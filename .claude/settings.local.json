@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile:*)",
+      "Bash(sqlite3:*)",
+      "WebSearch",
+      "WebFetch(domain:www.justwatch.com)",
+      "Bash(pip install:*)",
+      "Bash(cat:*)",
+      "Bash(set -a)",
+      "Bash(source .env)",
+      "Bash(set +a)",
+      "Bash(streamlit run:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
