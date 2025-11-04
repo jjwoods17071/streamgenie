@@ -9,6 +9,7 @@ from datetime import datetime
 import sendgrid
 from sendgrid.helpers.mail import Mail, Email, To, Content
 import os
+import preferences  # User notification preferences
 
 
 def create_notification(
@@ -38,21 +39,32 @@ def create_notification(
         True if successful, False otherwise
     """
     try:
-        # Create notification in database
-        notification_data = {
-            "user_id": user_id,
-            "notification_type": notification_type,
-            "title": title,
-            "message": message,
-            "related_show_id": related_show_id,
-            "related_show_title": related_show_title,
-            "sent_email": send_email
-        }
+        # Check user preferences for in-app notifications
+        should_create_inapp = preferences.should_create_inapp_notification(client, user_id, notification_type)
 
-        client.table("notifications").insert(notification_data).execute()
+        if not should_create_inapp and not send_email:
+            # User disabled this notification type
+            return True
 
-        # Send email if requested
-        if send_email:
+        # Check user preferences for email
+        should_email = send_email and preferences.should_send_email(client, user_id, notification_type)
+
+        # Create in-app notification if user hasn't disabled it
+        if should_create_inapp:
+            notification_data = {
+                "user_id": user_id,
+                "notification_type": notification_type,
+                "title": title,
+                "message": message,
+                "related_show_id": related_show_id,
+                "related_show_title": related_show_title,
+                "sent_email": should_email
+            }
+
+            client.table("notifications").insert(notification_data).execute()
+
+        # Send email if user preferences allow
+        if should_email:
             send_notification_email(client, user_id, title, message, related_show_title)
 
         return True
