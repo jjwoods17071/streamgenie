@@ -283,6 +283,52 @@ def discover_next_air_date(details:Dict[str, Any]) -> Optional[str]:
                 pass
     return None
 
+def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Check for stale next_air_date values (in the past) and refresh them from TMDB.
+    Updates database and returns updated show list.
+    """
+    today = dt.date.today()
+    updated_shows = []
+
+    for show in shows:
+        next_air_date = show.get("next_air_date")
+        needs_refresh = False
+
+        # Check if date is in the past
+        if next_air_date:
+            try:
+                air_date = dt.date.fromisoformat(next_air_date)
+                if air_date < today:
+                    needs_refresh = True
+            except Exception:
+                needs_refresh = True  # Invalid date format, refresh it
+
+        # Refresh from TMDB if needed
+        if needs_refresh:
+            try:
+                details = tv_details(show["tmdb_id"])
+                new_next_air = discover_next_air_date(details)
+
+                # Update in database
+                client.table("shows")\
+                    .update({"next_air_date": new_next_air})\
+                    .eq("user_id", get_user_id())\
+                    .eq("tmdb_id", show["tmdb_id"])\
+                    .eq("region", show["region"])\
+                    .eq("provider_name", show.get("provider_name", "Netflix"))\
+                    .execute()
+
+                # Update in the current list
+                show["next_air_date"] = new_next_air
+            except Exception as e:
+                # Silently fail - keep existing data
+                pass
+
+        updated_shows.append(show)
+
+    return updated_shows
+
 # --------------- LOGO OVERRIDE PERSISTENCE ---------------
 def load_logo_overrides(client: Client) -> dict:
     """Load logo URL overrides from Supabase."""
@@ -1346,6 +1392,10 @@ if rows:
                 pass  # Silently fail, don't interrupt display
     # Refresh rows after updates
     rows = list_shows(client)
+
+# Auto-refresh stale air dates (past dates get updated with next upcoming episode)
+if rows:
+    rows = refresh_stale_air_dates(client, rows)
 
 if not rows:
     st.info("Your watchlist is empty. Search and add shows from above.")
