@@ -1458,12 +1458,28 @@ if q:
 # Watchlist section below search
 st.write("---")
 
-# Header with icon actions
-header_cols = st.columns([9, 1])
+# Header with icon actions and view toggle
+header_cols = st.columns([7, 1, 1, 1])
 with header_cols[0]:
     st.subheader("📺 Your Watchlist")
 with header_cols[1]:
-    export_csv = st.button(ICONS["download"], key="export_icon", help="Export to CSV")
+    # Initialize view mode if not set
+    if 'view_mode' not in st.session_state:
+        st.session_state.view_mode = 'grid'
+with header_cols[2]:
+    if st.button("⊞", key="grid_view", help="Grid view", use_container_width=True):
+        st.session_state.view_mode = 'grid'
+        st.rerun()
+with header_cols[3]:
+    if st.button("☰", key="list_view", help="List view", use_container_width=True):
+        st.session_state.view_mode = 'list'
+        st.rerun()
+
+# Export button
+if st.button(f"{ICONS['download']} Export CSV", key="export_csv_btn", use_container_width=False):
+    st.session_state.show_export = True
+
+export_csv = st.session_state.get('show_export', False)
 
 rows = list_shows(client)
 
@@ -1510,9 +1526,21 @@ else:
 
     st.write("---")
 
-    # Sort controls
-    sort_cols = st.columns([2, 2, 2, 6])
-    with sort_cols[0]:
+    # Get current view mode
+    view_mode = st.session_state.get('view_mode', 'grid')
+
+    # Column headers with sort controls - aligned properly
+    if view_mode == 'grid':
+        # Grid view: Image | Title & Service | Date | Actions
+        header_cols = st.columns([1, 4, 3, 2])
+    else:
+        # List view: Poster | Title | Service | Date | Actions
+        header_cols = st.columns([0.5, 3, 2, 2, 1])
+
+    with header_cols[0]:
+        st.markdown("**Poster**")
+
+    with header_cols[1]:
         if st.button("📝 Title ↕️", key="sort_title", use_container_width=True, help="Sort by title"):
             if "sort_by" not in st.session_state or st.session_state.sort_by != "title":
                 st.session_state.sort_by = "title"
@@ -1521,16 +1549,20 @@ else:
                 st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
             st.rerun()
 
-    with sort_cols[1]:
-        if st.button("📺 Service ↕️", key="sort_service", use_container_width=True, help="Sort by streaming service"):
-            if "sort_by" not in st.session_state or st.session_state.sort_by != "service":
-                st.session_state.sort_by = "service"
-                st.session_state.sort_order = "asc"
-            else:
-                st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
-            st.rerun()
+    if view_mode == 'list':
+        with header_cols[2]:
+            if st.button("📺 Service ↕️", key="sort_service", use_container_width=True, help="Sort by streaming service"):
+                if "sort_by" not in st.session_state or st.session_state.sort_by != "service":
+                    st.session_state.sort_by = "service"
+                    st.session_state.sort_order = "asc"
+                else:
+                    st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
+                st.rerun()
+        date_col_idx = 3
+    else:
+        date_col_idx = 2
 
-    with sort_cols[2]:
+    with header_cols[date_col_idx]:
         if st.button("📅 Date ↕️", key="sort_date", use_container_width=True, help="Sort by next air date"):
             if "sort_by" not in st.session_state or st.session_state.sort_by != "date":
                 st.session_state.sort_by = "date"
@@ -1538,6 +1570,9 @@ else:
             else:
                 st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
             st.rerun()
+
+    with header_cols[-1]:
+        st.markdown("**Actions**")
 
     # Apply sorting
     sort_by = st.session_state.get("sort_by", "title")
@@ -1560,76 +1595,122 @@ else:
 
     for r in rows:
         provider_name = r.get("provider_name", DEFAULT_PROVIDER)
-        # Normalize the provider name for display
         display_provider_name = normalize_provider_name(provider_name)
         next_air_date = r.get("next_air_date")
+        poster_path = r.get("poster_path")
 
-        # Single row layout: Image | Info | Date | Actions
-        cols = st.columns([1, 4, 3, 2])
+        if view_mode == 'grid':
+            # GRID VIEW: Poster | Title+Service | Date | Actions
+            cols = st.columns([1, 4, 3, 2])
 
-        # Column 1: Poster image
-        with cols[0]:
-            poster_path = r.get("poster_path")
-            if poster_path:
-                img_url = f"https://image.tmdb.org/t/p/w92{poster_path}"
-                st.image(img_url, use_column_width=True)
-            else:
-                st.write(ICONS["movie"])
+            # Poster
+            with cols[0]:
+                if poster_path:
+                    img_url = f"https://image.tmdb.org/t/p/w92{poster_path}"
+                    st.image(img_url, use_column_width=True)
+                else:
+                    st.write(ICONS["movie"])
 
-        # Column 2: Title and provider info with logo
-        with cols[1]:
-            # Create a row with logo and title
-            title_cols = st.columns([1, 10])
-            with title_cols[0]:
-                logo_url = get_provider_logo_url(display_provider_name)
-                if logo_url:
-                    st.image(logo_url, width=48)  # Doubled from 24 to 48
-            with title_cols[1]:
+            # Title and provider with logo
+            with cols[1]:
+                title_cols = st.columns([1, 10])
+                with title_cols[0]:
+                    logo_url = get_provider_logo_url(display_provider_name)
+                    if logo_url:
+                        st.image(logo_url, width=48)
+                with title_cols[1]:
+                    st.markdown(f"**{r['title']}**")
+
+                status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
+                st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
+
+            # Date
+            with cols[2]:
+                if next_air_date:
+                    try:
+                        air_date = dt.date.fromisoformat(next_air_date)
+                        days = (air_date - dt.date.today()).days
+                        if days == 0:
+                            st.markdown("🔴 **TODAY**")
+                        elif days > 0:
+                            st.markdown(f"📅 **{next_air_date}**")
+                            st.caption(f"⏰ in {days} day{'s' if days != 1 else ''}")
+                        else:
+                            st.markdown(f"📅 {next_air_date}")
+                            st.caption(f"({abs(days)} day{'s' if abs(days) != 1 else ''} ago)")
+                    except Exception:
+                        st.caption(f"📅 {next_air_date}")
+                else:
+                    production_status = r.get('production_status')
+                    status_message = r.get('status_message')
+                    if production_status:
+                        st.markdown(f"**{production_status}**")
+                        if status_message:
+                            st.caption(status_message)
+                    elif r['on_provider']:
+                        st.markdown("✨ **All Episodes**")
+                        st.caption("Series complete")
+                    else:
+                        st.caption("❓ No air date")
+
+            # Actions
+            with cols[3]:
+                if st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
+                    delete_show(client, r["tmdb_id"], r["region"], provider_name)
+                    st.rerun()
+
+        else:
+            # LIST VIEW: Smaller Poster | Title | Service | Date | Actions
+            cols = st.columns([0.5, 3, 2, 2, 1])
+
+            # Smaller poster
+            with cols[0]:
+                if poster_path:
+                    img_url = f"https://image.tmdb.org/t/p/w92{poster_path}"
+                    st.image(img_url, width=40)
+                else:
+                    st.write(ICONS["movie"])
+
+            # Title only
+            with cols[1]:
                 st.markdown(f"**{r['title']}**")
 
-            status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
-            st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
+            # Service with logo
+            with cols[2]:
+                service_cols = st.columns([1, 3])
+                with service_cols[0]:
+                    logo_url = get_provider_logo_url(display_provider_name)
+                    if logo_url:
+                        st.image(logo_url, width=32)
+                with service_cols[1]:
+                    status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
+                    st.caption(f"{status_icon} {display_provider_name}")
 
-        # Column 3: Next air date with countdown
-        with cols[2]:
-            if next_air_date:
-                try:
-                    air_date = dt.date.fromisoformat(next_air_date)
-                    days = (air_date - dt.date.today()).days
-
-                    if days == 0:
-                        st.markdown("🔴 **TODAY**")
-                    elif days > 0:
-                        st.markdown(f"📅 **{next_air_date}**")
-                        st.caption(f"⏰ in {days} day{'s' if days != 1 else ''}")
-                    else:
-                        st.markdown(f"📅 {next_air_date}")
-                        st.caption(f"({abs(days)} day{'s' if abs(days) != 1 else ''} ago)")
-                except Exception:
-                    st.caption(f"📅 {next_air_date}")
-            else:
-                # Show enhanced production status if available
-                production_status = r.get('production_status')
-                status_message = r.get('status_message')
-
-                if production_status:
-                    # Display enhanced production intelligence
-                    st.markdown(f"**{production_status}**")
-                    if status_message:
-                        st.caption(status_message)
-                elif r['on_provider']:
-                    # Fallback to old display for shows without enhanced status
-                    st.markdown("✨ **All Episodes**")
-                    st.caption("Series complete")
+            # Date (compact)
+            with cols[3]:
+                if next_air_date:
+                    try:
+                        air_date = dt.date.fromisoformat(next_air_date)
+                        days = (air_date - dt.date.today()).days
+                        if days == 0:
+                            st.markdown("🔴 **TODAY**")
+                        elif days > 0:
+                            st.caption(f"📅 {next_air_date}")
+                        else:
+                            st.caption(f"📅 {next_air_date}")
+                    except Exception:
+                        st.caption(f"📅 {next_air_date}")
                 else:
-                    st.caption("❓ No air date")
-                    st.caption("↓ Check status")
+                    production_status = r.get('production_status')
+                    if production_status:
+                        st.caption(f"{production_status}")
+                    else:
+                        st.caption("❓")
 
-        # Column 4: Action buttons (avoid nested columns)
-        with cols[3]:
-            # Show only delete button - status updates happen automatically
-            if st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                st.rerun()
+            # Actions
+            with cols[4]:
+                if st.button(ICONS["delete"], key=f"del_list_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
+                    delete_show(client, r["tmdb_id"], r["region"], provider_name)
+                    st.rerun()
 
         st.divider()
