@@ -87,14 +87,14 @@ def _categorize_status(
     # ENDED - Clear case
     if status == "Ended":
         if last_air_date:
-            return ("🎭 ENDED", "high", f"Series concluded. Final episode aired {_format_date(last_air_date)}.")
-        return ("🎭 ENDED", "high", "Series has concluded.")
+            return ("ENDED", "high", f"Series concluded. Final episode aired {_format_date(last_air_date)}.")
+        return ("ENDED", "high", "Series has concluded.")
 
     # CANCELED - Clear case
     if status == "Canceled":
         if last_air_date:
-            return ("❌ CANCELED", "high", f"Canceled. Last episode aired {_format_date(last_air_date)}.")
-        return ("❌ CANCELED", "high", "Show has been canceled.")
+            return ("CANCELED", "high", f"Canceled. Last episode aired {_format_date(last_air_date)}.")
+        return ("CANCELED", "high", "Show has been canceled.")
 
     # HAS SCHEDULED EPISODE - Clear case
     if next_episode:
@@ -105,7 +105,7 @@ def _categorize_status(
         if air_date:
             formatted_date = _format_date(air_date)
             return (
-                "📅 SCHEDULED",
+                "SCHEDULED",
                 "high",
                 f"Next episode: S{season}E{episode} on {formatted_date}"
             )
@@ -113,7 +113,7 @@ def _categorize_status(
     # IN PRODUCTION - High confidence
     if in_production and status == "Returning Series":
         return (
-            "🎬 IN PRODUCTION",
+            "IN PRODUCTION",
             "high",
             "Currently in production. New season confirmed but air date not announced."
         )
@@ -125,29 +125,29 @@ def _categorize_status(
 
             if years_since < 1:
                 return (
-                    "📺 RETURNING SOON",
+                    "RETURNING SOON",
                     "medium",
                     f"Show is active. Last aired {_format_date(last_air_date)}. New season expected."
                 )
             elif years_since < 3:
                 return (
-                    "❓ UNCERTAIN",
+                    "UNCERTAIN",
                     "low",
                     f"Marked as returning series, but last aired {_format_date(last_air_date)} ({years_since:.0f} years ago). Status unclear."
                 )
             else:
                 return (
-                    "⏸️ ON HIATUS",
+                    "ON HIATUS",
                     "low",
                     f"On extended hiatus. Last aired {_format_date(last_air_date)} ({years_since:.0f} years ago)."
                 )
 
-        return ("📺 RETURNING SOON", "medium", "Marked as returning series. No air date announced.")
+        return ("RETURNING SOON", "medium", "Marked as returning series. No air date announced.")
 
     # IN PRODUCTION - but status is unclear
     if in_production:
         return (
-            "🎬 IN PRODUCTION",
+            "IN PRODUCTION",
             "medium",
             "Currently in production. Status and air date to be confirmed."
         )
@@ -155,7 +155,7 @@ def _categorize_status(
     # PLANNED
     if status == "Planned":
         return (
-            "✅ RENEWED",
+            "RENEWED",
             "medium",
             "Show has been renewed. Production has not yet started."
         )
@@ -163,7 +163,7 @@ def _categorize_status(
     # PILOT
     if status == "Pilot":
         return (
-            "🚀 PILOT",
+            "PILOT",
             "high",
             "Pilot episode available. Series pickup not yet confirmed."
         )
@@ -174,20 +174,20 @@ def _categorize_status(
 
         if years_since > 10:
             return (
-                "💀 LEGACY",
+                "LEGACY",
                 "high",
                 f"Classic show. Last aired {_format_date(last_air_date)} ({years_since:.0f} years ago). No new episodes expected."
             )
         elif years_since > 5:
             return (
-                "⏸️ ON HIATUS",
+                "ON HIATUS",
                 "medium",
                 f"On extended hiatus. Last aired {_format_date(last_air_date)} ({years_since:.0f} years ago)."
             )
 
     # UNKNOWN - Fallback
     return (
-        "❓ UNCERTAIN",
+        "UNCERTAIN",
         "low",
         "Status uncertain. Check TMDB or search online for production news."
     )
