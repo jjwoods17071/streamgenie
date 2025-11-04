@@ -2,6 +2,7 @@
 Show Status Tracking Module
 Checks TMDB for show status (Returning Series, Ended, Canceled, etc.)
 and sends notifications when status changes
+Now with enhanced production intelligence!
 """
 import os
 import requests
@@ -10,6 +11,7 @@ from supabase import Client
 from typing import Optional, Dict, List
 import logging
 import notifications
+import production_intel
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +58,16 @@ def fetch_show_status(tmdb_id: int) -> Optional[Dict]:
         return None
 
 
-def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: str) -> Optional[str]:
+def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: str, use_web_search: bool = False) -> Optional[str]:
     """
-    Update show status in database and send notifications if changed
+    Update show status in database with enhanced production intelligence
 
     Args:
         client: Supabase client
         user_id: User ID
         tmdb_id: TMDB show ID
         show_title: Show title
+        use_web_search: Whether to use web search for low-confidence cases
 
     Returns:
         New status string or None if error
@@ -77,9 +80,17 @@ def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: s
 
         new_status = status_info["status"]
 
+        # Get enhanced production intelligence
+        enhanced = production_intel.get_enhanced_status(
+            show_title=show_title,
+            tmdb_id=tmdb_id,
+            tmdb_data=status_info,
+            use_web_search=use_web_search
+        )
+
         # Get current status from database
         result = client.table("shows")\
-            .select("show_status, last_status_check")\
+            .select("show_status, production_status, last_status_check")\
             .eq("user_id", user_id)\
             .eq("tmdb_id", tmdb_id)\
             .execute()
@@ -89,19 +100,31 @@ def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: s
             return None
 
         old_status = result.data[0].get("show_status", "Unknown")
-        status_changed = old_status != new_status
+        old_production_status = result.data[0].get("production_status", "Unknown")
+        status_changed = old_status != new_status or old_production_status != enhanced["category"]
 
-        # Update status in database
+        # Update status in database with enhanced fields
+        update_data = {
+            "show_status": new_status,
+            "production_status": enhanced["category"],
+            "status_confidence": enhanced["confidence"],
+            "status_message": enhanced["message"],
+            "in_production": status_info.get("in_production", False),
+            "last_status_check": dt.datetime.now().isoformat(),
+            "last_intel_check": dt.datetime.now().isoformat()
+        }
+
+        # Add web intel if available
+        if "web_intel" in enhanced:
+            update_data["web_intel"] = str(enhanced["web_intel"])
+
         client.table("shows")\
-            .update({
-                "show_status": new_status,
-                "last_status_check": dt.datetime.now().isoformat()
-            })\
+            .update(update_data)\
             .eq("user_id", user_id)\
             .eq("tmdb_id", tmdb_id)\
             .execute()
 
-        logger.info(f"Updated status for {show_title} (ID: {tmdb_id}): {old_status} -> {new_status}")
+        logger.info(f"Updated status for {show_title} (ID: {tmdb_id}): {old_status} -> {new_status} | Enhanced: {enhanced['category']}")
 
         # Send notifications if status changed to Ended or Canceled
         if status_changed and new_status in ["Ended", "Canceled"]:
