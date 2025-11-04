@@ -329,6 +329,68 @@ def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List
 
     return updated_shows
 
+# --------------- PROMOTIONAL CONTENT ---------------
+def get_new_shows(region: str = "US", limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Get TV shows that premiered in the last 30 days.
+    Returns shows with air dates and available on streaming in the region.
+    """
+    try:
+        today = dt.date.today()
+        thirty_days_ago = today - dt.timedelta(days=30)
+
+        # Use TMDB discover to find recently premiered shows
+        params = {
+            "api_key": TMDB_API_KEY,
+            "language": "en-US",
+            "sort_by": "first_air_date.desc",
+            "first_air_date.gte": thirty_days_ago.isoformat(),
+            "first_air_date.lte": today.isoformat(),
+            "with_watch_providers": region,
+            "watch_region": region,
+            "vote_count.gte": 5,  # Filter out shows with very few votes
+            "page": 1
+        }
+
+        response = requests.get(f"{TMDB_BASE}/discover/tv", params=params, timeout=10)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Error fetching new shows: {e}")
+        return []
+
+def get_coming_soon_shows(region: str = "US", limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Get TV shows with announced air dates within the next 180 days.
+    Returns shows that are coming soon with specific air dates.
+    """
+    try:
+        today = dt.date.today()
+        six_months_from_now = today + dt.timedelta(days=180)
+
+        # Use TMDB discover to find upcoming shows
+        params = {
+            "api_key": TMDB_API_KEY,
+            "language": "en-US",
+            "sort_by": "first_air_date.asc",
+            "first_air_date.gte": today.isoformat(),
+            "first_air_date.lte": six_months_from_now.isoformat(),
+            "with_watch_providers": region,
+            "watch_region": region,
+            "page": 1
+        }
+
+        response = requests.get(f"{TMDB_BASE}/discover/tv", params=params, timeout=10)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Error fetching coming soon shows: {e}")
+        return []
+
 # --------------- LOGO OVERRIDE PERSISTENCE ---------------
 def load_logo_overrides(client: Client) -> dict:
     """Load logo URL overrides from Supabase."""
@@ -1298,8 +1360,72 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
+# Promotional Sections - New Shows, Coming Soon
+st.write("---")
+
+# Collapsible promotional sections
+with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
+    st.caption("Shows that premiered in the last 30 days")
+    new_shows = get_new_shows(region, limit=6)
+
+    if new_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(new_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("name", "Unknown")
+                first_air = show.get("first_air_date", "")
+                overview = show.get("overview", "")[:100]
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                if first_air:
+                    st.caption(f"📅 Premiered: {first_air}")
+                if overview:
+                    st.caption(overview + "...")
+    else:
+        st.info("No new shows in the last 30 days")
+
+with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
+    st.caption("Shows with confirmed air dates in the next 180 days")
+    coming_shows = get_coming_soon_shows(region, limit=6)
+
+    if coming_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(coming_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("name", "Unknown")
+                first_air = show.get("first_air_date", "")
+                overview = show.get("overview", "")[:100]
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                if first_air:
+                    try:
+                        air_date = dt.date.fromisoformat(first_air)
+                        days_until = (air_date - dt.date.today()).days
+                        st.caption(f"📅 Airs in {days_until} days ({first_air})")
+                    except:
+                        st.caption(f"📅 Airs: {first_air}")
+                if overview:
+                    st.caption(overview + "...")
+    else:
+        st.info("No upcoming shows with confirmed air dates")
+
+st.write("---")
+
 # Vertical layout: Search on top, watchlist below
-st.subheader("🔎 Search TV Shows")
+search_header = st.columns([8, 1])
+with search_header[0]:
+    st.subheader("🔎 Search TV Shows")
+with search_header[1]:
+    if st.button("🏠 Reset", help="Clear search and return to top", use_container_width=True):
+        st.session_state.clear_search = True
+        st.rerun()
+
 st.caption(f"Searching in region: **{region}** — Shows availability for all streaming services")
 
 # Use session state to track when to clear search
