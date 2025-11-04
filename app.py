@@ -676,11 +676,113 @@ auth.render_user_menu(client)
 # Show notifications in sidebar
 notifications.render_notifications_ui(client, get_user_id())
 
-# Header with settings toggle
-col_header, col_gear = st.columns([9, 1])
-with col_header:
-    st.title(f"{ICONS['movie']} StreamGenie")
-    st.caption("Search TV shows, discover streaming availability, and track release dates")
+# Hero Banner with Netflix-style gradient
+st.markdown("""
+<style>
+.hero-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #f5576c 75%, #ffa500 100%);
+    padding: 3rem 2rem;
+    border-radius: 15px;
+    margin-bottom: 2rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    position: relative;
+    overflow: hidden;
+}
+
+.hero-banner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(45deg, rgba(255,255,255,0.1) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.1) 75%, transparent 75%, transparent);
+    background-size: 50px 50px;
+    opacity: 0.3;
+    animation: slide 20s linear infinite;
+}
+
+@keyframes slide {
+    0% { background-position: 0 0; }
+    100% { background-position: 50px 50px; }
+}
+
+.hero-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    color: white;
+}
+
+.hero-title {
+    font-size: 3rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+    text-shadow: 2px 2px 8px rgba(0,0,0,0.3);
+    letter-spacing: -1px;
+}
+
+.hero-subtitle {
+    font-size: 1.2rem;
+    opacity: 0.95;
+    font-weight: 300;
+    text-shadow: 1px 1px 4px rgba(0,0,0,0.3);
+}
+
+.hero-stats {
+    margin-top: 1.5rem;
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+}
+
+.stat-item {
+    background: rgba(255,255,255,0.2);
+    padding: 0.75rem 1.5rem;
+    border-radius: 25px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.3);
+}
+
+.stat-number {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.stat-label {
+    font-size: 0.875rem;
+    opacity: 0.9;
+    margin-top: 0.25rem;
+}
+</style>
+
+<div class="hero-banner">
+    <div class="hero-content">
+        <div class="hero-title">🎬 StreamGenie</div>
+        <div class="hero-subtitle">Your personal TV show tracker • Never miss an episode again</div>
+        <div class="hero-stats">
+            <div class="stat-item">
+                <div class="stat-number">📺</div>
+                <div class="stat-label">Track Shows</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">🔔</div>
+                <div class="stat-label">Get Alerts</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">🌍</div>
+                <div class="stat-label">All Regions</div>
+            </div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Settings toggle (top right corner)
+col_spacer, col_gear = st.columns([9, 1])
+with col_spacer:
+    st.write("")  # Spacing
 with col_gear:
     st.write("")  # Spacing
     show_settings = st.toggle(ICONS['settings'], value=False, help="Show/hide settings")
