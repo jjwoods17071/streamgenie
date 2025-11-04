@@ -39,6 +39,76 @@ def get_user_id() -> str:
     user_id = auth.get_user_id()
     return user_id if user_id else DEFAULT_USER_ID
 
+# --------------- MATERIAL ICONS MAPPING ---------------
+# Streamlit Material Icons for a modern, professional look
+# Usage: st.button(f"{ICONS['settings']} Settings")
+ICONS = {
+    # Core UI
+    "tv": ":material/tv:",
+    "movie": ":material/movie:",
+    "calendar": ":material/calendar_today:",
+    "schedule": ":material/schedule:",
+    "settings": ":material/settings:",
+    "notifications": ":material/notifications:",
+    "help": ":material/help:",
+
+    # Actions
+    "add": ":material/add:",
+    "delete": ":material/delete:",
+    "edit": ":material/edit:",
+    "save": ":material/save:",
+    "cancel": ":material/cancel:",
+    "refresh": ":material/refresh:",
+    "download": ":material/download:",
+    "upload": ":material/upload:",
+    "search": ":material/search:",
+    "sort": ":material/sort:",
+
+    # Status
+    "check": ":material/check_circle:",
+    "error": ":material/error:",
+    "warning": ":material/warning:",
+    "info": ":material/info:",
+    "pending": ":material/pending:",
+    "done": ":material/done:",
+
+    # Content
+    "play": ":material/play_circle:",
+    "streaming": ":material/subscriptions:",
+    "broadcast": ":material/sensors:",
+    "live": ":material/live_tv:",
+
+    # People & Users
+    "person": ":material/person:",
+    "people": ":material/group:",
+    "admin": ":material/admin_panel_settings:",
+
+    # Time
+    "time": ":material/access_time:",
+    "today": ":material/today:",
+    "event": ":material/event:",
+    "history": ":material/history:",
+
+    # Data
+    "stats": ":material/bar_chart:",
+    "analytics": ":material/analytics:",
+    "trending": ":material/trending_up:",
+
+    # Communication
+    "email": ":material/email:",
+    "send": ":material/send:",
+    "inbox": ":material/inbox:",
+
+    # Special
+    "star": ":material/star:",
+    "favorite": ":material/favorite:",
+    "bookmark": ":material/bookmark:",
+    "lightbulb": ":material/lightbulb:",
+    "key": ":material/key:",
+    "visibility": ":material/visibility:",
+    "visibility_of": ":material/visibility_off:",
+}
+
 # Popular streaming providers supported by TMDB
 STREAMING_PROVIDERS = [
     "Netflix",
@@ -524,7 +594,7 @@ def check_and_send_daily_reminders(user_email: str, client: Client):
     return sent_count
 
 def format_status(on_provider:bool, next_air_date:Optional[str], provider_name:str) -> str:
-    badge = f"✅ On {provider_name}" if on_provider else f"⏳ Not on {provider_name} (in selected region)"
+    badge = f"{ICONS['check']} On {provider_name}" if on_provider else f"⏳ Not on {provider_name} (in selected region)"
     if next_air_date:
         try:
             d = dt.date.fromisoformat(next_air_date)
@@ -563,11 +633,11 @@ notifications.render_notifications_ui(client, get_user_id())
 # Header with settings toggle
 col_header, col_gear = st.columns([9, 1])
 with col_header:
-    st.title("🍿 StreamGenie")
+    st.title(f"{ICONS['movie']} StreamGenie")
     st.caption("Search TV shows, discover streaming availability, and track release dates")
 with col_gear:
     st.write("")  # Spacing
-    show_settings = st.toggle("⚙️", value=False, help="Show/hide settings")
+    show_settings = st.toggle(ICONS['settings'], value=False, help="Show/hide settings")
 
 # Collapsible settings section
 if show_settings:
@@ -581,13 +651,13 @@ if show_settings:
         }
         </style>
         """, unsafe_allow_html=True)
-        st.markdown("### ⚙️ Settings")
+        st.markdown(f"### {ICONS['settings']} Settings")
         col1, col2 = st.columns(2)
         with col1:
             region = st.text_input("Region (ISO-3166-1 code)", value=DEFAULT_REGION, help="e.g., US, CA, GB, AU")
         with col2:
             st.write("")
-            st.caption(f"TMDB API: {'✅ Connected' if bool(TMDB_API_KEY) else '❌ Not set'}")
+            st.caption(f"TMDB API: {ICONS['check'] if bool(TMDB_API_KEY) else ICONS['error']} {'Connected' if bool(TMDB_API_KEY) else 'Not set'}")
             st.caption(f"Database: {DB_PATH}")
 
         # Tabs for settings sections
@@ -596,9 +666,9 @@ if show_settings:
         user_is_admin = auth.is_admin(client, user_id)
 
         if user_is_admin:
-            tab1, tab2, tab3, tab4 = st.tabs(["ℹ️ How It Works", "🔧 Maintenance", "📧 Email Reminders", "🔔 Notification Preferences"])
+            tab1, tab2, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['settings']} Maintenance", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
         else:
-            tab1, tab3, tab4 = st.tabs(["ℹ️ How It Works", "📧 Email Reminders", "🔔 Notification Preferences"])
+            tab1, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
 
         with tab1:
             st.caption("1. Search for any TV show")
@@ -640,12 +710,12 @@ if show_settings:
                     st.session_state.user_settings['email'] = user_email
                     st.session_state.user_settings['reminders_enabled'] = reminders_enabled
                     save_user_settings(st.session_state.user_settings)
-                    st.success("✅ Settings saved!")
+                    st.success(f"{ICONS['check']} Settings saved!")
 
             with col_test:
                 if st.button("📧 Test Email", use_container_width=True, disabled=not user_email):
                     if not SENDGRID_API_KEY:
-                        st.error("❌ SendGrid API key not configured. Set SENDGRID_API_KEY environment variable.")
+                        st.error(f"{ICONS['error']} SendGrid API key not configured. Set SENDGRID_API_KEY environment variable.")
                     else:
                         # Send a test email
                         success = send_email_reminder(
@@ -656,17 +726,19 @@ if show_settings:
                             poster_path=None
                         )
                         if success:
-                            st.success("✅ Test email sent! Check your inbox.")
+                            st.success(f"{ICONS['check']} Test email sent! Check your inbox.")
                         else:
-                            st.error("❌ Failed to send test email. Check your configuration.")
+                            st.error(f"{ICONS['error']} Failed to send test email. Check your configuration.")
 
             st.write("---")
 
             # Status display
             st.markdown("**Current Status**")
-            st.caption(f"📧 Email: {user_email or 'Not set'}")
-            st.caption(f"🔔 Reminders: {'✅ Enabled' if reminders_enabled and user_email else '❌ Disabled'}")
-            st.caption(f"🔑 SendGrid API: {'✅ Configured' if SENDGRID_API_KEY else '❌ Not set'}")
+            st.caption(f"{ICONS['email']} Email: {user_email or 'Not set'}")
+            reminders_status = f"{ICONS['check']} Enabled" if reminders_enabled and user_email else f"{ICONS['error']} Disabled"
+            st.caption(f"{ICONS['notifications']} Reminders: {reminders_status}")
+            api_status = f"{ICONS['check']} Configured" if SENDGRID_API_KEY else f"{ICONS['error']} Not set"
+            st.caption(f"{ICONS['key']} SendGrid API: {api_status}")
 
             if SENDGRID_API_KEY and reminders_enabled and user_email:
                 st.info("📬 You'll receive emails at 8:00 AM when shows air!")
@@ -745,7 +817,7 @@ if show_settings:
                                         if logo_url:
                                             st.image(logo_url, width=40)
                                         else:
-                                            st.write("❌")
+                                            st.write(f"{ICONS['error']}")
 
                                     with col2:
                                         # Show if this provider has an override
@@ -766,7 +838,7 @@ if show_settings:
                                             st.rerun()
 
                                     with col4:
-                                        if st.button("🗑️", key=f"delete_{provider}", help=f"Delete {provider} from system"):
+                                        if st.button(ICONS["delete"], key=f"delete_{provider}", help=f"Delete {provider} from system"):
                                             # Initialize session state if needed
                                             if 'logo_overrides' not in st.session_state:
                                                 st.session_state.logo_overrides = load_logo_overrides(client)
@@ -783,7 +855,7 @@ if show_settings:
                                                 del st.session_state.logo_overrides[provider]
                                                 save_logo_overrides(client, st.session_state.logo_overrides)
 
-                                            st.toast(f"✅ Deleted {provider}")
+                                            st.toast(f"{ICONS['check']} Deleted {provider}")
                                             st.rerun()
 
                                 # Edit mode
@@ -808,11 +880,11 @@ if show_settings:
                                             save_logo_overrides(client, st.session_state.logo_overrides)
 
                                             st.session_state[f"editing_{provider}"] = False
-                                            st.success(f"✅ Logo URL updated for {provider} and saved to {LOGO_OVERRIDES_FILE}!")
+                                            st.success(f"{ICONS['check']} Logo URL updated for {provider} and saved to {LOGO_OVERRIDES_FILE}!")
                                             st.rerun()
 
                                     with col_cancel:
-                                        if st.button("❌ Cancel", key=f"cancel_{provider}"):
+                                        if st.button(f"{ICONS['error']} Cancel", key=f"cancel_{provider}"):
                                             st.session_state[f"editing_{provider}"] = False
                                             st.rerun()
 
@@ -829,7 +901,7 @@ if show_settings:
                     if scheduler:
                         jobs = scheduler.get_jobs()
                         if jobs:
-                            st.info(f"✅ {len(jobs)} scheduled jobs running")
+                            st.info(f"{ICONS['check']} {len(jobs)} scheduled jobs running")
                             for job in jobs:
                                 st.caption(f"• {job.name} - Next run: {job.next_run_time.strftime('%Y-%m-%d %I:%M %p') if job.next_run_time else 'N/A'}")
                         else:
@@ -843,18 +915,18 @@ if show_settings:
                             with st.spinner("Sending daily reminders..."):
                                 try:
                                     scheduler.test_daily_reminders_now()
-                                    st.success("✅ Daily reminders triggered! Check your email and in-app notifications.")
+                                    st.success(f"{ICONS['check']} Daily reminders triggered! Check your email and in-app notifications.")
                                 except Exception as e:
-                                    st.error(f"❌ Error: {e}")
+                                    st.error(f"{ICONS['error']} Error: {e}")
 
                     with col_test2:
                         if st.button("📅 Test Weekly Preview", use_container_width=True, help="Manually trigger weekly preview now"):
                             with st.spinner("Sending weekly previews..."):
                                 try:
                                     scheduler.test_weekly_preview_now()
-                                    st.success("✅ Weekly preview triggered! Check your email and in-app notifications.")
+                                    st.success(f"{ICONS['check']} Weekly preview triggered! Check your email and in-app notifications.")
                                 except Exception as e:
-                                    st.error(f"❌ Error: {e}")
+                                    st.error(f"{ICONS['error']} Error: {e}")
 
                     st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
                     st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
@@ -872,7 +944,7 @@ if show_settings:
                                 user_id = get_user_id()
                                 stats = show_status.check_all_shows_status(client, user_id)
 
-                                st.success(f"✅ Status check complete!")
+                                st.success(f"{ICONS['check']} Status check complete!")
                                 st.caption(f"📊 Total shows: {stats['total']}")
                                 st.caption(f"🔄 Updated: {stats['updated']}")
                                 st.caption(f"✓ Unchanged: {stats['unchanged']}")
@@ -882,7 +954,7 @@ if show_settings:
                                 if stats['updated'] > 0:
                                     st.info("📬 Check your notifications for any status changes!")
                             except Exception as e:
-                                st.error(f"❌ Error: {e}")
+                                st.error(f"{ICONS['error']} Error: {e}")
 
                     st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
 
@@ -922,7 +994,7 @@ if show_settings:
 
                                 with col1:
                                     # Show email and role
-                                    role_emoji = "👑" if role == "admin" else "👤"
+                                    role_emoji = ICONS["admin"] if role == "admin" else ICONS["person"]
                                     current_badge = " **(You)**" if is_current_user else ""
                                     st.markdown(f"{role_emoji} **{email}**{current_badge}")
                                     st.caption(f"Role: {role.capitalize()}")
@@ -999,7 +1071,7 @@ if show_settings:
                 )
 
                 email_series_cancelled = st.checkbox(
-                    "❌ Show Cancellations",
+                    f"{ICONS['error']} Show Cancellations",
                     value=user_prefs.get("email_series_cancelled", True),
                     help="Get notified when a tracked show is cancelled",
                     key="pref_email_series_cancelled"
@@ -1042,7 +1114,7 @@ if show_settings:
                 )
 
                 inapp_series_cancelled = st.checkbox(
-                    "❌ Show Cancellations",
+                    f"{ICONS['error']} Show Cancellations",
                     value=user_prefs.get("inapp_series_cancelled", True),
                     help="Show in-app notifications for cancelled shows",
                     key="pref_inapp_series_cancelled"
@@ -1070,10 +1142,10 @@ if show_settings:
 
                     # Update preferences
                     if preferences.update_preferences(client, user_id, updates):
-                        st.success("✅ Notification preferences saved!")
+                        st.success(f"{ICONS['check']} Notification preferences saved!")
                         st.balloons()
                     else:
-                        st.error("❌ Failed to save preferences. Please try again.")
+                        st.error(f"{ICONS['error']} Failed to save preferences. Please try again.")
 
             st.write("")
             st.info("💡 **Tip:** All notifications will appear in the sidebar notification center. You can control which types trigger emails separately.")
@@ -1187,7 +1259,7 @@ if q:
                                             try:
                                                 on_provider = is_on_provider_in_region(prov, provider, region)
                                                 upsert_show(client, tmdb_id, title, region, on_provider, next_air, overview, poster_path, normalized_provider)
-                                                st.success(f"✅ Added '{title}' to watchlist for {normalized_provider}!")
+                                                st.success(f"{ICONS['check']} Added '{title}' to watchlist for {normalized_provider}!")
                                                 st.session_state.clear_search = True
                                                 st.rerun()
                                             except Exception as e:
@@ -1203,7 +1275,7 @@ if q:
                             if st.button("➕ 📺 Broadcast/Cable TV", key=f"add_broadcast_{tmdb_id}", use_container_width=True):
                                 try:
                                     upsert_show(client, tmdb_id, title, region, True, next_air, overview, poster_path, "Broadcast TV")
-                                    st.success(f"✅ Added '{title}' to watchlist!")
+                                    st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
                                     st.session_state.clear_search = True
                                     st.rerun()
                                 except Exception as e:
@@ -1237,7 +1309,7 @@ if q:
                                         if clicked:
                                             try:
                                                 upsert_show(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider)
-                                                st.success(f"✅ Added '{title}' to watchlist for {provider}!")
+                                                st.success(f"{ICONS['check']} Added '{title}' to watchlist for {provider}!")
                                                 st.session_state.clear_search = True
                                                 st.rerun()
                                             except Exception as e:
@@ -1257,7 +1329,7 @@ header_cols = st.columns([9, 1])
 with header_cols[0]:
     st.subheader("📺 Your Watchlist")
 with header_cols[1]:
-    export_csv = st.button("⬇️", key="export_icon", help="Export to CSV")
+    export_csv = st.button(ICONS["download"], key="export_icon", help="Export to CSV")
 
 rows = list_shows(client)
 
@@ -1364,7 +1436,7 @@ else:
                 img_url = f"https://image.tmdb.org/t/p/w92{poster_path}"
                 st.image(img_url, use_column_width=True)
             else:
-                st.write("🎬")
+                st.write(ICONS["movie"])
 
         # Column 2: Title and provider info with logo
         with cols[1]:
@@ -1377,7 +1449,7 @@ else:
             with title_cols[1]:
                 st.markdown(f"**{r['title']}**")
 
-            status_icon = "✅" if r['on_provider'] else "⏳"
+            status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
             st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
 
         # Column 3: Next air date with countdown
@@ -1418,7 +1490,7 @@ else:
         # Column 4: Action buttons (avoid nested columns)
         with cols[3]:
             # Show only delete button - status updates happen automatically
-            if st.button("🗑️", key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
+            if st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
                 delete_show(client, r["tmdb_id"], r["region"], provider_name)
                 st.rerun()
 
