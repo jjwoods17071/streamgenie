@@ -1244,34 +1244,16 @@ if q:
 st.write("---")
 
 # Header with icon actions
-header_cols = st.columns([8, 1, 1])
+header_cols = st.columns([9, 1])
 with header_cols[0]:
     st.subheader("📺 Your Watchlist")
 with header_cols[1]:
-    do_refresh = st.button("🔄", key="refresh_icon", help="Refresh all shows")
-with header_cols[2]:
     export_csv = st.button("⬇️", key="export_icon", help="Export to CSV")
 
 rows = list_shows(client)
 if not rows:
     st.info("Your watchlist is empty. Search and add shows from above.")
 else:
-
-    if do_refresh:
-        with st.spinner("Refreshing all shows..."):
-            for row in rows:
-                try:
-                    det = tv_details(row["tmdb_id"])
-                    prov = tv_watch_providers(row["tmdb_id"])
-                    provider_name = row.get("provider_name", DEFAULT_PROVIDER)
-                    on_nf = is_on_provider_in_region(prov, provider_name, row["region"])
-                    next_air = discover_next_air_date(det)
-                    upsert_show(client, row["tmdb_id"], det.get("name") or row["title"], row["region"], on_nf, next_air, det.get("overview") or row["overview"], det.get("poster_path") or row["poster_path"], provider_name)
-                except Exception as e:
-                    st.warning(f"Refresh failed for {row['title']}: {e}")
-            rows = list_shows(client)
-        st.success("✅ Refreshed!")
-        st.rerun()
 
     if export_csv:
         import csv, io
