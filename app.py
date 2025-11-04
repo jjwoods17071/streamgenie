@@ -1328,6 +1328,18 @@ if q:
             with cols[0]:
                 if img_url:
                     st.image(img_url, use_column_width=True)
+                else:
+                    # Show a placeholder when no poster is available
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                border-radius: 8px;
+                                padding: 20px;
+                                text-align: center;
+                                color: white;
+                                font-size: 2rem;">
+                        {ICONS['tv']}
+                    </div>
+                    """, unsafe_allow_html=True)
 
             with cols[1]:
                 st.markdown(f"**{title}**")
