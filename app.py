@@ -1391,7 +1391,71 @@ if q:
     if not results:
         st.info("No results. Try a different title.")
     else:
-        for r in results[:20]:
+        # Add filters
+        with st.expander("🔍 Filter Results", expanded=False):
+            filter_cols = st.columns(2)
+
+            with filter_cols[0]:
+                # Genre filter
+                all_genres = set()
+                for r in results:
+                    genre_ids = r.get("genre_ids", [])
+                    all_genres.update(genre_ids)
+
+                # TMDB genre mapping
+                genre_map = {
+                    10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
+                    80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
+                    10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality",
+                    10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
+                    10768: "War & Politics", 37: "Western"
+                }
+
+                available_genres = sorted([genre_map.get(gid, f"Genre {gid}") for gid in all_genres])
+                selected_genres = st.multiselect("Genres", available_genres, default=[])
+
+            with filter_cols[1]:
+                # Year filter
+                years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
+                years = [int(y) for y in years if y.isdigit()]
+
+                if years:
+                    min_year = min(years)
+                    max_year = max(years)
+                    year_range = st.slider(
+                        "Year Range",
+                        min_value=min_year,
+                        max_value=max_year,
+                        value=(min_year, max_year)
+                    )
+                else:
+                    year_range = None
+
+        # Apply filters
+        filtered_results = results
+
+        if selected_genres:
+            # Get genre IDs from selected genre names
+            reverse_genre_map = {v: k for k, v in genre_map.items()}
+            selected_genre_ids = [reverse_genre_map[g] for g in selected_genres if g in reverse_genre_map]
+
+            filtered_results = [
+                r for r in filtered_results
+                if any(gid in r.get("genre_ids", []) for gid in selected_genre_ids)
+            ]
+
+        if year_range:
+            filtered_results = [
+                r for r in filtered_results
+                if r.get("first_air_date") and r.get("first_air_date")[:4].isdigit()
+                and year_range[0] <= int(r.get("first_air_date")[:4]) <= year_range[1]
+            ]
+
+        # Show result count
+        if filtered_results != results:
+            st.caption(f"Showing {len(filtered_results)} of {len(results)} results")
+
+        for r in filtered_results[:20]:
             # Add padding above each result
             st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
 
