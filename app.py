@@ -131,7 +131,7 @@ def delete_show(client: Client, tmdb_id:int, region:str, provider_name:str):
 def list_shows(client: Client) -> List[Dict[str, Any]]:
     """Get all shows from the user's watchlist"""
     result = client.table("shows")\
-        .select("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, poster_path")\
+        .select("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, poster_path, production_status, status_message, status_confidence, in_production")\
         .eq("user_id", get_user_id())\
         .order("title")\
         .execute()
@@ -1392,8 +1392,17 @@ else:
                 except Exception:
                     st.caption(f"📅 {next_air_date}")
             else:
-                # Show is available but no upcoming episodes
-                if r['on_provider']:
+                # Show enhanced production status if available
+                production_status = r.get('production_status')
+                status_message = r.get('status_message')
+
+                if production_status:
+                    # Display enhanced production intelligence
+                    st.markdown(f"**{production_status}**")
+                    if status_message:
+                        st.caption(status_message)
+                elif r['on_provider']:
+                    # Fallback to old display for shows without enhanced status
                     st.markdown("✨ **All Episodes**")
                     st.caption("Series complete")
                 else:
