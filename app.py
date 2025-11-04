@@ -391,6 +391,28 @@ def get_coming_soon_shows(region: str = "US", limit: int = 10) -> List[Dict[str,
         logger.error(f"Error fetching coming soon shows: {e}")
         return []
 
+def get_leaving_soon_shows(client: Client, limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Get shows that are leaving streaming platforms within the next 30 days.
+    Returns manually tracked entries from the leaving_soon table.
+    """
+    try:
+        today = dt.date.today()
+        thirty_days_from_now = today + dt.timedelta(days=30)
+
+        result = client.table("leaving_soon")\
+            .select("*")\
+            .gte("leaving_date", today.isoformat())\
+            .lte("leaving_date", thirty_days_from_now.isoformat())\
+            .order("leaving_date", desc=False)\
+            .limit(limit)\
+            .execute()
+
+        return result.data if result.data else []
+    except Exception as e:
+        logger.error(f"Error fetching leaving soon shows: {e}")
+        return []
+
 # --------------- LOGO OVERRIDE PERSISTENCE ---------------
 def load_logo_overrides(client: Client) -> dict:
     """Load logo URL overrides from Supabase."""
@@ -1592,6 +1614,37 @@ with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
                     st.caption(overview + "...")
     else:
         st.info("No upcoming shows with confirmed air dates")
+
+with st.expander("⏰ Leaving Soon - Watch Before They're Gone!", expanded=False):
+    st.caption("Shows leaving streaming platforms within 30 days")
+    leaving_shows = get_leaving_soon_shows(client, limit=6)
+
+    if leaving_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(leaving_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("title", "Unknown")
+                leaving_date = show.get("leaving_date", "")
+                provider = show.get("provider_name", "Unknown")
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                if leaving_date:
+                    try:
+                        leave_date = dt.date.fromisoformat(leaving_date)
+                        days_left = (leave_date - dt.date.today()).days
+                        if days_left == 0:
+                            st.warning(f"⏰ Leaving **{provider}** TODAY!")
+                        elif days_left == 1:
+                            st.warning(f"⏰ Leaving **{provider}** tomorrow")
+                        else:
+                            st.caption(f"⏰ Leaving **{provider}** in {days_left} days ({leaving_date})")
+                    except:
+                        st.caption(f"⏰ Leaving **{provider}** on {leaving_date}")
+    else:
+        st.info("No shows leaving soon (add entries in Settings > Leaving Soon Manager)")
 
 # Watchlist section below search
 st.write("---")
