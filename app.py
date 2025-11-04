@@ -1657,7 +1657,7 @@ st.write("---")
 # Collapsible promotional sections
 with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
     st.caption("Shows that premiered in the last 30 days")
-    new_shows = get_new_shows(region, limit=6)
+    new_shows = get_new_shows(region, limit=3)
 
     if new_shows:
         cols = st.columns(3)
@@ -1678,37 +1678,9 @@ with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
     else:
         st.info("No new shows in the last 30 days")
 
-with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
-    st.caption("Shows with confirmed air dates in the next 180 days")
-    coming_shows = get_coming_soon_shows(region, limit=6)
-
-    if coming_shows:
-        cols = st.columns(3)
-        for idx, show in enumerate(coming_shows):
-            with cols[idx % 3]:
-                poster_path = show.get("poster_path")
-                title = show.get("name", "Unknown")
-                first_air = show.get("first_air_date", "")
-                overview = show.get("overview", "")[:100]
-
-                if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
-                st.markdown(f"**{title}**")
-                if first_air:
-                    try:
-                        air_date = dt.date.fromisoformat(first_air)
-                        days_until = (air_date - dt.date.today()).days
-                        st.caption(f"📅 Airs in {days_until} days ({first_air})")
-                    except:
-                        st.caption(f"📅 Airs: {first_air}")
-                if overview:
-                    st.caption(overview + "...")
-    else:
-        st.info("No upcoming shows with confirmed air dates")
-
 with st.expander("🔥 Trending This Week - What's Hot Right Now!", expanded=False):
     st.caption("Most popular and talked-about shows this week")
-    trending_shows = get_trending_shows(limit=6)
+    trending_shows = get_trending_shows(limit=3)
 
     if trending_shows:
         cols = st.columns(3)
@@ -1731,7 +1703,7 @@ with st.expander("🔥 Trending This Week - What's Hot Right Now!", expanded=Fal
 
 with st.expander("⭐ Top Rated Shows - Critically Acclaimed Hits!", expanded=False):
     st.caption("All-time highest rated shows on TMDB")
-    top_rated_shows = get_top_rated_shows(limit=6)
+    top_rated_shows = get_top_rated_shows(limit=3)
 
     if top_rated_shows:
         cols = st.columns(3)
