@@ -1130,121 +1130,121 @@ if q:
             with cols[2]:
                 st.write((overview[:280] + "…") if len(overview) > 280 else overview or "_No synopsis available._")
 
-                # Show all available providers
-                with st.expander("📺 View Streaming Availability & Add to Watchlist", expanded=False):
-                    try:
-                        det = tv_details(tmdb_id)
-                        prov = tv_watch_providers(tmdb_id)
-                        next_air = discover_next_air_date(det)
+                # Show all available providers directly (no expander)
+                try:
+                    det = tv_details(tmdb_id)
+                    prov = tv_watch_providers(tmdb_id)
+                    next_air = discover_next_air_date(det)
 
-                        # Get all providers in the region
-                        all_providers = get_all_providers_in_region(prov, region)
+                    # Get all providers in the region
+                    all_providers = get_all_providers_in_region(prov, region)
 
-                        # Show next air date at the top
+                    # Show next air date at the top
+                    if next_air:
+                        try:
+                            d = dt.date.fromisoformat(next_air)
+                            days = (d - dt.date.today()).days
+                            when = "today" if days == 0 else (f"in {days} days" if days > 0 else f"{abs(days)} days ago")
+                            st.info(f"📅 Next episode: {next_air} ({when})")
+                        except Exception:
+                            st.info(f"📅 Next episode: {next_air}")
+
+                    # Collect all unique provider names and normalize them
+                    # Use a dict to track unique providers (deduplication)
+                    unique_providers = {}
+                    for providers_list in all_providers.values():
+                        for provider in providers_list:
+                            normalized = normalize_provider_name(provider)
+                            if normalized not in unique_providers:
+                                unique_providers[normalized] = provider
+                    available_provider_names = sorted(unique_providers.keys())
+
+                    if available_provider_names:
+                        st.caption("💡 Click any logo to add to watchlist")
+
+                        # Create logo grid (4 per row for better spacing)
+                        for i in range(0, len(available_provider_names), 4):
+                            logo_cols = st.columns(4)
+                            for j, col in enumerate(logo_cols):
+                                if i + j < len(available_provider_names):
+                                    provider = available_provider_names[i + j]
+                                    normalized_provider = normalize_provider_name(provider)
+                                    with col:
+                                        logo_url = get_provider_logo_url(normalized_provider)
+
+                                        # Create clickable logo/button
+                                        if logo_url:
+                                            # Show logo with click handler
+                                            st.image(logo_url, width=80)
+                                            # Use "Add" button below logo
+                                            clicked = st.button("Add", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
+                                        else:
+                                            # Show provider name text and button when logo not available
+                                            st.write(f"**{normalized_provider}**")
+                                            clicked = st.button("Add", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
+
+                                        if clicked:
+                                            try:
+                                                on_provider = is_on_provider_in_region(prov, provider, region)
+                                                upsert_show(client, tmdb_id, title, region, on_provider, next_air, overview, poster_path, normalized_provider)
+                                                st.success(f"✅ Added '{title}' to watchlist for {normalized_provider}!")
+                                                st.session_state.clear_search = True
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Failed: {e}")
+                    else:
+                        # If no providers available, might be broadcast TV
                         if next_air:
-                            try:
-                                d = dt.date.fromisoformat(next_air)
-                                days = (d - dt.date.today()).days
-                                when = "today" if days == 0 else (f"in {days} days" if days > 0 else f"{abs(days)} days ago")
-                                st.info(f"📅 Next episode: {next_air} ({when})")
-                            except Exception:
-                                st.info(f"📅 Next episode: {next_air}")
+                            # Has air date but no streaming = likely broadcast TV
+                            st.info(f"📺 This show airs on broadcast/cable TV")
+                            st.caption("Add it to track upcoming episodes:")
 
-                        # Collect all unique provider names and normalize them
-                        available_provider_names = []
-                        for providers_list in all_providers.values():
-                            for provider in providers_list:
-                                normalized = normalize_provider_name(provider)
-                                if normalized not in available_provider_names:
-                                    available_provider_names.append(normalized)
-                        available_provider_names = sorted(available_provider_names)
+                            # Add Broadcast TV option
+                            if st.button("➕ 📺 Broadcast/Cable TV", key=f"add_broadcast_{tmdb_id}", use_container_width=True):
+                                try:
+                                    upsert_show(client, tmdb_id, title, region, True, next_air, overview, poster_path, "Broadcast TV")
+                                    st.success(f"✅ Added '{title}' to watchlist!")
+                                    st.session_state.clear_search = True
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed: {e}")
 
-                        if available_provider_names:
-                            st.caption("💡 Click any logo to add to watchlist")
-
-                            # Create logo grid (4 per row for better spacing)
-                            for i in range(0, len(available_provider_names), 4):
-                                cols = st.columns(4)
-                                for j, col in enumerate(cols):
-                                    if i + j < len(available_provider_names):
-                                        provider = available_provider_names[i + j]
-                                        normalized_provider = normalize_provider_name(provider)
-                                        with col:
-                                            logo_url = get_provider_logo_url(normalized_provider)
-
-                                            # Create clickable logo/button
-                                            if logo_url:
-                                                # Show logo with click handler
-                                                st.image(logo_url, width=80)
-                                                # Use "Add" button below logo
-                                                clicked = st.button("Add", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
-                                            else:
-                                                # Show provider name text and button when logo not available
-                                                st.write(f"**{normalized_provider}**")
-                                                clicked = st.button("Add", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
-
-                                            if clicked:
-                                                try:
-                                                    on_provider = is_on_provider_in_region(prov, provider, region)
-                                                    upsert_show(client, tmdb_id, title, region, on_provider, next_air, overview, poster_path, normalized_provider)
-                                                    st.success(f"✅ Added '{title}' to watchlist for {normalized_provider}!")
-                                                    st.session_state.clear_search = True
-                                                    st.rerun()
-                                                except Exception as e:
-                                                    st.error(f"Failed: {e}")
+                            st.write("---")
+                            st.caption("Or track it for when it comes to streaming:")
                         else:
-                            # If no providers available, might be broadcast TV
-                            if next_air:
-                                # Has air date but no streaming = likely broadcast TV
-                                st.info(f"📺 This show airs on broadcast/cable TV")
-                                st.caption("Add it to track upcoming episodes:")
+                            st.warning(f"⚠️ Not available in {region}")
+                            st.caption("You can still track it for future availability:")
 
-                                # Add Broadcast TV option
-                                if st.button("➕ 📺 Broadcast/Cable TV", key=f"add_broadcast_{tmdb_id}", use_container_width=True):
-                                    try:
-                                        upsert_show(client, tmdb_id, title, region, True, next_air, overview, poster_path, "Broadcast TV")
-                                        st.success(f"✅ Added '{title}' to watchlist!")
-                                        st.session_state.clear_search = True
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Failed: {e}")
+                        # Show top streaming services as logo buttons
+                        top_services = ["Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+"]
 
-                                st.write("---")
-                                st.caption("Or track it for when it comes to streaming:")
-                            else:
-                                st.warning(f"⚠️ Not available in {region}")
-                                st.caption("You can still track it for future availability:")
+                        for i in range(0, len(top_services), 4):
+                            logo_cols = st.columns(4)
+                            for j, col in enumerate(logo_cols):
+                                if i + j < len(top_services):
+                                    provider = top_services[i + j]
+                                    with col:
+                                        logo_url = get_provider_logo_url(provider)
 
-                            # Show top streaming services as logo buttons
-                            top_services = ["Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+"]
+                                        # Create clickable logo/button
+                                        if logo_url:
+                                            st.image(logo_url, width=80)
+                                            clicked = st.button("Add", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
+                                        else:
+                                            st.write(f"**{provider}**")
+                                            clicked = st.button("Add", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
 
-                            for i in range(0, len(top_services), 4):
-                                cols = st.columns(4)
-                                for j, col in enumerate(cols):
-                                    if i + j < len(top_services):
-                                        provider = top_services[i + j]
-                                        with col:
-                                            logo_url = get_provider_logo_url(provider)
+                                        if clicked:
+                                            try:
+                                                upsert_show(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider)
+                                                st.success(f"✅ Added '{title}' to watchlist for {provider}!")
+                                                st.session_state.clear_search = True
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Failed: {e}")
 
-                                            # Create clickable logo/button
-                                            if logo_url:
-                                                st.image(logo_url, width=80)
-                                                clicked = st.button("Add", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
-                                            else:
-                                                st.write(f"**{provider}**")
-                                                clicked = st.button("Add", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
-
-                                            if clicked:
-                                                try:
-                                                    upsert_show(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider)
-                                                    st.success(f"✅ Added '{title}' to watchlist for {provider}!")
-                                                    st.session_state.clear_search = True
-                                                    st.rerun()
-                                                except Exception as e:
-                                                    st.error(f"Failed: {e}")
-
-                    except Exception as e:
-                        st.error(f"Lookup error: {e}")
+                except Exception as e:
+                    st.error(f"Lookup error: {e}")
 
             # Add padding below each result
             st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
