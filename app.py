@@ -11,6 +11,7 @@ import auth  # Authentication module
 import notifications  # Notifications module
 import scheduled_tasks  # Background task scheduler
 import preferences  # User notification preferences
+import show_status  # Show status tracking from TMDB
 
 # Load environment variables
 load_dotenv()
@@ -113,6 +114,9 @@ def upsert_show(client: Client, tmdb_id:int, title:str, region:str, on_provider:
             new_status="added",
             send_email=False
         )
+
+        # Check and update show status from TMDB (series finale/cancellation detection)
+        show_status.update_show_status(client, user_id, tmdb_id, title)
 
 def delete_show(client: Client, tmdb_id:int, region:str, provider_name:str):
     """Delete a show from the user's watchlist"""
@@ -834,6 +838,30 @@ if show_settings:
 
             st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
             st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
+
+            st.write("---")
+            st.markdown("**📊 Show Status Tracking**")
+            st.caption("Check show status from TMDB (Returning Series, Ended, Canceled)")
+
+            if st.button("🔍 Check All Show Statuses", use_container_width=True, help="Check TMDB for status updates on all your shows"):
+                with st.spinner("Checking show statuses from TMDB..."):
+                    try:
+                        user_id = get_user_id()
+                        stats = show_status.check_all_shows_status(client, user_id)
+
+                        st.success(f"✅ Status check complete!")
+                        st.caption(f"📊 Total shows: {stats['total']}")
+                        st.caption(f"🔄 Updated: {stats['updated']}")
+                        st.caption(f"✓ Unchanged: {stats['unchanged']}")
+                        if stats['errors'] > 0:
+                            st.caption(f"⚠️ Errors: {stats['errors']}")
+
+                        if stats['updated'] > 0:
+                            st.info("📬 Check your notifications for any status changes!")
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+
+            st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
 
         with tab4:
             st.markdown("**🔔 Customize Your Notifications**")
