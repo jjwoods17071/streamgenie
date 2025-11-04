@@ -1251,6 +1251,21 @@ with header_cols[1]:
     export_csv = st.button("⬇️", key="export_icon", help="Export to CSV")
 
 rows = list_shows(client)
+
+# Auto-update production status for shows that don't have it
+if rows:
+    user_id = get_user_id()
+    for row in rows:
+        # Check if production_status is missing or null
+        if not row.get('production_status'):
+            try:
+                # Silently update status in background
+                show_status.update_show_status(client, user_id, row['tmdb_id'], row['title'])
+            except Exception:
+                pass  # Silently fail, don't interrupt display
+    # Refresh rows after updates
+    rows = list_shows(client)
+
 if not rows:
     st.info("Your watchlist is empty. Search and add shows from above.")
 else:
