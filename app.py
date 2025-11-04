@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import auth  # Authentication module
 import notifications  # Notifications module
+import scheduled_tasks  # Background task scheduler
 
 # Load environment variables
 load_dotenv()
@@ -535,6 +536,10 @@ st.set_page_config(page_title="StreamGenie - Streaming Tracker", page_icon="🍿
 # Initialize Supabase client (needed throughout the app)
 client = get_supabase_client()
 
+# Initialize background task scheduler
+# This will schedule daily reminders at 8 AM and weekly previews on Sunday at 6 PM
+scheduler = scheduled_tasks.init_scheduler(client)
+
 # Initialize authentication
 auth.init_auth_session()
 
@@ -791,31 +796,49 @@ if show_settings:
 
                                 st.write("---")
 
+            st.write("---")
+            st.markdown("**⏰ Scheduled Tasks**")
+            st.caption("Test automated email reminders and weekly previews")
+
+            # Show scheduled jobs
+            if scheduler:
+                jobs = scheduler.get_jobs()
+                if jobs:
+                    st.info(f"✅ {len(jobs)} scheduled jobs running")
+                    for job in jobs:
+                        st.caption(f"• {job.name} - Next run: {job.next_run_time.strftime('%Y-%m-%d %I:%M %p') if job.next_run_time else 'N/A'}")
+                else:
+                    st.warning("No scheduled jobs found")
+
+            # Test buttons
+            col_test1, col_test2 = st.columns(2)
+
+            with col_test1:
+                if st.button("📧 Test Daily Reminders", use_container_width=True, help="Manually trigger daily reminders now"):
+                    with st.spinner("Sending daily reminders..."):
+                        try:
+                            scheduler.test_daily_reminders_now()
+                            st.success("✅ Daily reminders triggered! Check your email and in-app notifications.")
+                        except Exception as e:
+                            st.error(f"❌ Error: {e}")
+
+            with col_test2:
+                if st.button("📅 Test Weekly Preview", use_container_width=True, help="Manually trigger weekly preview now"):
+                    with st.spinner("Sending weekly previews..."):
+                        try:
+                            scheduler.test_weekly_preview_now()
+                            st.success("✅ Weekly preview triggered! Check your email and in-app notifications.")
+                        except Exception as e:
+                            st.error(f"❌ Error: {e}")
+
+            st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
+            st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
+
         st.write("---")
 else:
     region = DEFAULT_REGION
 
-# --------------- BACKGROUND SCHEDULER FOR REMINDERS ---------------
-# Initialize scheduler for daily reminder checks
-if 'scheduler_started' not in st.session_state:
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-
-        def scheduled_reminder_check():
-            """Run daily at 8 AM to check for shows airing today."""
-            settings = load_user_settings()
-            user_email = settings.get('email', '')
-            if user_email and settings.get('reminders_enabled', False):
-                client_bg = get_supabase_client()
-                sent_count = check_and_send_daily_reminders(user_email, client_bg)
-                print(f"Daily reminder check: {sent_count} emails sent")
-
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(scheduled_reminder_check, 'cron', hour=8, minute=0)
-        scheduler.start()
-        st.session_state.scheduler_started = True
-    except Exception as e:
-        print(f"Could not start scheduler: {e}")
+# Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
 # Vertical layout: Search on top, watchlist below
 st.subheader("🔎 Search TV Shows")
