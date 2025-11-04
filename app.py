@@ -1360,63 +1360,6 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
-# Promotional Sections - New Shows, Coming Soon
-st.write("---")
-
-# Collapsible promotional sections
-with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
-    st.caption("Shows that premiered in the last 30 days")
-    new_shows = get_new_shows(region, limit=6)
-
-    if new_shows:
-        cols = st.columns(3)
-        for idx, show in enumerate(new_shows):
-            with cols[idx % 3]:
-                poster_path = show.get("poster_path")
-                title = show.get("name", "Unknown")
-                first_air = show.get("first_air_date", "")
-                overview = show.get("overview", "")[:100]
-
-                if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
-                st.markdown(f"**{title}**")
-                if first_air:
-                    st.caption(f"📅 Premiered: {first_air}")
-                if overview:
-                    st.caption(overview + "...")
-    else:
-        st.info("No new shows in the last 30 days")
-
-with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
-    st.caption("Shows with confirmed air dates in the next 180 days")
-    coming_shows = get_coming_soon_shows(region, limit=6)
-
-    if coming_shows:
-        cols = st.columns(3)
-        for idx, show in enumerate(coming_shows):
-            with cols[idx % 3]:
-                poster_path = show.get("poster_path")
-                title = show.get("name", "Unknown")
-                first_air = show.get("first_air_date", "")
-                overview = show.get("overview", "")[:100]
-
-                if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
-                st.markdown(f"**{title}**")
-                if first_air:
-                    try:
-                        air_date = dt.date.fromisoformat(first_air)
-                        days_until = (air_date - dt.date.today()).days
-                        st.caption(f"📅 Airs in {days_until} days ({first_air})")
-                    except:
-                        st.caption(f"📅 Airs: {first_air}")
-                if overview:
-                    st.caption(overview + "...")
-    else:
-        st.info("No upcoming shows with confirmed air dates")
-
-st.write("---")
-
 # Vertical layout: Search on top, watchlist below
 search_header = st.columns([8, 1])
 with search_header[0]:
@@ -1594,6 +1537,61 @@ if q:
 
             # Add padding below each result
             st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
+
+# Promotional Sections - Between search and watchlist
+st.write("---")
+
+# Collapsible promotional sections
+with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
+    st.caption("Shows that premiered in the last 30 days")
+    new_shows = get_new_shows(region, limit=6)
+
+    if new_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(new_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("name", "Unknown")
+                first_air = show.get("first_air_date", "")
+                overview = show.get("overview", "")[:100]
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                if first_air:
+                    st.caption(f"📅 Premiered: {first_air}")
+                if overview:
+                    st.caption(overview + "...")
+    else:
+        st.info("No new shows in the last 30 days")
+
+with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
+    st.caption("Shows with confirmed air dates in the next 180 days")
+    coming_shows = get_coming_soon_shows(region, limit=6)
+
+    if coming_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(coming_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("name", "Unknown")
+                first_air = show.get("first_air_date", "")
+                overview = show.get("overview", "")[:100]
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                if first_air:
+                    try:
+                        air_date = dt.date.fromisoformat(first_air)
+                        days_until = (air_date - dt.date.today()).days
+                        st.caption(f"📅 Airs in {days_until} days ({first_air})")
+                    except:
+                        st.caption(f"📅 Airs: {first_air}")
+                if overview:
+                    st.caption(overview + "...")
+    else:
+        st.info("No upcoming shows with confirmed air dates")
 
 # Watchlist section below search
 st.write("---")
