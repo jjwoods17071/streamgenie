@@ -343,12 +343,10 @@ def get_new_shows(region: str = "US", limit: int = 10) -> List[Dict[str, Any]]:
         params = {
             "api_key": TMDB_API_KEY,
             "language": "en-US",
-            "sort_by": "first_air_date.desc",
+            "sort_by": "popularity.desc",
             "first_air_date.gte": thirty_days_ago.isoformat(),
             "first_air_date.lte": today.isoformat(),
-            "with_watch_providers": region,
-            "watch_region": region,
-            "vote_count.gte": 5,  # Filter out shows with very few votes
+            "vote_count.gte": 10,  # Filter out shows with very few votes
             "page": 1
         }
 
@@ -374,11 +372,10 @@ def get_coming_soon_shows(region: str = "US", limit: int = 10) -> List[Dict[str,
         params = {
             "api_key": TMDB_API_KEY,
             "language": "en-US",
-            "sort_by": "first_air_date.asc",
+            "sort_by": "popularity.desc",
             "first_air_date.gte": today.isoformat(),
             "first_air_date.lte": six_months_from_now.isoformat(),
-            "with_watch_providers": region,
-            "watch_region": region,
+            "vote_count.gte": 5,  # Filter out shows with very few votes
             "page": 1
         }
 
