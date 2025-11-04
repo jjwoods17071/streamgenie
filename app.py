@@ -1430,11 +1430,14 @@ if q:
                             st.write("---")
                             st.caption("Or track it for when it comes to streaming:")
                         else:
-                            st.warning(f"⚠️ Not available in {region}")
-                            st.caption("You can still track it for future availability:")
+                            st.info(f"📺 Not currently available on streaming platforms in {region}")
+                            st.caption("This show may air on broadcast/cable TV. Add to track when it becomes available:")
 
-                        # Show top streaming services as buttons
-                        top_services = ["Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+"]
+                        # Show streaming services and broadcast/cable networks
+                        top_services = [
+                            "Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+",
+                            "ESPN", "ABC", "NBC", "CBS", "Fox", "Broadcast TV"
+                        ]
 
                         for i in range(0, len(top_services), 3):
                             logo_cols = st.columns(3)
