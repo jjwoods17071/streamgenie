@@ -1519,7 +1519,7 @@ if q:
                     available_provider_names = sorted(unique_providers.keys())
 
                     if available_provider_names:
-                        st.caption("💡 Click any logo to add to watchlist")
+                        st.caption("💡 Click a service to add to watchlist")
 
                         # Create logo grid (4 per row for better spacing)
                         for i in range(0, len(available_provider_names), 4):
@@ -1531,16 +1531,25 @@ if q:
                                     with col:
                                         logo_url = get_provider_logo_url(normalized_provider)
 
-                                        # Create clickable logo/button
+                                        # Show logo and make entire area clickable
                                         if logo_url:
-                                            # Show logo with click handler
+                                            # Show logo
                                             st.image(logo_url, width=80)
-                                            # Use "Add" button below logo
-                                            clicked = st.button("Add", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
+                                            # Clickable button with provider name
+                                            clicked = st.button(
+                                                f"➕ {normalized_provider}",
+                                                key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
+                                                use_container_width=True,
+                                                type="primary"
+                                            )
                                         else:
-                                            # Show provider name text and button when logo not available
-                                            st.write(f"**{normalized_provider}**")
-                                            clicked = st.button("Add", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
+                                            # Show provider name as button when logo not available
+                                            clicked = st.button(
+                                                f"➕ {normalized_provider}",
+                                                key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
+                                                use_container_width=True,
+                                                type="primary"
+                                            )
 
                                         if clicked:
                                             try:
