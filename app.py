@@ -1408,62 +1408,9 @@ else:
 
         # Column 4: Action buttons (avoid nested columns)
         with cols[3]:
-            if next_air_date:
-                # Show only refresh and delete for shows with air dates
-                if st.button("🔄", key=f"refresh_{r['tmdb_id']}_{provider_name}", help="Refresh", use_container_width=True):
-                    try:
-                        det = tv_details(r["tmdb_id"])
-                        prov = tv_watch_providers(r["tmdb_id"])
-                        on_nf = is_on_provider_in_region(prov, provider_name, r["region"])
-                        next_air = discover_next_air_date(det)
-                        upsert_show(client, r["tmdb_id"], det.get("name") or r["title"], r["region"], on_nf, next_air, det.get("overview") or r["overview"], det.get("poster_path") or r["poster_path"], provider_name)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed: {e}")
-                if st.button("🗑️", key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                    delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                    st.rerun()
-            else:
-                # Show Info toggle, refresh, and delete for shows without air dates
-                # Use session state to track which info panels are open
-                info_key = f"show_info_{r['tmdb_id']}_{provider_name}"
-                if info_key not in st.session_state:
-                    st.session_state[info_key] = False
-
-                if st.button("🔍 Info", key=f"info_btn_{r['tmdb_id']}_{provider_name}", help="Check if show is renewed, cancelled, or complete", use_container_width=True):
-                    st.session_state[info_key] = not st.session_state[info_key]
-                    st.rerun()
-
-                # Show info if toggled on
-                if st.session_state[info_key]:
-                    st.info(f"💡 **About '{r['title']}':**")
-
-                    if r['on_provider']:
-                        st.success("✅ This show is available to stream!")
-                        st.caption("No upcoming episodes means this is likely:")
-                        st.caption("• A completed series (all episodes available)")
-                        st.caption("• Between seasons (check for renewal news)")
-                    else:
-                        st.warning("⏳ Not currently available in your region")
-                        st.caption("No air date may indicate:")
-                        st.caption("• Show has been cancelled")
-                        st.caption("• Series has concluded")
-                        st.caption("• Not yet announced for your region")
-
-                    st.markdown(f"🔍 [Search Google for renewal status ↗](https://www.google.com/search?q={r['title'].replace(' ', '+')}+renewed+cancelled+status)")
-
-                if st.button("🔄", key=f"refresh_{r['tmdb_id']}_{provider_name}", help="Refresh", use_container_width=True):
-                    try:
-                        det = tv_details(r["tmdb_id"])
-                        prov = tv_watch_providers(r["tmdb_id"])
-                        on_nf = is_on_provider_in_region(prov, provider_name, r["region"])
-                        next_air = discover_next_air_date(det)
-                        upsert_show(client, r["tmdb_id"], det.get("name") or r["title"], r["region"], on_nf, next_air, det.get("overview") or r["overview"], det.get("poster_path") or r["poster_path"], provider_name)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed: {e}")
-                if st.button("🗑️", key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                    delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                    st.rerun()
+            # Show only delete button - status updates happen automatically
+            if st.button("🗑️", key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
+                delete_show(client, r["tmdb_id"], r["region"], provider_name)
+                st.rerun()
 
         st.divider()
