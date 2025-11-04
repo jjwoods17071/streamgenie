@@ -388,6 +388,49 @@ def get_coming_soon_shows(region: str = "US", limit: int = 10) -> List[Dict[str,
         logger.error(f"Error fetching coming soon shows: {e}")
         return []
 
+def get_trending_shows(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Get trending TV shows this week.
+    Returns the most popular and talked-about shows right now.
+    """
+    try:
+        # Use TMDB trending endpoint for weekly trending shows
+        params = {
+            "api_key": TMDB_API_KEY,
+            "language": "en-US"
+        }
+
+        response = requests.get(f"{TMDB_BASE}/trending/tv/week", params=params, timeout=10)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Error fetching trending shows: {e}")
+        return []
+
+def get_top_rated_shows(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Get all-time top rated TV shows.
+    Returns critically acclaimed and highest-rated shows on TMDB.
+    """
+    try:
+        # Use TMDB top rated endpoint
+        params = {
+            "api_key": TMDB_API_KEY,
+            "language": "en-US",
+            "page": 1
+        }
+
+        response = requests.get(f"{TMDB_BASE}/tv/top_rated", params=params, timeout=10)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+
+        return results[:limit]
+    except Exception as e:
+        logger.error(f"Error fetching top rated shows: {e}")
+        return []
+
 # --------------- LOGO OVERRIDE PERSISTENCE ---------------
 def load_logo_overrides(client: Client) -> dict:
     """Load logo URL overrides from Supabase."""
@@ -1662,6 +1705,56 @@ with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
                     st.caption(overview + "...")
     else:
         st.info("No upcoming shows with confirmed air dates")
+
+with st.expander("🔥 Trending This Week - What's Hot Right Now!", expanded=False):
+    st.caption("Most popular and talked-about shows this week")
+    trending_shows = get_trending_shows(limit=6)
+
+    if trending_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(trending_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("name", "Unknown")
+                vote_average = show.get("vote_average", 0)
+                overview = show.get("overview", "")[:100]
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                if vote_average:
+                    st.caption(f"⭐ {vote_average:.1f}/10")
+                if overview:
+                    st.caption(overview + "...")
+    else:
+        st.info("No trending shows available")
+
+with st.expander("⭐ Top Rated Shows - Critically Acclaimed Hits!", expanded=False):
+    st.caption("All-time highest rated shows on TMDB")
+    top_rated_shows = get_top_rated_shows(limit=6)
+
+    if top_rated_shows:
+        cols = st.columns(3)
+        for idx, show in enumerate(top_rated_shows):
+            with cols[idx % 3]:
+                poster_path = show.get("poster_path")
+                title = show.get("name", "Unknown")
+                vote_average = show.get("vote_average", 0)
+                first_air = show.get("first_air_date", "")
+                overview = show.get("overview", "")[:100]
+
+                if poster_path:
+                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                st.markdown(f"**{title}**")
+                rating_caption = f"⭐ {vote_average:.1f}/10"
+                if first_air:
+                    year = first_air[:4]
+                    rating_caption += f" • {year}"
+                st.caption(rating_caption)
+                if overview:
+                    st.caption(overview + "...")
+    else:
+        st.info("No top rated shows available")
 
 # Watchlist section below search
 st.write("---")
