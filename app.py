@@ -518,6 +518,14 @@ def normalize_provider_name(provider_name: str) -> str:
     if "hulu" in provider_lower:
         return "Hulu"
 
+    # Consolidate Netflix variations (Netflix, Netflix basic with Ads, etc.)
+    if "netflix" in provider_lower:
+        return "Netflix"
+
+    # Consolidate Peacock variations (Peacock, Peacock Premium, Peacock Premium Plus, etc.)
+    if "peacock" in provider_lower:
+        return "Peacock"
+
     # Consolidate Fandango variations (and legacy Vudu)
     if "fandango" in provider_lower and "free" not in provider_lower:
         return "Fandango At Home"
