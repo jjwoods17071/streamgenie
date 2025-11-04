@@ -571,7 +571,16 @@ with col_gear:
 
 # Collapsible settings section
 if show_settings:
-    with st.container():
+    with st.container(border=True):
+        st.markdown("""
+        <style>
+        [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         st.markdown("### ⚙️ Settings")
         col1, col2 = st.columns(2)
         with col1:
