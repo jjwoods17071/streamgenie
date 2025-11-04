@@ -591,7 +591,14 @@ if show_settings:
             st.caption(f"Database: {DB_PATH}")
 
         # Tabs for settings sections
-        tab1, tab2, tab3, tab4 = st.tabs(["ℹ️ How It Works", "🔧 Maintenance", "📧 Email Reminders", "🔔 Notification Preferences"])
+        # Check if user is admin to show Maintenance tab
+        user_id = get_user_id()
+        user_is_admin = auth.is_admin(client, user_id)
+
+        if user_is_admin:
+            tab1, tab2, tab3, tab4 = st.tabs(["ℹ️ How It Works", "🔧 Maintenance", "📧 Email Reminders", "🔔 Notification Preferences"])
+        else:
+            tab1, tab3, tab4 = st.tabs(["ℹ️ How It Works", "📧 Email Reminders", "🔔 Notification Preferences"])
 
         with tab1:
             st.caption("1. Search for any TV show")
@@ -666,211 +673,212 @@ if show_settings:
             elif not SENDGRID_API_KEY:
                 st.warning("⚠️ To enable reminders, set the SENDGRID_API_KEY environment variable.\n\nGet a free API key at https://sendgrid.com")
 
-        with tab2:
-            st.markdown("**Provider Logo Assignments**")
+        if user_is_admin:
+            with tab2:
+                st.markdown("**Provider Logo Assignments**")
 
-            # Get all logo assignments
-            all_logos = get_all_provider_logos()
+                # Get all logo assignments
+                all_logos = get_all_provider_logos()
 
-            # Initialize session state
-            if 'logo_overrides' not in st.session_state:
-                st.session_state.logo_overrides = load_logo_overrides(client)
+                # Initialize session state
+                if 'logo_overrides' not in st.session_state:
+                    st.session_state.logo_overrides = load_logo_overrides(client)
 
-            if 'deleted_providers' not in st.session_state:
-                st.session_state.deleted_providers = load_deleted_providers(client)
+                if 'deleted_providers' not in st.session_state:
+                    st.session_state.deleted_providers = load_deleted_providers(client)
 
-            # Filter out deleted providers
-            active_logos = {k: v for k, v in all_logos.items() if k not in st.session_state.deleted_providers}
+                # Filter out deleted providers
+                active_logos = {k: v for k, v in all_logos.items() if k not in st.session_state.deleted_providers}
 
-            override_count = len(st.session_state.logo_overrides)
-            deleted_count = len(st.session_state.deleted_providers)
+                override_count = len(st.session_state.logo_overrides)
+                deleted_count = len(st.session_state.deleted_providers)
 
-            status_parts = [f"Total providers: {len(active_logos)}"]
-            if override_count > 0:
-                status_parts.append(f"**🔧 {override_count} modified**")
-            if deleted_count > 0:
-                status_parts.append(f"**🗑️ {deleted_count} deleted**")
+                status_parts = [f"Total providers: {len(active_logos)}"]
+                if override_count > 0:
+                    status_parts.append(f"**🔧 {override_count} modified**")
+                if deleted_count > 0:
+                    status_parts.append(f"**🗑️ {deleted_count} deleted**")
 
-            st.caption(" | ".join(status_parts))
+                st.caption(" | ".join(status_parts))
 
-            # Group by category
-            categories = {
-                "Major Streaming Services": [],
-                "Premium Channels": [],
-                "Specialty Streaming": [],
-                "Discovery/Learning": [],
-                "Free Ad-Supported": [],
-                "Live TV / Cable": [],
-                "Rental/Purchase": []
-            }
+                # Group by category
+                categories = {
+                    "Major Streaming Services": [],
+                    "Premium Channels": [],
+                    "Specialty Streaming": [],
+                    "Discovery/Learning": [],
+                    "Free Ad-Supported": [],
+                    "Live TV / Cable": [],
+                    "Rental/Purchase": []
+                }
 
-            # Categorize providers (simple keyword matching)
-            for provider in sorted(active_logos.keys()):
-                if provider in ["netflix", "prime video", "amazon prime video", "hulu", "disney plus", "disney+",
-                               "max", "hbo max", "paramount plus", "paramount+", "peacock", "peacock premium",
-                               "apple tv plus", "apple tv+"]:
-                    categories["Major Streaming Services"].append(provider)
-                elif provider in ["showtime", "starz", "mgm plus", "amc+", "bet+", "espn+"]:
-                    categories["Premium Channels"].append(provider)
-                elif provider in ["crunchyroll", "shudder", "acorn tv", "sundance now", "criterion channel"]:
-                    categories["Specialty Streaming"].append(provider)
-                elif provider in ["youtube premium", "discovery plus", "discovery+"]:
-                    categories["Discovery/Learning"].append(provider)
-                elif provider in ["tubi", "pluto tv", "freevee", "amazon freevee", "the roku channel", "roku channel", "plex", "xumo play"]:
-                    categories["Free Ad-Supported"].append(provider)
-                elif provider in ["fubotv", "fubo tv", "sling tv", "directv stream", "spectrum on demand"]:
-                    categories["Live TV / Cable"].append(provider)
-                else:
-                    categories["Rental/Purchase"].append(provider)
+                # Categorize providers (simple keyword matching)
+                for provider in sorted(active_logos.keys()):
+                    if provider in ["netflix", "prime video", "amazon prime video", "hulu", "disney plus", "disney+",
+                                   "max", "hbo max", "paramount plus", "paramount+", "peacock", "peacock premium",
+                                   "apple tv plus", "apple tv+"]:
+                        categories["Major Streaming Services"].append(provider)
+                    elif provider in ["showtime", "starz", "mgm plus", "amc+", "bet+", "espn+"]:
+                        categories["Premium Channels"].append(provider)
+                    elif provider in ["crunchyroll", "shudder", "acorn tv", "sundance now", "criterion channel"]:
+                        categories["Specialty Streaming"].append(provider)
+                    elif provider in ["youtube premium", "discovery plus", "discovery+"]:
+                        categories["Discovery/Learning"].append(provider)
+                    elif provider in ["tubi", "pluto tv", "freevee", "amazon freevee", "the roku channel", "roku channel", "plex", "xumo play"]:
+                        categories["Free Ad-Supported"].append(provider)
+                    elif provider in ["fubotv", "fubo tv", "sling tv", "directv stream", "spectrum on demand"]:
+                        categories["Live TV / Cable"].append(provider)
+                    else:
+                        categories["Rental/Purchase"].append(provider)
 
-            # Display by category
-            for category, providers in categories.items():
-                if providers:
-                    with st.expander(f"**{category}** ({len(providers)} providers)"):
-                        for provider in providers:
-                            # Add border container for each row
-                            with st.container(border=True):
-                                logo_url = get_provider_logo_url(provider)
+                # Display by category
+                for category, providers in categories.items():
+                    if providers:
+                        with st.expander(f"**{category}** ({len(providers)} providers)"):
+                            for provider in providers:
+                                # Add border container for each row
+                                with st.container(border=True):
+                                    logo_url = get_provider_logo_url(provider)
 
-                                col1, col2, col3, col4 = st.columns([1, 5, 0.5, 0.5])
-                                with col1:
-                                    if logo_url:
-                                        st.image(logo_url, width=40)
-                                    else:
-                                        st.write("❌")
+                                    col1, col2, col3, col4 = st.columns([1, 5, 0.5, 0.5])
+                                    with col1:
+                                        if logo_url:
+                                            st.image(logo_url, width=40)
+                                        else:
+                                            st.write("❌")
 
-                                with col2:
-                                    # Show if this provider has an override
-                                    has_override = 'logo_overrides' in st.session_state and provider in st.session_state.logo_overrides
-                                    if has_override:
-                                        st.caption(f"**{provider}** 🔧 _(modified)_")
-                                    else:
-                                        st.caption(f"**{provider}**")
+                                    with col2:
+                                        # Show if this provider has an override
+                                        has_override = 'logo_overrides' in st.session_state and provider in st.session_state.logo_overrides
+                                        if has_override:
+                                            st.caption(f"**{provider}** 🔧 _(modified)_")
+                                        else:
+                                            st.caption(f"**{provider}**")
 
-                                    if logo_url:
-                                        st.caption(f"`{logo_url}`")
-                                    else:
-                                        st.caption("_No logo URL assigned_")
+                                        if logo_url:
+                                            st.caption(f"`{logo_url}`")
+                                        else:
+                                            st.caption("_No logo URL assigned_")
 
-                                with col3:
-                                    if st.button("✏️", key=f"edit_{provider}", help=f"Edit {provider} logo URL"):
-                                        st.session_state[f"editing_{provider}"] = True
-                                        st.rerun()
+                                    with col3:
+                                        if st.button("✏️", key=f"edit_{provider}", help=f"Edit {provider} logo URL"):
+                                            st.session_state[f"editing_{provider}"] = True
+                                            st.rerun()
 
-                                with col4:
-                                    if st.button("🗑️", key=f"delete_{provider}", help=f"Delete {provider} from system"):
-                                        # Initialize session state if needed
-                                        if 'logo_overrides' not in st.session_state:
-                                            st.session_state.logo_overrides = load_logo_overrides(client)
-                                        if 'deleted_providers' not in st.session_state:
-                                            st.session_state.deleted_providers = load_deleted_providers(client)
+                                    with col4:
+                                        if st.button("🗑️", key=f"delete_{provider}", help=f"Delete {provider} from system"):
+                                            # Initialize session state if needed
+                                            if 'logo_overrides' not in st.session_state:
+                                                st.session_state.logo_overrides = load_logo_overrides(client)
+                                            if 'deleted_providers' not in st.session_state:
+                                                st.session_state.deleted_providers = load_deleted_providers(client)
 
-                                        # Add to deleted list
-                                        if provider not in st.session_state.deleted_providers:
-                                            st.session_state.deleted_providers.append(provider)
-                                            save_deleted_providers(client, st.session_state.deleted_providers)
+                                            # Add to deleted list
+                                            if provider not in st.session_state.deleted_providers:
+                                                st.session_state.deleted_providers.append(provider)
+                                                save_deleted_providers(client, st.session_state.deleted_providers)
 
-                                        # Also remove any override if it exists
-                                        if provider in st.session_state.logo_overrides:
-                                            del st.session_state.logo_overrides[provider]
+                                            # Also remove any override if it exists
+                                            if provider in st.session_state.logo_overrides:
+                                                del st.session_state.logo_overrides[provider]
+                                                save_logo_overrides(client, st.session_state.logo_overrides)
+
+                                            st.toast(f"✅ Deleted {provider}")
+                                            st.rerun()
+
+                                # Edit mode
+                                if st.session_state.get(f"editing_{provider}", False):
+                                    st.markdown(f"**Edit logo URL for: {provider}**")
+                                    new_url = st.text_input(
+                                        "Logo URL",
+                                        value=logo_url or "",
+                                        key=f"url_{provider}",
+                                        placeholder="https://images.justwatch.com/icon/..."
+                                    )
+
+                                    col_save, col_cancel = st.columns(2)
+                                    with col_save:
+                                        if st.button("💾 Save", key=f"save_{provider}"):
+                                            # Initialize logo_overrides if it doesn't exist
+                                            if 'logo_overrides' not in st.session_state:
+                                                st.session_state.logo_overrides = load_logo_overrides(client)
+
+                                            # Store the new URL in session state and persist to file
+                                            st.session_state.logo_overrides[provider] = new_url
                                             save_logo_overrides(client, st.session_state.logo_overrides)
 
-                                        st.toast(f"✅ Deleted {provider}")
-                                        st.rerun()
+                                            st.session_state[f"editing_{provider}"] = False
+                                            st.success(f"✅ Logo URL updated for {provider} and saved to {LOGO_OVERRIDES_FILE}!")
+                                            st.rerun()
 
-                            # Edit mode
-                            if st.session_state.get(f"editing_{provider}", False):
-                                st.markdown(f"**Edit logo URL for: {provider}**")
-                                new_url = st.text_input(
-                                    "Logo URL",
-                                    value=logo_url or "",
-                                    key=f"url_{provider}",
-                                    placeholder="https://images.justwatch.com/icon/..."
-                                )
+                                    with col_cancel:
+                                        if st.button("❌ Cancel", key=f"cancel_{provider}"):
+                                            st.session_state[f"editing_{provider}"] = False
+                                            st.rerun()
 
-                                col_save, col_cancel = st.columns(2)
-                                with col_save:
-                                    if st.button("💾 Save", key=f"save_{provider}"):
-                                        # Initialize logo_overrides if it doesn't exist
-                                        if 'logo_overrides' not in st.session_state:
-                                            st.session_state.logo_overrides = load_logo_overrides(client)
+                                    st.write("---")
 
-                                        # Store the new URL in session state and persist to file
-                                        st.session_state.logo_overrides[provider] = new_url
-                                        save_logo_overrides(client, st.session_state.logo_overrides)
+                st.write("---")
+                st.markdown("**⏰ Scheduled Tasks**")
+                st.caption("Test automated email reminders and weekly previews")
 
-                                        st.session_state[f"editing_{provider}"] = False
-                                        st.success(f"✅ Logo URL updated for {provider} and saved to {LOGO_OVERRIDES_FILE}!")
-                                        st.rerun()
+                # Show scheduled jobs
+                if scheduler:
+                    jobs = scheduler.get_jobs()
+                    if jobs:
+                        st.info(f"✅ {len(jobs)} scheduled jobs running")
+                        for job in jobs:
+                            st.caption(f"• {job.name} - Next run: {job.next_run_time.strftime('%Y-%m-%d %I:%M %p') if job.next_run_time else 'N/A'}")
+                    else:
+                        st.warning("No scheduled jobs found")
 
-                                with col_cancel:
-                                    if st.button("❌ Cancel", key=f"cancel_{provider}"):
-                                        st.session_state[f"editing_{provider}"] = False
-                                        st.rerun()
+                # Test buttons
+                col_test1, col_test2 = st.columns(2)
 
-                                st.write("---")
+                with col_test1:
+                    if st.button("📧 Test Daily Reminders", use_container_width=True, help="Manually trigger daily reminders now"):
+                        with st.spinner("Sending daily reminders..."):
+                            try:
+                                scheduler.test_daily_reminders_now()
+                                st.success("✅ Daily reminders triggered! Check your email and in-app notifications.")
+                            except Exception as e:
+                                st.error(f"❌ Error: {e}")
 
-            st.write("---")
-            st.markdown("**⏰ Scheduled Tasks**")
-            st.caption("Test automated email reminders and weekly previews")
+                with col_test2:
+                    if st.button("📅 Test Weekly Preview", use_container_width=True, help="Manually trigger weekly preview now"):
+                        with st.spinner("Sending weekly previews..."):
+                            try:
+                                scheduler.test_weekly_preview_now()
+                                st.success("✅ Weekly preview triggered! Check your email and in-app notifications.")
+                            except Exception as e:
+                                st.error(f"❌ Error: {e}")
 
-            # Show scheduled jobs
-            if scheduler:
-                jobs = scheduler.get_jobs()
-                if jobs:
-                    st.info(f"✅ {len(jobs)} scheduled jobs running")
-                    for job in jobs:
-                        st.caption(f"• {job.name} - Next run: {job.next_run_time.strftime('%Y-%m-%d %I:%M %p') if job.next_run_time else 'N/A'}")
-                else:
-                    st.warning("No scheduled jobs found")
+                st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
+                st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
 
-            # Test buttons
-            col_test1, col_test2 = st.columns(2)
+                st.write("---")
+                st.markdown("**📊 Show Status Tracking**")
+                st.caption("Check show status from TMDB (Returning Series, Ended, Canceled)")
 
-            with col_test1:
-                if st.button("📧 Test Daily Reminders", use_container_width=True, help="Manually trigger daily reminders now"):
-                    with st.spinner("Sending daily reminders..."):
+                if st.button("🔍 Check All Show Statuses", use_container_width=True, help="Check TMDB for status updates on all your shows"):
+                    with st.spinner("Checking show statuses from TMDB..."):
                         try:
-                            scheduler.test_daily_reminders_now()
-                            st.success("✅ Daily reminders triggered! Check your email and in-app notifications.")
+                            user_id = get_user_id()
+                            stats = show_status.check_all_shows_status(client, user_id)
+
+                            st.success(f"✅ Status check complete!")
+                            st.caption(f"📊 Total shows: {stats['total']}")
+                            st.caption(f"🔄 Updated: {stats['updated']}")
+                            st.caption(f"✓ Unchanged: {stats['unchanged']}")
+                            if stats['errors'] > 0:
+                                st.caption(f"⚠️ Errors: {stats['errors']}")
+
+                            if stats['updated'] > 0:
+                                st.info("📬 Check your notifications for any status changes!")
                         except Exception as e:
                             st.error(f"❌ Error: {e}")
 
-            with col_test2:
-                if st.button("📅 Test Weekly Preview", use_container_width=True, help="Manually trigger weekly preview now"):
-                    with st.spinner("Sending weekly previews..."):
-                        try:
-                            scheduler.test_weekly_preview_now()
-                            st.success("✅ Weekly preview triggered! Check your email and in-app notifications.")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
-
-            st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
-            st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
-
-            st.write("---")
-            st.markdown("**📊 Show Status Tracking**")
-            st.caption("Check show status from TMDB (Returning Series, Ended, Canceled)")
-
-            if st.button("🔍 Check All Show Statuses", use_container_width=True, help="Check TMDB for status updates on all your shows"):
-                with st.spinner("Checking show statuses from TMDB..."):
-                    try:
-                        user_id = get_user_id()
-                        stats = show_status.check_all_shows_status(client, user_id)
-
-                        st.success(f"✅ Status check complete!")
-                        st.caption(f"📊 Total shows: {stats['total']}")
-                        st.caption(f"🔄 Updated: {stats['updated']}")
-                        st.caption(f"✓ Unchanged: {stats['unchanged']}")
-                        if stats['errors'] > 0:
-                            st.caption(f"⚠️ Errors: {stats['errors']}")
-
-                        if stats['updated'] > 0:
-                            st.info("📬 Check your notifications for any status changes!")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-
-            st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
+                st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
 
         with tab4:
             st.markdown("**🔔 Customize Your Notifications**")

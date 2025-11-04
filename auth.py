@@ -1,10 +1,13 @@
 """
 Authentication module for StreamGenie
-Handles user signup, login, logout, and session management
+Handles user signup, login, logout, session management, and user roles
 """
 import streamlit as st
 from supabase import Client
 from typing import Optional, Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def init_auth_session():
@@ -187,3 +190,151 @@ def render_user_menu(client: Client):
         if st.button("🚪 Logout", use_container_width=True):
             logout_user(client)
             st.rerun()
+
+
+# ========================================
+# Role-Based Access Control Functions
+# ========================================
+
+def get_user_role(client: Client, user_id: str) -> str:
+    """
+    Get the role for a user
+
+    Args:
+        client: Supabase client
+        user_id: User ID
+
+    Returns:
+        User role string ('user', 'admin') or 'user' if error
+    """
+    try:
+        result = client.table("users")\
+            .select("user_role")\
+            .eq("id", user_id)\
+            .execute()
+
+        if result.data and len(result.data) > 0:
+            return result.data[0].get("user_role", "user")
+
+        # Default to 'user' if no role found
+        return "user"
+
+    except Exception as e:
+        logger.error(f"Error getting user role: {e}")
+        return "user"  # Fail safely to regular user
+
+
+def is_admin(client: Client, user_id: str) -> bool:
+    """
+    Check if user is an admin
+
+    Args:
+        client: Supabase client
+        user_id: User ID
+
+    Returns:
+        True if user is admin, False otherwise
+    """
+    role = get_user_role(client, user_id)
+    return role == "admin"
+
+
+def require_admin(client: Client, user_id: str) -> bool:
+    """
+    Check if user is admin, raise exception if not
+
+    Args:
+        client: Supabase client
+        user_id: User ID
+
+    Returns:
+        True if admin
+
+    Raises:
+        PermissionError if user is not admin
+    """
+    if not is_admin(client, user_id):
+        raise PermissionError("Admin access required")
+    return True
+
+
+def set_user_role(client: Client, user_id: str, role: str) -> bool:
+    """
+    Set the role for a user (admin only)
+
+    Args:
+        client: Supabase client
+        user_id: User ID to update
+        role: New role ('user', 'admin')
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Validate role
+        if role not in ["user", "admin"]:
+            logger.error(f"Invalid role: {role}")
+            return False
+
+        # Update role
+        client.table("users")\
+            .update({"user_role": role})\
+            .eq("id", user_id)\
+            .execute()
+
+        logger.info(f"Updated user {user_id} role to {role}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error setting user role: {e}")
+        return False
+
+
+def get_user_email_by_id(client: Client, user_id: str) -> Optional[str]:
+    """
+    Get email for a user
+
+    Args:
+        client: Supabase client
+        user_id: User ID
+
+    Returns:
+        User email or None if not found
+    """
+    try:
+        result = client.table("users")\
+            .select("email")\
+            .eq("id", user_id)\
+            .execute()
+
+        if result.data and len(result.data) > 0:
+            return result.data[0].get("email")
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting user email: {e}")
+        return None
+
+
+def list_admins(client: Client) -> list:
+    """
+    Get list of all admin users
+
+    Args:
+        client: Supabase client
+
+    Returns:
+        List of admin user dictionaries with id, email, user_role
+    """
+    try:
+        result = client.table("users")\
+            .select("id, email, user_role")\
+            .eq("user_role", "admin")\
+            .execute()
+
+        return result.data if result.data else []
+
+    except Exception as e:
+        logger.error(f"Error listing admins: {e}")
+        return []
