@@ -332,12 +332,12 @@ def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List
 # --------------- PROMOTIONAL CONTENT ---------------
 def get_new_shows(region: str = "US", limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Get TV shows that premiered in the last 30 days.
+    Get TV shows that premiered in the last 90 days.
     Returns shows with air dates and available on streaming in the region.
     """
     try:
         today = dt.date.today()
-        thirty_days_ago = today - dt.timedelta(days=30)
+        thirty_days_ago = today - dt.timedelta(days=90)
 
         # Use TMDB discover to find recently premiered shows
         params = {
@@ -1606,8 +1606,8 @@ if q:
 st.write("---")
 
 # Collapsible promotional sections
-with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
-    st.caption("Shows that premiered in the last 30 days")
+with st.expander("🆕 New Recently - Just Premiered!", expanded=False):
+    st.caption("Shows that premiered in the last 90 days")
     new_shows = get_new_shows(region, limit=6)
 
     if new_shows:
@@ -1627,7 +1627,7 @@ with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
                 if overview:
                     st.caption(overview + "...")
     else:
-        st.info("No new shows in the last 30 days")
+        st.info("No new shows in the last 90 days")
 
 with st.expander("📅 Coming Soon - Announced Air Dates!", expanded=False):
     st.caption("Shows with confirmed air dates in the next 180 days")
