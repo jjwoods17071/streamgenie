@@ -819,131 +819,140 @@ if show_settings:
                                     st.write("---")
 
                 st.write("---")
-                st.markdown("**⏰ Scheduled Tasks**")
-                st.caption("Test automated email reminders and weekly previews")
 
-                # Show scheduled jobs
-                if scheduler:
-                    jobs = scheduler.get_jobs()
-                    if jobs:
-                        st.info(f"✅ {len(jobs)} scheduled jobs running")
-                        for job in jobs:
-                            st.caption(f"• {job.name} - Next run: {job.next_run_time.strftime('%Y-%m-%d %I:%M %p') if job.next_run_time else 'N/A'}")
+                # Scheduled Tasks Section with border
+                with st.container(border=True):
+                    st.markdown("**⏰ Scheduled Tasks**")
+                    st.caption("Test automated email reminders and weekly previews")
+
+                    # Show scheduled jobs
+                    if scheduler:
+                        jobs = scheduler.get_jobs()
+                        if jobs:
+                            st.info(f"✅ {len(jobs)} scheduled jobs running")
+                            for job in jobs:
+                                st.caption(f"• {job.name} - Next run: {job.next_run_time.strftime('%Y-%m-%d %I:%M %p') if job.next_run_time else 'N/A'}")
+                        else:
+                            st.warning("No scheduled jobs found")
+
+                    # Test buttons
+                    col_test1, col_test2 = st.columns(2)
+
+                    with col_test1:
+                        if st.button("📧 Test Daily Reminders", use_container_width=True, help="Manually trigger daily reminders now"):
+                            with st.spinner("Sending daily reminders..."):
+                                try:
+                                    scheduler.test_daily_reminders_now()
+                                    st.success("✅ Daily reminders triggered! Check your email and in-app notifications.")
+                                except Exception as e:
+                                    st.error(f"❌ Error: {e}")
+
+                    with col_test2:
+                        if st.button("📅 Test Weekly Preview", use_container_width=True, help="Manually trigger weekly preview now"):
+                            with st.spinner("Sending weekly previews..."):
+                                try:
+                                    scheduler.test_weekly_preview_now()
+                                    st.success("✅ Weekly preview triggered! Check your email and in-app notifications.")
+                                except Exception as e:
+                                    st.error(f"❌ Error: {e}")
+
+                    st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
+                    st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
+
+                st.write("---")
+
+                # Show Status Tracking Section with border
+                with st.container(border=True):
+                    st.markdown("**📊 Show Status Tracking**")
+                    st.caption("Check show status from TMDB (Returning Series, Ended, Canceled)")
+
+                    if st.button("🔍 Check All Show Statuses", use_container_width=True, help="Check TMDB for status updates on all your shows"):
+                        with st.spinner("Checking show statuses from TMDB..."):
+                            try:
+                                user_id = get_user_id()
+                                stats = show_status.check_all_shows_status(client, user_id)
+
+                                st.success(f"✅ Status check complete!")
+                                st.caption(f"📊 Total shows: {stats['total']}")
+                                st.caption(f"🔄 Updated: {stats['updated']}")
+                                st.caption(f"✓ Unchanged: {stats['unchanged']}")
+                                if stats['errors'] > 0:
+                                    st.caption(f"⚠️ Errors: {stats['errors']}")
+
+                                if stats['updated'] > 0:
+                                    st.info("📬 Check your notifications for any status changes!")
+                            except Exception as e:
+                                st.error(f"❌ Error: {e}")
+
+                    st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
+
+                st.write("---")
+
+                # User Management Section with border
+                with st.container(border=True):
+                    st.markdown("**👥 User Management**")
+                    st.caption("Manage user roles and permissions")
+
+                    # Get current admin user ID
+                    admin_user_id = get_user_id()
+
+                    # Get all users
+                    all_users = auth.list_all_users(client)
+
+                    if not all_users:
+                        st.info("No users found in the system")
                     else:
-                        st.warning("No scheduled jobs found")
+                        # Count by role
+                        admin_count = sum(1 for u in all_users if u.get('user_role') == 'admin')
+                        user_count = sum(1 for u in all_users if u.get('user_role') == 'user')
 
-                # Test buttons
-                col_test1, col_test2 = st.columns(2)
+                        st.caption(f"📊 Total users: {len(all_users)} | 👑 Admins: {admin_count} | 👤 Users: {user_count}")
 
-                with col_test1:
-                    if st.button("📧 Test Daily Reminders", use_container_width=True, help="Manually trigger daily reminders now"):
-                        with st.spinner("Sending daily reminders..."):
-                            try:
-                                scheduler.test_daily_reminders_now()
-                                st.success("✅ Daily reminders triggered! Check your email and in-app notifications.")
-                            except Exception as e:
-                                st.error(f"❌ Error: {e}")
+                        st.write("")
 
-                with col_test2:
-                    if st.button("📅 Test Weekly Preview", use_container_width=True, help="Manually trigger weekly preview now"):
-                        with st.spinner("Sending weekly previews..."):
-                            try:
-                                scheduler.test_weekly_preview_now()
-                                st.success("✅ Weekly preview triggered! Check your email and in-app notifications.")
-                            except Exception as e:
-                                st.error(f"❌ Error: {e}")
+                        # Display users in a table-like format
+                        for user in all_users:
+                            user_id = user.get('id')
+                            email = user.get('email', 'Unknown')
+                            role = user.get('user_role', 'user')
+                            is_current_user = (user_id == admin_user_id)
 
-                st.caption("⏰ Daily reminders run automatically at 8:00 AM EST")
-                st.caption("📅 Weekly previews run automatically on Sundays at 6:00 PM EST")
+                            with st.container(border=True):
+                                col1, col2, col3 = st.columns([3, 1, 1])
 
-                st.write("---")
-                st.markdown("**📊 Show Status Tracking**")
-                st.caption("Check show status from TMDB (Returning Series, Ended, Canceled)")
+                                with col1:
+                                    # Show email and role
+                                    role_emoji = "👑" if role == "admin" else "👤"
+                                    current_badge = " **(You)**" if is_current_user else ""
+                                    st.markdown(f"{role_emoji} **{email}**{current_badge}")
+                                    st.caption(f"Role: {role.capitalize()}")
 
-                if st.button("🔍 Check All Show Statuses", use_container_width=True, help="Check TMDB for status updates on all your shows"):
-                    with st.spinner("Checking show statuses from TMDB..."):
-                        try:
-                            user_id = get_user_id()
-                            stats = show_status.check_all_shows_status(client, user_id)
+                                with col2:
+                                    # Promote button (only for regular users)
+                                    if role == "user":
+                                        if st.button("⬆️ Make Admin", key=f"promote_{user_id}", use_container_width=True):
+                                            success, message = auth.promote_to_admin(client, user_id, admin_user_id)
+                                            if success:
+                                                st.success(message)
+                                                st.rerun()
+                                            else:
+                                                st.error(message)
 
-                            st.success(f"✅ Status check complete!")
-                            st.caption(f"📊 Total shows: {stats['total']}")
-                            st.caption(f"🔄 Updated: {stats['updated']}")
-                            st.caption(f"✓ Unchanged: {stats['unchanged']}")
-                            if stats['errors'] > 0:
-                                st.caption(f"⚠️ Errors: {stats['errors']}")
+                                with col3:
+                                    # Demote button (only for admins, not yourself)
+                                    if role == "admin" and not is_current_user:
+                                        if st.button("⬇️ Remove Admin", key=f"demote_{user_id}", use_container_width=True):
+                                            success, message = auth.demote_to_user(client, user_id, admin_user_id)
+                                            if success:
+                                                st.success(message)
+                                                st.rerun()
+                                            else:
+                                                st.error(message)
+                                    elif is_current_user and role == "admin":
+                                        st.caption("_(Cannot demote yourself)_")
 
-                            if stats['updated'] > 0:
-                                st.info("📬 Check your notifications for any status changes!")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
-
-                st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
-
-                st.write("---")
-                st.markdown("**👥 User Management**")
-                st.caption("Manage user roles and permissions")
-
-                # Get current admin user ID
-                admin_user_id = get_user_id()
-
-                # Get all users
-                all_users = auth.list_all_users(client)
-
-                if not all_users:
-                    st.info("No users found in the system")
-                else:
-                    # Count by role
-                    admin_count = sum(1 for u in all_users if u.get('user_role') == 'admin')
-                    user_count = sum(1 for u in all_users if u.get('user_role') == 'user')
-
-                    st.caption(f"📊 Total users: {len(all_users)} | 👑 Admins: {admin_count} | 👤 Users: {user_count}")
-
-                    st.write("")
-
-                    # Display users in a table-like format
-                    for user in all_users:
-                        user_id = user.get('id')
-                        email = user.get('email', 'Unknown')
-                        role = user.get('user_role', 'user')
-                        is_current_user = (user_id == admin_user_id)
-
-                        with st.container(border=True):
-                            col1, col2, col3 = st.columns([3, 1, 1])
-
-                            with col1:
-                                # Show email and role
-                                role_emoji = "👑" if role == "admin" else "👤"
-                                current_badge = " **(You)**" if is_current_user else ""
-                                st.markdown(f"{role_emoji} **{email}**{current_badge}")
-                                st.caption(f"Role: {role.capitalize()}")
-
-                            with col2:
-                                # Promote button (only for regular users)
-                                if role == "user":
-                                    if st.button("⬆️ Make Admin", key=f"promote_{user_id}", use_container_width=True):
-                                        success, message = auth.promote_to_admin(client, user_id, admin_user_id)
-                                        if success:
-                                            st.success(message)
-                                            st.rerun()
-                                        else:
-                                            st.error(message)
-
-                            with col3:
-                                # Demote button (only for admins, not yourself)
-                                if role == "admin" and not is_current_user:
-                                    if st.button("⬇️ Remove Admin", key=f"demote_{user_id}", use_container_width=True):
-                                        success, message = auth.demote_to_user(client, user_id, admin_user_id)
-                                        if success:
-                                            st.success(message)
-                                            st.rerun()
-                                        else:
-                                            st.error(message)
-                                elif is_current_user and role == "admin":
-                                    st.caption("_(Cannot demote yourself)_")
-
-                    st.write("")
-                    st.info("💡 **Tip:** At least one admin must exist at all times. You cannot demote yourself or the last remaining admin.")
+                        st.write("")
+                        st.info("💡 **Tip:** At least one admin must exist at all times. You cannot demote yourself or the last remaining admin.")
 
         with tab4:
             st.markdown("**🔔 Customize Your Notifications**")
