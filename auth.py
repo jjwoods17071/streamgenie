@@ -338,3 +338,107 @@ def list_admins(client: Client) -> list:
     except Exception as e:
         logger.error(f"Error listing admins: {e}")
         return []
+
+
+def list_all_users(client: Client) -> list:
+    """
+    Get list of all users
+
+    Args:
+        client: Supabase client
+
+    Returns:
+        List of user dictionaries with id, email, user_role, created_at
+    """
+    try:
+        result = client.table("users")\
+            .select("id, email, user_role, created_at")\
+            .order("created_at", desc=True)\
+            .execute()
+
+        return result.data if result.data else []
+
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        return []
+
+
+def promote_to_admin(client: Client, user_id: str, admin_user_id: str) -> tuple[bool, str]:
+    """
+    Promote a user to admin role (admin only)
+
+    Args:
+        client: Supabase client
+        user_id: User ID to promote
+        admin_user_id: ID of admin performing the action
+
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        # Check if requester is admin
+        if not is_admin(client, admin_user_id):
+            return False, "Only admins can promote users"
+
+        # Get user email for logging
+        user_email = get_user_email_by_id(client, user_id)
+        if not user_email:
+            return False, "User not found"
+
+        # Update role
+        success = set_user_role(client, user_id, "admin")
+
+        if success:
+            logger.info(f"Admin {admin_user_id} promoted {user_email} to admin")
+            return True, f"Successfully promoted {user_email} to admin"
+        else:
+            return False, "Failed to update user role"
+
+    except Exception as e:
+        logger.error(f"Error promoting user to admin: {e}")
+        return False, f"Error: {e}"
+
+
+def demote_to_user(client: Client, user_id: str, admin_user_id: str) -> tuple[bool, str]:
+    """
+    Demote an admin to regular user role (admin only)
+
+    Args:
+        client: Supabase client
+        user_id: User ID to demote
+        admin_user_id: ID of admin performing the action
+
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        # Check if requester is admin
+        if not is_admin(client, admin_user_id):
+            return False, "Only admins can demote users"
+
+        # Prevent self-demotion
+        if user_id == admin_user_id:
+            return False, "You cannot demote yourself"
+
+        # Check if this would leave no admins
+        admins = list_admins(client)
+        if len(admins) <= 1:
+            return False, "Cannot demote the last admin. Promote another user first."
+
+        # Get user email for logging
+        user_email = get_user_email_by_id(client, user_id)
+        if not user_email:
+            return False, "User not found"
+
+        # Update role
+        success = set_user_role(client, user_id, "user")
+
+        if success:
+            logger.info(f"Admin {admin_user_id} demoted {user_email} to regular user")
+            return True, f"Successfully demoted {user_email} to regular user"
+        else:
+            return False, "Failed to update user role"
+
+    except Exception as e:
+        logger.error(f"Error demoting admin to user: {e}")
+        return False, f"Error: {e}"

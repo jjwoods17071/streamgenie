@@ -880,6 +880,71 @@ if show_settings:
 
                 st.caption("💡 Show statuses are automatically checked when you add a show to your watchlist")
 
+                st.write("---")
+                st.markdown("**👥 User Management**")
+                st.caption("Manage user roles and permissions")
+
+                # Get current admin user ID
+                admin_user_id = get_user_id()
+
+                # Get all users
+                all_users = auth.list_all_users(client)
+
+                if not all_users:
+                    st.info("No users found in the system")
+                else:
+                    # Count by role
+                    admin_count = sum(1 for u in all_users if u.get('user_role') == 'admin')
+                    user_count = sum(1 for u in all_users if u.get('user_role') == 'user')
+
+                    st.caption(f"📊 Total users: {len(all_users)} | 👑 Admins: {admin_count} | 👤 Users: {user_count}")
+
+                    st.write("")
+
+                    # Display users in a table-like format
+                    for user in all_users:
+                        user_id = user.get('id')
+                        email = user.get('email', 'Unknown')
+                        role = user.get('user_role', 'user')
+                        is_current_user = (user_id == admin_user_id)
+
+                        with st.container(border=True):
+                            col1, col2, col3 = st.columns([3, 1, 1])
+
+                            with col1:
+                                # Show email and role
+                                role_emoji = "👑" if role == "admin" else "👤"
+                                current_badge = " **(You)**" if is_current_user else ""
+                                st.markdown(f"{role_emoji} **{email}**{current_badge}")
+                                st.caption(f"Role: {role.capitalize()}")
+
+                            with col2:
+                                # Promote button (only for regular users)
+                                if role == "user":
+                                    if st.button("⬆️ Make Admin", key=f"promote_{user_id}", use_container_width=True):
+                                        success, message = auth.promote_to_admin(client, user_id, admin_user_id)
+                                        if success:
+                                            st.success(message)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
+
+                            with col3:
+                                # Demote button (only for admins, not yourself)
+                                if role == "admin" and not is_current_user:
+                                    if st.button("⬇️ Remove Admin", key=f"demote_{user_id}", use_container_width=True):
+                                        success, message = auth.demote_to_user(client, user_id, admin_user_id)
+                                        if success:
+                                            st.success(message)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
+                                elif is_current_user and role == "admin":
+                                    st.caption("_(Cannot demote yourself)_")
+
+                    st.write("")
+                    st.info("💡 **Tip:** At least one admin must exist at all times. You cannot demote yourself or the last remaining admin.")
+
         with tab4:
             st.markdown("**🔔 Customize Your Notifications**")
             st.caption("Choose which notifications you want to receive via email and in-app")
