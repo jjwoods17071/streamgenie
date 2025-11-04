@@ -761,20 +761,6 @@ st.markdown("""
     <div class="hero-content">
         <div class="hero-title">🎬 StreamGenie</div>
         <div class="hero-subtitle">Your personal TV show tracker • Never miss an episode again</div>
-        <div class="hero-stats">
-            <div class="stat-item">
-                <div class="stat-number">📺</div>
-                <div class="stat-label">Track Shows</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-number">🔔</div>
-                <div class="stat-label">Get Alerts</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-number">🌍</div>
-                <div class="stat-label">All Regions</div>
-            </div>
-        </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
