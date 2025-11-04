@@ -1421,26 +1421,17 @@ if q:
                             st.warning(f"⚠️ Not available in {region}")
                             st.caption("You can still track it for future availability:")
 
-                        # Show top streaming services as logo buttons
+                        # Show top streaming services as buttons
                         top_services = ["Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+"]
 
-                        for i in range(0, len(top_services), 4):
-                            logo_cols = st.columns(4)
+                        for i in range(0, len(top_services), 3):
+                            logo_cols = st.columns(3)
                             for j, col in enumerate(logo_cols):
                                 if i + j < len(top_services):
                                     provider = top_services[i + j]
                                     with col:
-                                        logo_url = get_provider_logo_url(provider)
-
-                                        # Create clickable logo/button
-                                        if logo_url:
-                                            st.image(logo_url, width=80)
-                                            clicked = st.button("Add", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
-                                        else:
-                                            st.write(f"**{provider}**")
-                                            clicked = st.button("Add", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True)
-
-                                        if clicked:
+                                        # Show provider name with Add button
+                                        if st.button(f"➕ {provider}", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True, type="secondary"):
                                             try:
                                                 upsert_show(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider)
                                                 st.success(f"{ICONS['check']} Added '{title}' to watchlist for {provider}!")
