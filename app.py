@@ -1671,37 +1671,53 @@ if q:
 # Promotional Sections - Between search and watchlist
 st.write("---")
 
-# Collapsible promotional sections
+# Collapsible promotional sections with watchlist-style layout
 with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=False):
     st.caption("Shows that premiered in the last 30 days")
     new_shows = get_new_shows(region, limit=3)
 
     if new_shows:
-        cols = st.columns(3)
-        for idx, show in enumerate(new_shows):
-            with cols[idx % 3]:
-                poster_path = show.get("poster_path")
-                title = show.get("name", "Unknown")
-                tmdb_id = show.get("id")
-                first_air = show.get("first_air_date", "")
-                overview = show.get("overview", "")
+        for show in new_shows:
+            poster_path = show.get("poster_path")
+            title = show.get("name", "Unknown")
+            tmdb_id = show.get("id")
+            first_air = show.get("first_air_date", "")
+            overview = show.get("overview", "")
+            vote_average = show.get("vote_average", 0)
 
+            # Use same column layout as watchlist: Poster | Title+Info | Date | Actions
+            cols = st.columns([1, 4, 3, 2])
+
+            # Poster
+            with cols[0]:
                 if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
-                st.markdown(f"**{title}**")
-                if first_air:
-                    st.caption(f"{ICONS['calendar']} Premiered: {first_air}")
-                if overview:
-                    st.caption(overview[:100] + "...")
+                    st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", use_column_width=True)
+                else:
+                    st.write(ICONS["tv"])
 
-                # Add to watchlist button
-                if st.button(f"{ICONS['add']} Add to Watchlist", key=f"new_show_{tmdb_id}", use_container_width=True, type="primary"):
+            # Title and info
+            with cols[1]:
+                st.markdown(f"**{title}**")
+                if vote_average:
+                    st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
+                if overview:
+                    st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+
+            # Date
+            with cols[2]:
+                if first_air:
+                    st.markdown(f"**{first_air}**")
+                    st.caption(f"{ICONS['calendar']} Premiered")
+
+            # Add button
+            with cols[3]:
+                if st.button(f"{ICONS['add']}", key=f"new_show_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
                         upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
-                        st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
+                        st.success(f"Added!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to add: {e}")
+                        st.error(f"Error")
     else:
         st.info("No new shows in the last 30 days")
 
@@ -1710,32 +1726,48 @@ with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", 
     trending_shows = get_trending_shows(limit=3)
 
     if trending_shows:
-        cols = st.columns(3)
-        for idx, show in enumerate(trending_shows):
-            with cols[idx % 3]:
-                poster_path = show.get("poster_path")
-                title = show.get("name", "Unknown")
-                tmdb_id = show.get("id")
-                vote_average = show.get("vote_average", 0)
-                first_air = show.get("first_air_date", "")
-                overview = show.get("overview", "")
+        for show in trending_shows:
+            poster_path = show.get("poster_path")
+            title = show.get("name", "Unknown")
+            tmdb_id = show.get("id")
+            vote_average = show.get("vote_average", 0)
+            first_air = show.get("first_air_date", "")
+            overview = show.get("overview", "")
 
+            # Use same column layout as watchlist: Poster | Title+Info | Date | Actions
+            cols = st.columns([1, 4, 3, 2])
+
+            # Poster
+            with cols[0]:
                 if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                    st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", use_column_width=True)
+                else:
+                    st.write(ICONS["tv"])
+
+            # Title and info
+            with cols[1]:
                 st.markdown(f"**{title}**")
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
-                    st.caption(overview[:100] + "...")
+                    st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
 
-                # Add to watchlist button
-                if st.button(f"{ICONS['add']} Add to Watchlist", key=f"trending_{tmdb_id}", use_container_width=True, type="primary"):
+            # Date/status
+            with cols[2]:
+                if first_air:
+                    year = first_air[:4]
+                    st.markdown(f"**{year}**")
+                st.caption(f"{ICONS['trending']} Trending")
+
+            # Add button
+            with cols[3]:
+                if st.button(f"{ICONS['add']}", key=f"trending_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
                         upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
-                        st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
+                        st.success(f"Added!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to add: {e}")
+                        st.error(f"Error")
     else:
         st.info("No trending shows available")
 
@@ -1744,35 +1776,48 @@ with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!"
     top_rated_shows = get_top_rated_shows(limit=3)
 
     if top_rated_shows:
-        cols = st.columns(3)
-        for idx, show in enumerate(top_rated_shows):
-            with cols[idx % 3]:
-                poster_path = show.get("poster_path")
-                title = show.get("name", "Unknown")
-                tmdb_id = show.get("id")
-                vote_average = show.get("vote_average", 0)
-                first_air = show.get("first_air_date", "")
-                overview = show.get("overview", "")
+        for show in top_rated_shows:
+            poster_path = show.get("poster_path")
+            title = show.get("name", "Unknown")
+            tmdb_id = show.get("id")
+            vote_average = show.get("vote_average", 0)
+            first_air = show.get("first_air_date", "")
+            overview = show.get("overview", "")
 
+            # Use same column layout as watchlist: Poster | Title+Info | Date | Actions
+            cols = st.columns([1, 4, 3, 2])
+
+            # Poster
+            with cols[0]:
                 if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
+                    st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", use_column_width=True)
+                else:
+                    st.write(ICONS["tv"])
+
+            # Title and info
+            with cols[1]:
                 st.markdown(f"**{title}**")
-                rating_caption = f"{ICONS['star']} {vote_average:.1f}/10"
+                if vote_average:
+                    st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
+                if overview:
+                    st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+
+            # Date/year
+            with cols[2]:
                 if first_air:
                     year = first_air[:4]
-                    rating_caption += f" • {year}"
-                st.caption(rating_caption)
-                if overview:
-                    st.caption(overview[:100] + "...")
+                    st.markdown(f"**{year}**")
+                st.caption(f"{ICONS['rated']} Top Rated")
 
-                # Add to watchlist button
-                if st.button(f"{ICONS['add']} Add to Watchlist", key=f"toprated_{tmdb_id}", use_container_width=True, type="primary"):
+            # Add button
+            with cols[3]:
+                if st.button(f"{ICONS['add']}", key=f"toprated_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
                         upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
-                        st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
+                        st.success(f"Added!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to add: {e}")
+                        st.error(f"Error")
     else:
         st.info("No top rated shows available")
 
