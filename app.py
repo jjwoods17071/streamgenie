@@ -107,6 +107,15 @@ ICONS = {
     "key": ":material/key:",
     "visibility": ":material/visibility:",
     "visibility_of": ":material/visibility_off:",
+
+    # Promotional & Content Discovery
+    "new": ":material/fiber_new:",
+    "hot": ":material/whatshot:",
+    "fire": ":material/local_fire_department:",
+    "rated": ":material/grade:",
+    "home": ":material/home:",
+    "filter": ":material/filter_list:",
+    "arrow_forward": ":material/arrow_forward:",
 }
 
 # Popular streaming providers supported by TMDB
@@ -1403,9 +1412,9 @@ else:
 # Vertical layout: Search on top, watchlist below
 search_header = st.columns([8, 1])
 with search_header[0]:
-    st.subheader("🔎 Search TV Shows")
+    st.subheader(f"{ICONS['search']} Search TV Shows")
 with search_header[1]:
-    if st.button("🏠 Reset", help="Clear search and return to top", use_container_width=True):
+    if st.button(f"{ICONS['home']} Reset", help="Clear search and return to top", use_container_width=True):
         st.session_state.clear_search = True
         st.rerun()
 
@@ -1432,42 +1441,46 @@ if q:
         st.info("No results. Try a different title.")
     else:
         # Add filters
-        with st.expander("🔍 Filter Results", expanded=False):
-            filter_cols = st.columns(2)
+        with st.expander(f"{ICONS['filter']} Filter Results", expanded=False):
+            # Mobile-friendly: Stack filters vertically instead of side-by-side
 
-            with filter_cols[0]:
-                # Genre filter
-                all_genres = set()
-                for r in results:
-                    genre_ids = r.get("genre_ids", [])
-                    all_genres.update(genre_ids)
+            # Genre filter
+            all_genres = set()
+            for r in results:
+                genre_ids = r.get("genre_ids", [])
+                all_genres.update(genre_ids)
 
-                # TMDB genre mapping
-                genre_map = {
-                    10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
-                    80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
-                    10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality",
-                    10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
-                    10768: "War & Politics", 37: "Western"
-                }
+            # TMDB genre mapping
+            genre_map = {
+                10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
+                80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
+                10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality",
+                10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
+                10768: "War & Politics", 37: "Western"
+            }
 
-                available_genres = sorted([genre_map.get(gid, f"Genre {gid}") for gid in all_genres])
-                selected_genres = st.multiselect("Genres", available_genres, default=[])
+            available_genres = sorted([genre_map.get(gid, f"Genre {gid}") for gid in all_genres])
+            selected_genres = st.multiselect(
+                "Filter by Genre",
+                available_genres,
+                default=[],
+                help="Select one or more genres to filter"
+            )
 
-            with filter_cols[1]:
-                # Year filter
-                years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
-                years = [int(y) for y in years if y.isdigit()]
+            # Year filter
+            years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
+            years = [int(y) for y in years if y.isdigit()]
 
-                if years:
-                    min_year = min(years)
-                    max_year = max(years)
-                    year_range = st.slider(
-                        "Year Range",
-                        min_value=min_year,
-                        max_value=max_year,
-                        value=(min_year, max_year)
-                    )
+            if years:
+                min_year = min(years)
+                max_year = max(years)
+                year_range = st.slider(
+                    "Filter by Year",
+                    min_value=min_year,
+                    max_value=max_year,
+                    value=(min_year, max_year),
+                    help="Adjust the range to filter by premiere year"
+                )
                 else:
                     year_range = None
 
@@ -1655,7 +1668,7 @@ if q:
 st.write("---")
 
 # Collapsible promotional sections
-with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
+with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=False):
     st.caption("Shows that premiered in the last 30 days")
     new_shows = get_new_shows(region, limit=3)
 
@@ -1673,12 +1686,12 @@ with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
                     st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
                 st.markdown(f"**{title}**")
                 if first_air:
-                    st.caption(f"📅 Premiered: {first_air}")
+                    st.caption(f"{ICONS['calendar']} Premiered: {first_air}")
                 if overview:
                     st.caption(overview[:100] + "...")
 
                 # Add to watchlist button
-                if st.button("➕ Add to Watchlist", key=f"new_show_{tmdb_id}", use_container_width=True, type="primary"):
+                if st.button(f"{ICONS['add']} Add to Watchlist", key=f"new_show_{tmdb_id}", use_container_width=True, type="primary"):
                     try:
                         upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
                         st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
@@ -1688,7 +1701,7 @@ with st.expander("🆕 New This Month - Just Premiered!", expanded=False):
     else:
         st.info("No new shows in the last 30 days")
 
-with st.expander("🔥 Trending This Week - What's Hot Right Now!", expanded=False):
+with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", expanded=False):
     st.caption("Most popular and talked-about shows this week")
     trending_shows = get_trending_shows(limit=3)
 
@@ -1707,12 +1720,12 @@ with st.expander("🔥 Trending This Week - What's Hot Right Now!", expanded=Fal
                     st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
                 st.markdown(f"**{title}**")
                 if vote_average:
-                    st.caption(f"⭐ {vote_average:.1f}/10")
+                    st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview[:100] + "...")
 
                 # Add to watchlist button
-                if st.button("➕ Add to Watchlist", key=f"trending_{tmdb_id}", use_container_width=True, type="primary"):
+                if st.button(f"{ICONS['add']} Add to Watchlist", key=f"trending_{tmdb_id}", use_container_width=True, type="primary"):
                     try:
                         upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
                         st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
@@ -1722,7 +1735,7 @@ with st.expander("🔥 Trending This Week - What's Hot Right Now!", expanded=Fal
     else:
         st.info("No trending shows available")
 
-with st.expander("⭐ Top Rated Shows - Critically Acclaimed Hits!", expanded=False):
+with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!", expanded=False):
     st.caption("All-time highest rated shows on TMDB")
     top_rated_shows = get_top_rated_shows(limit=3)
 
@@ -1740,7 +1753,7 @@ with st.expander("⭐ Top Rated Shows - Critically Acclaimed Hits!", expanded=Fa
                 if poster_path:
                     st.image(f"https://image.tmdb.org/t/p/w200{poster_path}", use_column_width=True)
                 st.markdown(f"**{title}**")
-                rating_caption = f"⭐ {vote_average:.1f}/10"
+                rating_caption = f"{ICONS['star']} {vote_average:.1f}/10"
                 if first_air:
                     year = first_air[:4]
                     rating_caption += f" • {year}"
@@ -1749,7 +1762,7 @@ with st.expander("⭐ Top Rated Shows - Critically Acclaimed Hits!", expanded=Fa
                     st.caption(overview[:100] + "...")
 
                 # Add to watchlist button
-                if st.button("➕ Add to Watchlist", key=f"toprated_{tmdb_id}", use_container_width=True, type="primary"):
+                if st.button(f"{ICONS['add']} Add to Watchlist", key=f"toprated_{tmdb_id}", use_container_width=True, type="primary"):
                     try:
                         upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
                         st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
@@ -1765,7 +1778,7 @@ st.write("---")
 # Header with icon actions and view toggle
 header_cols = st.columns([7, 1, 1, 1])
 with header_cols[0]:
-    st.subheader("📺 Your Watchlist")
+    st.subheader(f"{ICONS['tv']} Your Watchlist")
 with header_cols[1]:
     # Initialize view mode if not set
     if 'view_mode' not in st.session_state:
