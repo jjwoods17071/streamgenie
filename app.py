@@ -1481,8 +1481,8 @@ if q:
                     value=(min_year, max_year),
                     help="Adjust the range to filter by premiere year"
                 )
-                else:
-                    year_range = None
+            else:
+                year_range = None
 
         # Apply filters
         filtered_results = results
