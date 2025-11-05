@@ -16,6 +16,8 @@ def init_auth_session():
         st.session_state.user = None
     if 'auth_mode' not in st.session_state:
         st.session_state.auth_mode = 'login'  # 'login' or 'signup'
+    if 'show_forgot_password' not in st.session_state:
+        st.session_state.show_forgot_password = False
 
 
 def get_current_user() -> Optional[Dict[str, Any]]:
@@ -104,6 +106,31 @@ def login_user(client: Client, email: str, password: str) -> tuple[bool, str]:
             return False, f"Error: {error_msg}"
 
 
+def reset_password_request(client: Client, email: str) -> tuple[bool, str]:
+    """
+    Request a password reset email
+    Returns: (success: bool, message: str)
+    """
+    try:
+        # Supabase will send a password reset email to this address
+        response = client.auth.reset_password_for_email(
+            email,
+            options={
+                "redirect_to": "https://streamgenie-estero.streamlit.app"  # Redirect after reset
+            }
+        )
+
+        return True, f"Password reset email sent to {email}! Check your inbox and spam folder."
+
+    except Exception as e:
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            # Don't reveal if email exists or not for security
+            return True, f"If an account exists for {email}, a password reset email has been sent."
+        else:
+            return False, f"Error: {error_msg}"
+
+
 def logout_user(client: Client):
     """Log out the current user"""
     try:
@@ -129,26 +156,52 @@ def render_auth_ui(client: Client):
         tab1, tab2 = st.tabs(["🔑 Login", "📝 Sign Up"])
 
         with tab1:
-            st.markdown("**Log in to your account**")
-            login_email = st.text_input("Email", key="login_email", placeholder="your@email.com")
-            login_password = st.text_input("Password", type="password", key="login_password")
+            # Check if user wants to reset password
+            if st.session_state.get('show_forgot_password', False):
+                st.markdown("**Reset Your Password**")
+                st.caption("Enter your email address and we'll send you a link to reset your password.")
 
-            col_login, col_forgot = st.columns([1, 1])
-            with col_login:
-                if st.button("🔓 Log In", use_container_width=True, type="primary"):
-                    if not login_email or not login_password:
-                        st.error("Please enter both email and password")
-                    else:
-                        success, message = login_user(client, login_email, login_password)
-                        if success:
-                            st.success(message)
-                            st.rerun()
+                reset_email = st.text_input("Email", key="reset_email", placeholder="your@email.com")
+
+                col_send, col_back = st.columns([1, 1])
+                with col_send:
+                    if st.button("📧 Send Reset Link", use_container_width=True, type="primary"):
+                        if not reset_email:
+                            st.error("Please enter your email address")
                         else:
-                            st.error(message)
+                            success, message = reset_password_request(client, reset_email)
+                            if success:
+                                st.success(message)
+                            else:
+                                st.error(message)
 
-            with col_forgot:
-                if st.button("🔄 Forgot Password?", use_container_width=True):
-                    st.info("Password reset coming soon! Contact support for now.")
+                with col_back:
+                    if st.button("⬅️ Back to Login", use_container_width=True):
+                        st.session_state.show_forgot_password = False
+                        st.rerun()
+
+            else:
+                st.markdown("**Log in to your account**")
+                login_email = st.text_input("Email", key="login_email", placeholder="your@email.com")
+                login_password = st.text_input("Password", type="password", key="login_password")
+
+                col_login, col_forgot = st.columns([1, 1])
+                with col_login:
+                    if st.button("🔓 Log In", use_container_width=True, type="primary"):
+                        if not login_email or not login_password:
+                            st.error("Please enter both email and password")
+                        else:
+                            success, message = login_user(client, login_email, login_password)
+                            if success:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
+
+                with col_forgot:
+                    if st.button("🔄 Forgot Password?", use_container_width=True):
+                        st.session_state.show_forgot_password = True
+                        st.rerun()
 
         with tab2:
             st.markdown("**Create a new account**")
