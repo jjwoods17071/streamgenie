@@ -1471,7 +1471,7 @@ if q:
             years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
             years = [int(y) for y in years if y.isdigit()]
 
-            if years:
+            if years and len(set(years)) > 1:  # Only show slider if there's a range
                 min_year = min(years)
                 max_year = max(years)
                 year_range = st.slider(
@@ -1481,6 +1481,10 @@ if q:
                     value=(min_year, max_year),
                     help="Adjust the range to filter by premiere year"
                 )
+            elif years:
+                # All shows from same year
+                year_range = (min(years), max(years))
+                st.caption(f"All results from {min(years)}")
             else:
                 year_range = None
 
