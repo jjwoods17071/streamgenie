@@ -14,6 +14,7 @@ import preferences  # User notification preferences
 import show_status  # Show status tracking from TMDB
 import leaving_soon  # Admin-curated "leaving soon" list
 import watched  # Watched-episode tracking
+import discover  # Provider discovery + Netflix history import
 
 # Load environment variables
 load_dotenv()
@@ -1940,9 +1941,21 @@ with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!"
     else:
         st.info("No top rated shows available")
 
+# 🎯 Grow your watchlist — provider discovery + Netflix import
+_wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
+
+def _add_discovered(tmdb_id, title, overview, poster_path):
+    upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
+
+with st.expander("🎯 Grow your watchlist — find new shows on your services"):
+    dtab1, dtab2 = st.tabs(["🔎 New & Returning on Your Services", "📥 Import Netflix History"])
+    with dtab1:
+        discover.render_discover_section(region, _wl_ids, _add_discovered)
+    with dtab2:
+        discover.render_netflix_import(_wl_ids, _add_discovered)
+
 # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
 try:
-    _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
     leaving_soon.render_user_section(client, watchlist_tmdb_ids=_wl_ids)
 except Exception:
     pass
