@@ -1,0 +1,54 @@
+name: StreamGenie scheduled jobs
+
+# Runs the notification jobs on a schedule, independent of the Streamlit app
+# (the in-app APScheduler only runs while the app is awake on Streamlit Cloud).
+on:
+  schedule:
+    # 13:00 UTC daily ≈ 9:00am EDT / 8:00am EST. Runs daily reminders,
+    # leaving-soon alerts, status sweep; weekly preview also runs on Sundays.
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    # Manual "Run workflow" button (with a dry-run toggle for safe testing)
+    inputs:
+      job:
+        description: 'Which job to run'
+        required: false
+        default: 'all'
+        type: choice
+        options: [all, daily, leaving, status, weekly]
+      dry_run:
+        description: 'Dry run (log only, no emails)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: streamgenie-cron
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scheduled jobs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+        run: |
+          python cron_runner.py \
+            --job "${{ github.event.inputs.job || 'all' }}" \
+            ${{ (github.event.inputs.dry_run == 'true') && '--dry-run' || '' }}
