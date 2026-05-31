@@ -155,6 +155,71 @@ def reset_password_request(client: Client, email: str) -> tuple[bool, str]:
             return False, f"Error: {error_msg}"
 
 
+def inject_recovery_hash_shim():
+    """Supabase recovery links return the token in the URL #fragment, which Streamlit
+    (server-side) can't read. This JS reads the parent window's hash and, if it's a
+    recovery link, rewrites the URL to query params (?recovery=1&at=...&rt=...) so the
+    Python side can pick it up."""
+    import streamlit.components.v1 as components
+    components.html(
+        """
+        <script>
+        (function () {
+          try {
+            var h = window.parent.location.hash || "";
+            if (h.indexOf("type=recovery") !== -1 && h.indexOf("access_token") !== -1) {
+              var p = new URLSearchParams(h.substring(1));
+              var at = p.get("access_token");
+              var rt = p.get("refresh_token") || "";
+              var base = window.parent.location.origin + window.parent.location.pathname;
+              window.parent.location.replace(
+                base + "?recovery=1&at=" + encodeURIComponent(at) + "&rt=" + encodeURIComponent(rt)
+              );
+            }
+          } catch (e) { /* cross-origin or no hash: ignore */ }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def handle_password_recovery(client: Client) -> bool:
+    """If the URL carries a recovery token (via the shim above), show a set-new-password
+    form. Returns True if recovery is in progress (caller should st.stop())."""
+    qp = st.query_params
+    if qp.get("recovery") != "1" or not qp.get("at"):
+        return False
+
+    access_token = qp.get("at")
+    refresh_token = qp.get("rt", "")
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("### 🔒 Set a New Password")
+        st.caption("Choose a new password for your StreamGenie account.")
+        pw1 = st.text_input("New password", type="password", key="rec_pw1")
+        pw2 = st.text_input("Confirm new password", type="password", key="rec_pw2")
+        if st.button("Update Password", type="primary", use_container_width=True):
+            if len(pw1) < 6:
+                st.error("Password must be at least 6 characters.")
+            elif pw1 != pw2:
+                st.error("Passwords don't match.")
+            else:
+                try:
+                    client.auth.set_session(access_token, refresh_token)
+                    client.auth.update_user({"password": pw1})
+                    client.auth.sign_out()
+                    st.session_state.user = None
+                    st.success("✅ Password updated! Returning to login…")
+                    st.query_params.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Reset failed — the link may have expired (they last 1 hour, single use). {e}")
+        st.caption("Reset links expire after 1 hour and can only be used once.")
+    return True
+
+
 def logout_user(client: Client):
     """Log out the current user"""
     try:

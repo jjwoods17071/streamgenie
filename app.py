@@ -886,6 +886,12 @@ scheduler = scheduled_tasks.init_scheduler(client)
 # Initialize authentication
 auth.init_auth_session()
 
+# Password-recovery flow: convert the Supabase #fragment token to a query param,
+# then show a set-new-password form if we're mid-recovery.
+auth.inject_recovery_hash_shim()
+if auth.handle_password_recovery(client):
+    st.stop()
+
 # Check if user is authenticated
 if not auth.is_authenticated():
     # Show login/signup page
