@@ -13,6 +13,7 @@ import scheduled_tasks  # Background task scheduler
 import preferences  # User notification preferences
 import show_status  # Show status tracking from TMDB
 import leaving_soon  # Admin-curated "leaving soon" list
+import watched  # Watched-episode tracking
 
 # Load environment variables
 load_dotenv()
@@ -259,8 +260,27 @@ def get_season_episodes(tv_id:int, season_number:int) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-def render_episode_guide(tv_id:int, key_prefix:str) -> None:
-    """Season selector + episode list for one show (used inside a per-show expander)."""
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_next_episode(tv_id:int) -> Optional[Dict[str, Any]]:
+    """Cached upcoming-episode info for the countdown: {season, episode, name, air_date} or None."""
+    try:
+        nxt = tv_details(tv_id).get("next_episode_to_air")
+        if isinstance(nxt, dict) and nxt.get("air_date"):
+            return {
+                "season": nxt.get("season_number"),
+                "episode": nxt.get("episode_number"),
+                "name": nxt.get("name"),
+                "air_date": nxt.get("air_date"),
+            }
+    except Exception:
+        pass
+    return None
+
+
+def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -> None:
+    """Season selector + episode list for one show (used inside a per-show expander).
+    If client+user_id are given and the watched_episodes table exists, shows per-episode
+    'watched' checkboxes."""
     info = get_show_seasons(tv_id)
     seasons = info.get("seasons") or []
     if not seasons:
@@ -276,7 +296,16 @@ def render_episode_guide(tv_id:int, key_prefix:str) -> None:
     if not eps:
         st.caption("No episodes listed for this season yet.")
         return
+
     today = dt.date.today()
+    track = bool(client is not None and user_id and watched.table_available(client))
+    wset = watched.get_watched(client, user_id, tv_id) if track else set()
+
+    if track:
+        aired = [e for e in eps if (e.get("air_date") and e["air_date"] <= today.isoformat())]
+        seen = sum(1 for e in aired if (sel, e.get("episode_number")) in wset)
+        st.caption(f"✓ Watched {seen}/{len(aired)} aired this season")
+
     for ep in eps:
         en = ep.get("episode_number") or 0
         name = ep.get("name") or f"Episode {en}"
@@ -288,7 +317,7 @@ def render_episode_guide(tv_id:int, key_prefix:str) -> None:
                 upcoming = dt.date.fromisoformat(ad) > today
         except Exception:
             pass
-        ec = st.columns([4, 1])
+        ec = st.columns([4, 1, 1]) if track else st.columns([4, 1])
         with ec[0]:
             st.markdown(f"**E{en:02d} · {name}**" + ("  🔜" if upcoming else ""))
             ov = ep.get("overview")
@@ -298,6 +327,18 @@ def render_episode_guide(tv_id:int, key_prefix:str) -> None:
             st.caption(f"📅 {ad}")
             if rating:
                 st.caption(f"⭐ {rating:.1f}")
+        if track:
+            with ec[2]:
+                if upcoming:
+                    st.caption(" ")
+                else:
+                    is_watched = (sel, en) in wset
+                    new_val = st.checkbox("✓", value=is_watched,
+                                          key=f"{key_prefix}_w_{sel}_{en}",
+                                          help="Mark watched")
+                    if new_val != is_watched:
+                        watched.set_watched(client, user_id, tv_id, sel, en, new_val)
+                        st.rerun()
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
@@ -2038,6 +2079,9 @@ else:
 
     st.caption(f"Tracking {len(rows)} show(s) • Sorted by {sort_by} ({sort_order})")
 
+    # Watched-episode counts for badges (one query; {} if table not yet created)
+    _wcounts = watched.watched_counts(client, get_user_id())
+
     for r in rows:
         provider_name = r.get("provider_name", DEFAULT_PROVIDER)
         display_provider_name = normalize_provider_name(provider_name)
@@ -2068,6 +2112,9 @@ else:
 
                 status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
                 st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
+                _wc = _wcounts.get(r["tmdb_id"], 0)
+                if _wc:
+                    st.caption(f"✓ {_wc} watched")
 
             # Date
             with cols[2]:
@@ -2075,11 +2122,17 @@ else:
                     try:
                         air_date = dt.date.fromisoformat(next_air_date)
                         days = (air_date - dt.date.today()).days
+                        # Episode label (e.g. "S3E1") for upcoming episodes
+                        ep_label = ""
+                        if days >= 0:
+                            ne = get_next_episode(r["tmdb_id"])
+                            if ne and ne.get("season") and ne.get("episode"):
+                                ep_label = f"S{ne['season']}E{ne['episode']}"
                         if days == 0:
-                            st.markdown("🔴 **TODAY**")
+                            st.markdown(f"🔴 **TODAY**" + (f" · {ep_label}" if ep_label else ""))
                         elif days > 0:
-                            st.markdown(f"📅 **{next_air_date}**")
-                            st.caption(f"⏰ in {days} day{'s' if days != 1 else ''}")
+                            st.markdown(f"📅 **Next: {ep_label}**" if ep_label else f"📅 **{next_air_date}**")
+                            st.caption(f"⏰ {next_air_date} · in {days} day{'s' if days != 1 else ''}")
                         else:
                             st.markdown(f"📅 {next_air_date}")
                             st.caption(f"({abs(days)} day{'s' if abs(days) != 1 else ''} ago)")
@@ -2137,10 +2190,15 @@ else:
                     try:
                         air_date = dt.date.fromisoformat(next_air_date)
                         days = (air_date - dt.date.today()).days
+                        ep_label = ""
+                        if days >= 0:
+                            ne = get_next_episode(r["tmdb_id"])
+                            if ne and ne.get("season") and ne.get("episode"):
+                                ep_label = f"S{ne['season']}E{ne['episode']} · "
                         if days == 0:
-                            st.markdown("🔴 **TODAY**")
+                            st.markdown(f"🔴 **TODAY** {ep_label}".strip())
                         elif days > 0:
-                            st.caption(f"📅 {next_air_date}")
+                            st.caption(f"📅 {ep_label}in {days}d")
                         else:
                             st.caption(f"📅 {next_air_date}")
                     except Exception:
@@ -2163,6 +2221,6 @@ else:
         with st.expander("📺 Episode Guide"):
             if st.session_state.get(eg_key) or st.button("Load episode guide", key=f"{eg_key}_btn"):
                 st.session_state[eg_key] = True
-                render_episode_guide(r["tmdb_id"], eg_key)
+                render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id())
 
         st.divider()
