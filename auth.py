@@ -2,12 +2,17 @@
 Authentication module for StreamGenie
 Handles user signup, login, logout, session management, and user roles
 """
+import os
 import streamlit as st
 from supabase import Client
 from typing import Optional, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Base URL the password-reset link returns to. Defaults to the hosted app; set
+# APP_BASE_URL=http://localhost:8501 in a local .env to test resets in dev.
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://streamgenie-estero.streamlit.app").rstrip("/")
 
 
 def init_auth_session():
@@ -140,7 +145,7 @@ def reset_password_request(client: Client, email: str) -> tuple[bool, str]:
         response = client.auth.reset_password_for_email(
             email,
             options={
-                "redirect_to": "https://streamgenie-estero.streamlit.app"  # Redirect after reset
+                "redirect_to": APP_BASE_URL  # env-aware: hosted by default, localhost in dev
             }
         )
 
