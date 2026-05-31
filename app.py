@@ -12,6 +12,7 @@ import notifications  # Notifications module
 import scheduled_tasks  # Background task scheduler
 import preferences  # User notification preferences
 import show_status  # Show status tracking from TMDB
+import leaving_soon  # Admin-curated "leaving soon" list
 
 # Load environment variables
 load_dotenv()
@@ -236,6 +237,67 @@ def search_tv(query:str) -> List[Dict[str, Any]]:
 
 def tv_details(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}", {"language": "en-US"})
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_show_seasons(tv_id:int) -> Dict[str, Any]:
+    """Cached show details for the episode guide (6h TTL). Real seasons only (skip specials)."""
+    try:
+        d = tv_details(tv_id)
+        return {
+            "status": d.get("status"),
+            "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
+        }
+    except Exception:
+        return {}
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_season_episodes(tv_id:int, season_number:int) -> List[Dict[str, Any]]:
+    """Cached episode list for one season (6h TTL)."""
+    try:
+        sf = tmdb_get(f"/tv/{tv_id}/season/{season_number}", {"language": "en-US"})
+        return sf.get("episodes") or []
+    except Exception:
+        return []
+
+def render_episode_guide(tv_id:int, key_prefix:str) -> None:
+    """Season selector + episode list for one show (used inside a per-show expander)."""
+    info = get_show_seasons(tv_id)
+    seasons = info.get("seasons") or []
+    if not seasons:
+        st.caption("No season data available from TMDB.")
+        return
+    season_nums = [s["season_number"] for s in seasons]
+    labels = {s["season_number"]: (s.get("name") or f"Season {s['season_number']}") for s in seasons}
+    # default to the most recent season
+    sel = st.selectbox("Season", season_nums, index=len(season_nums) - 1,
+                       format_func=lambda n: labels.get(n, f"Season {n}"),
+                       key=f"{key_prefix}_season")
+    eps = get_season_episodes(tv_id, sel)
+    if not eps:
+        st.caption("No episodes listed for this season yet.")
+        return
+    today = dt.date.today()
+    for ep in eps:
+        en = ep.get("episode_number") or 0
+        name = ep.get("name") or f"Episode {en}"
+        ad = ep.get("air_date") or "TBA"
+        rating = ep.get("vote_average") or 0
+        upcoming = False
+        try:
+            if ad != "TBA":
+                upcoming = dt.date.fromisoformat(ad) > today
+        except Exception:
+            pass
+        ec = st.columns([4, 1])
+        with ec[0]:
+            st.markdown(f"**E{en:02d} · {name}**" + ("  🔜" if upcoming else ""))
+            ov = ep.get("overview")
+            if ov:
+                st.caption(ov)
+        with ec[1]:
+            st.caption(f"📅 {ad}")
+            if rating:
+                st.caption(f"⭐ {rating:.1f}")
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
@@ -792,6 +854,14 @@ if not auth.is_authenticated():
 # User is authenticated - show user menu and continue with app
 auth.render_user_menu(client)
 
+# Self-heal once per session: ensure this auth user has a public.users row
+# (FK parent for shows/notifications). Covers dashboard-created or restore-orphaned users.
+if not st.session_state.get('_user_record_ensured'):
+    _cu = auth.get_current_user()
+    if _cu:
+        auth.ensure_user_record(client, _cu.get('id'), _cu.get('email'))
+        st.session_state['_user_record_ensured'] = True
+
 # Show notifications in sidebar
 notifications.render_notifications_ui(client, get_user_id())
 
@@ -919,7 +989,9 @@ if show_settings:
         user_is_admin = auth.is_admin(client, user_id)
 
         if user_is_admin:
-            tab1, tab2, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['settings']} Maintenance", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
+            tab1, tab2, tab5, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['settings']} Maintenance", "⏳ Leaving Soon", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
+            with tab5:
+                leaving_soon.render_admin_panel(client)
         else:
             tab1, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
 
@@ -1821,6 +1893,13 @@ with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!"
     else:
         st.info("No top rated shows available")
 
+# ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
+try:
+    _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
+    leaving_soon.render_user_section(client, watchlist_tmdb_ids=_wl_ids)
+except Exception:
+    pass
+
 # Watchlist section below search
 st.write("---")
 
@@ -2078,5 +2157,12 @@ else:
                 if st.button(ICONS["delete"], key=f"del_list_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
                     delete_show(client, r["tmdb_id"], r["region"], provider_name)
                     st.rerun()
+
+        # Episode Guide — lazy-loaded (TMDB only hit after the user opens & clicks Load)
+        eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
+        with st.expander("📺 Episode Guide"):
+            if st.session_state.get(eg_key) or st.button("Load episode guide", key=f"{eg_key}_btn"):
+                st.session_state[eg_key] = True
+                render_episode_guide(r["tmdb_id"], eg_key)
 
         st.divider()

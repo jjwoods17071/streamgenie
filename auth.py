@@ -36,6 +36,28 @@ def get_user_id() -> Optional[str]:
     return user['id'] if user else None
 
 
+def ensure_user_record(client: Client, user_id: str, email: Optional[str]) -> bool:
+    """
+    Guarantee a public.users row exists for this auth user.
+
+    The shows/notifications/etc. tables FK onto users(id); a user created via the
+    Supabase dashboard (or lost in a restore) can authenticate but has no users row,
+    which makes inserts fail with shows_user_id_fkey. Upsert is idempotent.
+    """
+    if not user_id:
+        return False
+    try:
+        client.table("users").upsert({
+            "id": user_id,
+            "email": email,
+            "username": (email or "user").split('@')[0] or "user",
+        }, on_conflict="id").execute()
+        return True
+    except Exception as e:
+        print(f"ensure_user_record warning: {e}")
+        return False
+
+
 def signup_user(client: Client, email: str, password: str) -> tuple[bool, str]:
     """
     Sign up a new user
@@ -94,6 +116,8 @@ def login_user(client: Client, email: str, password: str) -> tuple[bool, str]:
                 'id': response.user.id,
                 'email': response.user.email
             }
+            # Self-heal: guarantee the public.users FK parent row exists
+            ensure_user_record(client, response.user.id, response.user.email)
             return True, f"Welcome back, {email}!"
         else:
             return False, "Invalid email or password."
