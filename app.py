@@ -1593,7 +1593,7 @@ if q:
             title = r.get("name") or r.get("original_name") or "Untitled"
             tmdb_id = r.get("id")
             overview = (r.get("overview") or "").strip()
-            img_url = f"https://image.tmdb.org/t/p/w200{poster_path}" if poster_path else None
+            img_url = f"https://image.tmdb.org/t/p/w342{poster_path}" if poster_path else None
 
             with cols[0]:
                 if img_url:
@@ -1763,7 +1763,7 @@ with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=Fa
             # Poster
             with cols[0]:
                 if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", use_column_width=True)
+                    st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
                 else:
                     st.write(ICONS["tv"])
 
@@ -1812,7 +1812,7 @@ with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", 
             # Poster
             with cols[0]:
                 if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", use_column_width=True)
+                    st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
                 else:
                     st.write(ICONS["tv"])
 
@@ -1862,7 +1862,7 @@ with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!"
             # Poster
             with cols[0]:
                 if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", use_column_width=True)
+                    st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
                 else:
                     st.write(ICONS["tv"])
 
@@ -2051,7 +2051,7 @@ else:
             # Poster
             with cols[0]:
                 if poster_path:
-                    img_url = f"https://image.tmdb.org/t/p/w92{poster_path}"
+                    img_url = f"https://image.tmdb.org/t/p/w342{poster_path}"
                     st.image(img_url, use_column_width=True)
                 else:
                     st.write(ICONS["movie"])

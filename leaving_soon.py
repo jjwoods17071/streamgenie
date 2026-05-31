@@ -216,7 +216,7 @@ def render_user_section(client, watchlist_tmdb_ids: Optional[set] = None,
     cols = st.columns(min(len(active), 5))
     for i, e in enumerate(active[:5]):
         with cols[i]:
-            pu = poster_url(e.get("poster_path"), "w185")
+            pu = poster_url(e.get("poster_path"), "w342")
             if pu:
                 st.image(pu, use_container_width=True)
             star = "⭐ " if e.get("tmdb_id") in watchlist_tmdb_ids else ""
