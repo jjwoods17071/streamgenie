@@ -213,7 +213,7 @@ def delete_show(client: Client, tmdb_id:int, region:str, provider_name:str):
 def list_shows(client: Client) -> List[Dict[str, Any]]:
     """Get all shows from the user's watchlist"""
     result = client.table("shows")\
-        .select("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, poster_path, production_status, status_message, status_confidence, in_production")\
+        .select("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, poster_path, production_status, status_message, status_confidence, in_production, created_at, show_status")\
         .eq("user_id", get_user_id())\
         .order("title")\
         .execute()
@@ -2170,69 +2170,37 @@ else:
     # Get current view mode
     view_mode = st.session_state.get('view_mode', 'grid')
 
-    # Column headers with sort controls - aligned properly
-    if view_mode == 'grid':
-        # Grid view: Image | Title & Service | Date | Actions
-        header_cols = st.columns([1, 4, 3, 2])
-    else:
-        # List view: Poster | Title | Service | Date | Actions
-        header_cols = st.columns([0.5, 3, 2, 2, 1])
-
-    with header_cols[0]:
-        st.markdown("**Poster**")
-
-    with header_cols[1]:
-        if st.button("📝 Title ↕️", key="sort_title", use_container_width=True, help="Sort by title"):
-            if "sort_by" not in st.session_state or st.session_state.sort_by != "title":
-                st.session_state.sort_by = "title"
-                st.session_state.sort_order = "asc"
-            else:
-                st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
-            st.rerun()
-
-    if view_mode == 'list':
-        with header_cols[2]:
-            if st.button("📺 Service ↕️", key="sort_service", use_container_width=True, help="Sort by streaming service"):
-                if "sort_by" not in st.session_state or st.session_state.sort_by != "service":
-                    st.session_state.sort_by = "service"
-                    st.session_state.sort_order = "asc"
-                else:
-                    st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
-                st.rerun()
-        date_col_idx = 3
-    else:
-        date_col_idx = 2
-
-    with header_cols[date_col_idx]:
-        if st.button("📅 Date ↕️", key="sort_date", use_container_width=True, help="Sort by next air date"):
-            if "sort_by" not in st.session_state or st.session_state.sort_by != "date":
-                st.session_state.sort_by = "date"
-                st.session_state.sort_order = "asc"
-            else:
-                st.session_state.sort_order = "desc" if st.session_state.sort_order == "asc" else "asc"
-            st.rerun()
-
-    with header_cols[-1]:
-        st.markdown("**Actions**")
-
-    # Apply sorting
-    sort_by = st.session_state.get("sort_by", "title")
-    sort_order = st.session_state.get("sort_order", "asc")
+    # Sort control — single dropdown, works in both grid and list views
+    SORT_OPTS = {
+        "Next episode (soonest)": ("date", "asc"),
+        "Next episode (latest)": ("date", "desc"),
+        "Recently added": ("added", "desc"),
+        "Oldest added": ("added", "asc"),
+        "Title (A\u2013Z)": ("title", "asc"),
+        "Title (Z\u2013A)": ("title", "desc"),
+        "Provider": ("service", "asc"),
+    }
+    _opt_keys = list(SORT_OPTS.keys())
+    sc = st.columns([2, 3])
+    with sc[0]:
+        sort_label = st.selectbox("Sort by", _opt_keys, key="sort_label")
+    sort_by, sort_order = SORT_OPTS[sort_label]
 
     if sort_by == "title":
         rows = sorted(rows, key=lambda x: x["title"].lower(), reverse=(sort_order == "desc"))
     elif sort_by == "date":
-        # Sort by date - None values (no air date) go last when ascending, first when descending
-        def date_sort_key(r):
-            date = r.get("next_air_date")
-            if not date:
+        def _date_key(r):
+            d = r.get("next_air_date")
+            if not d:
                 return "9999-99-99" if sort_order == "asc" else "0000-00-00"
-            return date
-        rows = sorted(rows, key=date_sort_key, reverse=(sort_order == "desc"))
+            return d
+        rows = sorted(rows, key=_date_key, reverse=(sort_order == "desc"))
     elif sort_by == "service":
         rows = sorted(rows, key=lambda x: normalize_provider_name(x.get("provider_name", "")).lower(), reverse=(sort_order == "desc"))
+    elif sort_by == "added":
+        rows = sorted(rows, key=lambda x: x.get("created_at") or "", reverse=(sort_order == "desc"))
 
-    st.caption(f"Tracking {len(rows)} show(s) • Sorted by {sort_by} ({sort_order})")
+    st.caption(f"Tracking {len(rows)} show(s) \u2022 {sort_label}")
 
     # Watched-episode counts for badges (one query; {} if table not yet created)
     _wcounts = watched.watched_counts(client, get_user_id())
