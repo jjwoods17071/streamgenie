@@ -359,6 +359,124 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -
                         st.rerun()
         st.markdown("<hr style='margin:2px 0;opacity:0.15'>", unsafe_allow_html=True)
 
+def render_show_row(r, view_mode, client, wcounts):
+    """Render one watchlist show card (grid or list) + its episode-guide expander."""
+    provider_name = r.get("provider_name", DEFAULT_PROVIDER)
+    display_provider_name = normalize_provider_name(provider_name)
+    next_air_date = r.get("next_air_date")
+    poster_path = r.get("poster_path")
+
+    if view_mode == 'grid':
+        cols = st.columns([1, 4, 3, 2])
+        with cols[0]:
+            if poster_path:
+                st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
+            else:
+                st.write(ICONS["movie"])
+        with cols[1]:
+            title_cols = st.columns([1, 10])
+            with title_cols[0]:
+                logo_url = get_provider_logo_url(display_provider_name)
+                if logo_url:
+                    st.image(logo_url, width=48)
+            with title_cols[1]:
+                st.markdown(f"**{r['title']}**")
+            status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
+            st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
+            _wc = wcounts.get(r["tmdb_id"], 0)
+            if _wc:
+                st.caption(f"✓ {_wc} watched")
+        with cols[2]:
+            if next_air_date:
+                try:
+                    air_date = dt.date.fromisoformat(next_air_date)
+                    days = (air_date - dt.date.today()).days
+                    ep_label = ""
+                    if days >= 0:
+                        ne = get_next_episode(r["tmdb_id"])
+                        if ne and ne.get("season") and ne.get("episode"):
+                            ep_label = f"S{ne['season']}E{ne['episode']}"
+                    if days == 0:
+                        st.markdown("🔴 **TODAY**" + (f" · {ep_label}" if ep_label else ""))
+                    elif days > 0:
+                        st.markdown(f"📅 **Next: {ep_label}**" if ep_label else f"📅 **{next_air_date}**")
+                        st.caption(f"⏰ {next_air_date} · in {days} day{'s' if days != 1 else ''}")
+                    else:
+                        st.markdown(f"📅 {next_air_date}")
+                        st.caption(f"({abs(days)} day{'s' if abs(days) != 1 else ''} ago)")
+                except Exception:
+                    st.caption(f"📅 {next_air_date}")
+            else:
+                production_status = r.get('production_status')
+                status_message = r.get('status_message')
+                if production_status:
+                    st.markdown(f"**{production_status}**")
+                    if status_message:
+                        st.caption(status_message)
+                elif r['on_provider']:
+                    st.markdown("✨ **All Episodes**")
+                    st.caption("Series complete")
+                else:
+                    st.caption("❓ No air date")
+        with cols[3]:
+            if st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
+                delete_show(client, r["tmdb_id"], r["region"], provider_name)
+                st.rerun()
+    else:
+        cols = st.columns([0.5, 3, 2, 2, 1])
+        with cols[0]:
+            if poster_path:
+                st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", width=40)
+            else:
+                st.write(ICONS["movie"])
+        with cols[1]:
+            st.markdown(f"**{r['title']}**")
+        with cols[2]:
+            service_cols = st.columns([1, 3])
+            with service_cols[0]:
+                logo_url = get_provider_logo_url(display_provider_name)
+                if logo_url:
+                    st.image(logo_url, width=32)
+            with service_cols[1]:
+                status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
+                st.caption(f"{status_icon} {display_provider_name}")
+        with cols[3]:
+            if next_air_date:
+                try:
+                    air_date = dt.date.fromisoformat(next_air_date)
+                    days = (air_date - dt.date.today()).days
+                    ep_label = ""
+                    if days >= 0:
+                        ne = get_next_episode(r["tmdb_id"])
+                        if ne and ne.get("season") and ne.get("episode"):
+                            ep_label = f"S{ne['season']}E{ne['episode']} · "
+                    if days == 0:
+                        st.markdown(f"🔴 **TODAY** {ep_label}".strip())
+                    elif days > 0:
+                        st.caption(f"📅 {ep_label}in {days}d")
+                    else:
+                        st.caption(f"📅 {next_air_date}")
+                except Exception:
+                    st.caption(f"📅 {next_air_date}")
+            else:
+                production_status = r.get('production_status')
+                if production_status:
+                    st.caption(f"{production_status}")
+                else:
+                    st.caption("❓")
+        with cols[4]:
+            if st.button(ICONS["delete"], key=f"del_list_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
+                delete_show(client, r["tmdb_id"], r["region"], provider_name)
+                st.rerun()
+
+    eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
+    with st.expander("📺 Episode Guide"):
+        if st.session_state.get(eg_key) or st.button("Load episode guide", key=f"{eg_key}_btn"):
+            st.session_state[eg_key] = True
+            render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id())
+    st.divider()
+
+
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
 
@@ -2119,145 +2237,36 @@ else:
     # Watched-episode counts for badges (one query; {} if table not yet created)
     _wcounts = watched.watched_counts(client, get_user_id())
 
+    def _status_group(rr):
+        ss = (rr.get("show_status") or "")
+        ps = (rr.get("production_status") or "")
+        if ss == "Canceled" or ps == "CANCELED":
+            return "canceled"
+        if ss == "Ended" or ps == "ENDED":
+            return "ended"
+        return "active"
+
+    _groups = {"active": [], "canceled": [], "ended": []}
     for r in rows:
-        provider_name = r.get("provider_name", DEFAULT_PROVIDER)
-        display_provider_name = normalize_provider_name(provider_name)
-        next_air_date = r.get("next_air_date")
-        poster_path = r.get("poster_path")
+        _groups[_status_group(r)].append(r)
 
-        if view_mode == 'grid':
-            # GRID VIEW: Poster | Title+Service | Date | Actions
-            cols = st.columns([1, 4, 3, 2])
-
-            # Poster
-            with cols[0]:
-                if poster_path:
-                    img_url = f"https://image.tmdb.org/t/p/w342{poster_path}"
-                    st.image(img_url, use_column_width=True)
-                else:
-                    st.write(ICONS["movie"])
-
-            # Title and provider with logo
-            with cols[1]:
-                title_cols = st.columns([1, 10])
-                with title_cols[0]:
-                    logo_url = get_provider_logo_url(display_provider_name)
-                    if logo_url:
-                        st.image(logo_url, width=48)
-                with title_cols[1]:
-                    st.markdown(f"**{r['title']}**")
-
-                status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
-                st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
-                _wc = _wcounts.get(r["tmdb_id"], 0)
-                if _wc:
-                    st.caption(f"✓ {_wc} watched")
-
-            # Date
-            with cols[2]:
-                if next_air_date:
-                    try:
-                        air_date = dt.date.fromisoformat(next_air_date)
-                        days = (air_date - dt.date.today()).days
-                        # Episode label (e.g. "S3E1") for upcoming episodes
-                        ep_label = ""
-                        if days >= 0:
-                            ne = get_next_episode(r["tmdb_id"])
-                            if ne and ne.get("season") and ne.get("episode"):
-                                ep_label = f"S{ne['season']}E{ne['episode']}"
-                        if days == 0:
-                            st.markdown(f"🔴 **TODAY**" + (f" · {ep_label}" if ep_label else ""))
-                        elif days > 0:
-                            st.markdown(f"📅 **Next: {ep_label}**" if ep_label else f"📅 **{next_air_date}**")
-                            st.caption(f"⏰ {next_air_date} · in {days} day{'s' if days != 1 else ''}")
-                        else:
-                            st.markdown(f"📅 {next_air_date}")
-                            st.caption(f"({abs(days)} day{'s' if abs(days) != 1 else ''} ago)")
-                    except Exception:
-                        st.caption(f"📅 {next_air_date}")
-                else:
-                    production_status = r.get('production_status')
-                    status_message = r.get('status_message')
-                    if production_status:
-                        st.markdown(f"**{production_status}**")
-                        if status_message:
-                            st.caption(status_message)
-                    elif r['on_provider']:
-                        st.markdown("✨ **All Episodes**")
-                        st.caption("Series complete")
-                    else:
-                        st.caption("❓ No air date")
-
-            # Actions
-            with cols[3]:
-                if st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                    delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                    st.rerun()
-
-        else:
-            # LIST VIEW: Smaller Poster | Title | Service | Date | Actions
-            cols = st.columns([0.5, 3, 2, 2, 1])
-
-            # Smaller poster
-            with cols[0]:
-                if poster_path:
-                    img_url = f"https://image.tmdb.org/t/p/w92{poster_path}"
-                    st.image(img_url, width=40)
-                else:
-                    st.write(ICONS["movie"])
-
-            # Title only
-            with cols[1]:
-                st.markdown(f"**{r['title']}**")
-
-            # Service with logo
-            with cols[2]:
-                service_cols = st.columns([1, 3])
-                with service_cols[0]:
-                    logo_url = get_provider_logo_url(display_provider_name)
-                    if logo_url:
-                        st.image(logo_url, width=32)
-                with service_cols[1]:
-                    status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
-                    st.caption(f"{status_icon} {display_provider_name}")
-
-            # Date (compact)
-            with cols[3]:
-                if next_air_date:
-                    try:
-                        air_date = dt.date.fromisoformat(next_air_date)
-                        days = (air_date - dt.date.today()).days
-                        ep_label = ""
-                        if days >= 0:
-                            ne = get_next_episode(r["tmdb_id"])
-                            if ne and ne.get("season") and ne.get("episode"):
-                                ep_label = f"S{ne['season']}E{ne['episode']} · "
-                        if days == 0:
-                            st.markdown(f"🔴 **TODAY** {ep_label}".strip())
-                        elif days > 0:
-                            st.caption(f"📅 {ep_label}in {days}d")
-                        else:
-                            st.caption(f"📅 {next_air_date}")
-                    except Exception:
-                        st.caption(f"📅 {next_air_date}")
-                else:
-                    production_status = r.get('production_status')
-                    if production_status:
-                        st.caption(f"{production_status}")
-                    else:
-                        st.caption("❓")
-
-            # Actions
-            with cols[4]:
-                if st.button(ICONS["delete"], key=f"del_list_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                    delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                    st.rerun()
-
-        # Episode Guide — lazy-loaded (TMDB only hit after the user opens & clicks Load)
-        eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
-        with st.expander("📺 Episode Guide"):
-            if st.session_state.get(eg_key) or st.button("Load episode guide", key=f"{eg_key}_btn"):
-                st.session_state[eg_key] = True
-                render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id())
-
-        st.divider()
+    _t_active, _t_canceled, _t_ended = st.tabs([
+        f"📺 Active ({len(_groups['active'])})",
+        f"🚫 Canceled ({len(_groups['canceled'])})",
+        f"✅ Ended ({len(_groups['ended'])})",
+    ])
+    with _t_active:
+        if not _groups['active']:
+            st.info("No active shows.")
+        for r in _groups['active']:
+            render_show_row(r, view_mode, client, _wcounts)
+    with _t_canceled:
+        if not _groups['canceled']:
+            st.info("No canceled shows. 🎉")
+        for r in _groups['canceled']:
+            render_show_row(r, view_mode, client, _wcounts)
+    with _t_ended:
+        if not _groups['ended']:
+            st.info("No ended shows yet.")
+        for r in _groups['ended']:
+            render_show_row(r, view_mode, client, _wcounts)
