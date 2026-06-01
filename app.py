@@ -306,30 +306,37 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -
         aired = [e for e in eps if (e.get("air_date") and e["air_date"] <= today.isoformat())]
         seen = sum(1 for e in aired if (sel, e.get("episode_number")) in wset)
         st.caption(f"✓ Watched {seen}/{len(aired)} aired this season")
+        if aired:
+            st.progress(seen / len(aired))
 
     for ep in eps:
         en = ep.get("episode_number") or 0
         name = ep.get("name") or f"Episode {en}"
         ad = ep.get("air_date") or "TBA"
         rating = ep.get("vote_average") or 0
+        still = ep.get("still_path")
         upcoming = False
         try:
             if ad != "TBA":
                 upcoming = dt.date.fromisoformat(ad) > today
         except Exception:
             pass
-        ec = st.columns([4, 1, 1]) if track else st.columns([4, 1])
+        # layout: still | info | date | (watched)
+        ec = st.columns([1.3, 4, 1, 0.8]) if track else st.columns([1.3, 4, 1])
         with ec[0]:
+            if still:
+                st.image(f"https://image.tmdb.org/t/p/w185{still}", use_container_width=True)
+        with ec[1]:
             st.markdown(f"**E{en:02d} · {name}**" + ("  🔜" if upcoming else ""))
             ov = ep.get("overview")
             if ov:
                 st.caption(ov)
-        with ec[1]:
+        with ec[2]:
             st.caption(f"📅 {ad}")
             if rating:
                 st.caption(f"⭐ {rating:.1f}")
         if track:
-            with ec[2]:
+            with ec[3]:
                 if upcoming:
                     st.caption(" ")
                 else:
@@ -340,6 +347,7 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -
                     if new_val != is_watched:
                         watched.set_watched(client, user_id, tv_id, sel, en, new_val)
                         st.rerun()
+        st.markdown("<hr style='margin:2px 0;opacity:0.15'>", unsafe_allow_html=True)
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
