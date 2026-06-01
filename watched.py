@@ -50,6 +50,26 @@ def set_watched(client, user_id: str, tmdb_id: int, season: int, episode: int, w
         return False
 
 
+def set_season(client, user_id: str, tmdb_id: int, season: int,
+               episode_numbers, watched: bool) -> bool:
+    """Mark/unmark a whole season at once."""
+    try:
+        if watched:
+            rows = [{"user_id": user_id, "tmdb_id": tmdb_id,
+                     "season_number": season, "episode_number": en} for en in episode_numbers]
+            if rows:
+                client.table("watched_episodes").upsert(
+                    rows, on_conflict="user_id,tmdb_id,season_number,episode_number"
+                ).execute()
+        else:
+            client.table("watched_episodes").delete()\
+                .eq("user_id", user_id).eq("tmdb_id", tmdb_id)\
+                .eq("season_number", season).execute()
+        return True
+    except Exception:
+        return False
+
+
 def watched_counts(client, user_id: str) -> Dict[int, int]:
     """tmdb_id -> number of watched episodes for the user (single query, for card badges)."""
     try:

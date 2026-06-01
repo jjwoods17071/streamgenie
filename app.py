@@ -308,6 +308,16 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -
         st.caption(f"✓ Watched {seen}/{len(aired)} aired this season")
         if aired:
             st.progress(seen / len(aired))
+            bc = st.columns(2)
+            aired_nums = [e.get("episode_number") for e in aired]
+            if bc[0].button("✓ Mark season watched", key=f"{key_prefix}_markall_{sel}",
+                            use_container_width=True):
+                watched.set_season(client, user_id, tv_id, sel, aired_nums, True)
+                st.rerun()
+            if bc[1].button("Clear season", key=f"{key_prefix}_clearall_{sel}",
+                            use_container_width=True):
+                watched.set_season(client, user_id, tv_id, sel, aired_nums, False)
+                st.rerun()
 
     for ep in eps:
         en = ep.get("episode_number") or 0
