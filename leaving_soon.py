@@ -213,14 +213,35 @@ def render_user_section(client, watchlist_tmdb_ids: Optional[set] = None,
         titles = ", ".join(f"**{e['title']}**" for e in on_watch)
         st.warning(f"On your watchlist and leaving soon: {titles}")
 
+    def _poster_card(e):
+        pu = poster_url(e.get("poster_path"), "w342")
+        if pu:
+            st.image(pu, use_container_width=True)
+        star = "⭐ " if e.get("tmdb_id") in watchlist_tmdb_ids else ""
+        st.caption(f"{star}**{e['title']}**")
+        days = e.get("_days_left", 0)
+        urgency = "🔴" if days <= 7 else ("🟡" if days <= 21 else "⚪")
+        st.caption(f"{urgency} {e['provider_name']} · {days}d left")
+
+    # Compact strip: soonest 5
     cols = st.columns(min(len(active), 5))
     for i, e in enumerate(active[:5]):
         with cols[i]:
-            pu = poster_url(e.get("poster_path"), "w342")
-            if pu:
-                st.image(pu, use_container_width=True)
-            star = "⭐ " if e.get("tmdb_id") in watchlist_tmdb_ids else ""
-            st.caption(f"{star}**{e['title']}**")
-            days = e.get("_days_left", 0)
-            urgency = "🔴" if days <= 7 else ("🟡" if days <= 21 else "⚪")
-            st.caption(f"{urgency} {e['provider_name']} · {days}d left")
+            _poster_card(e)
+
+    # Full grouped view if there's more than the strip shows
+    if len(active) > 5:
+        with st.expander(f"📋 See all {len(active)} leaving soon"):
+            groups = [
+                ("⏰ This week", [e for e in active if e.get("_days_left", 0) <= 7]),
+                ("📅 This month", [e for e in active if 7 < e.get("_days_left", 0) <= 30]),
+                ("🔜 Later", [e for e in active if e.get("_days_left", 0) > 30]),
+            ]
+            for label, items in groups:
+                if not items:
+                    continue
+                st.markdown(f"**{label}** ({len(items)})")
+                row = st.columns(5)
+                for i, e in enumerate(items):
+                    with row[i % 5]:
+                        _poster_card(e)
