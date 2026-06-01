@@ -367,7 +367,7 @@ def render_show_row(r, view_mode, client, wcounts):
     poster_path = r.get("poster_path")
 
     if view_mode == 'grid':
-        cols = st.columns([1, 4, 3, 2])
+        cols = st.columns([2, 4, 3, 2])
         with cols[0]:
             if poster_path:
                 st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
@@ -426,7 +426,7 @@ def render_show_row(r, view_mode, client, wcounts):
         cols = st.columns([0.5, 3, 2, 2, 1])
         with cols[0]:
             if poster_path:
-                st.image(f"https://image.tmdb.org/t/p/w92{poster_path}", width=40)
+                st.image(f"https://image.tmdb.org/t/p/w185{poster_path}", width=64)
             else:
                 st.write(ICONS["movie"])
         with cols[1]:
