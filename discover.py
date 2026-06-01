@@ -167,9 +167,9 @@ def match_title(title: str) -> Optional[Dict[str, Any]]:
 
 
 def render_netflix_import(watchlist_ids: Set[int], add_fn: Callable) -> None:
-    st.caption("Export your history from **Netflix → Account → Viewing activity → Download all**, "
-               "then upload `ViewingActivity.csv` here. We'll add the still-returning series.")
-    up = st.file_uploader("Netflix ViewingActivity.csv", type=["csv"], key="nflx_csv")
+    st.caption("Export from **netflix.com/viewingactivity → Download all** (per-profile, on the website), "
+               "then upload `NetflixViewingHistory.csv` here. We'll add the still-returning series.")
+    up = st.file_uploader("Netflix viewing history (.csv)", type=["csv"], key="nflx_csv")
     if not up:
         return
     titles = parse_netflix_titles(up.getvalue())
