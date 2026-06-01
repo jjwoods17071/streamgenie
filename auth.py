@@ -14,6 +14,85 @@ logger = logging.getLogger(__name__)
 # APP_BASE_URL=http://localhost:8501 in a local .env to test resets in dev.
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://streamgenie-estero.streamlit.app").rstrip("/")
 
+# ---------------- Persistent login (browser cookie) ----------------
+# Streamlit session state is wiped when the WebSocket drops (phone screen-lock,
+# tab backgrounded). We persist the Supabase refresh token in a cookie so the
+# session can be restored on reconnect. Everything below is fail-safe: if the
+# cookie component is unavailable or errors, we silently fall back to the normal
+# login screen — never a lockout.
+try:
+    import extra_streamlit_components as stx
+except Exception:
+    stx = None
+
+_COOKIE_NAME = "sg_session"
+
+
+def _cookie_manager():
+    if stx is None:
+        return None
+    if "_cookie_mgr" not in st.session_state:
+        try:
+            st.session_state["_cookie_mgr"] = stx.CookieManager(key="sg_cookie_mgr")
+        except Exception:
+            st.session_state["_cookie_mgr"] = None
+    return st.session_state.get("_cookie_mgr")
+
+
+def persist_session(refresh_token: Optional[str]):
+    """Store the Supabase refresh token in a 30-day cookie."""
+    cm = _cookie_manager()
+    if not cm or not refresh_token:
+        return
+    try:
+        import datetime as _dt
+        cm.set(_COOKIE_NAME, refresh_token,
+               expires_at=_dt.datetime.now() + _dt.timedelta(days=30), key="sg_cookie_set")
+    except Exception:
+        pass
+
+
+def clear_persisted_session():
+    cm = _cookie_manager()
+    if not cm:
+        return
+    try:
+        cm.delete(_COOKIE_NAME, key="sg_cookie_del")
+    except Exception:
+        pass
+
+
+def restore_session(client: Client) -> bool:
+    """If there's no in-memory user but a valid refresh-token cookie exists,
+    refresh the Supabase session and restore login. Returns True if restored."""
+    if st.session_state.get("user"):
+        return False
+    cm = _cookie_manager()
+    if not cm:
+        return False
+    try:
+        rt = cm.get(_COOKIE_NAME)
+    except Exception:
+        rt = None
+    if not rt:
+        return False
+    try:
+        # Throwaway client so we don't mutate the cached (shared) service-role client
+        from supabase import create_client
+        tmp = create_client(os.getenv("SUPABASE_URL", ""), os.getenv("SUPABASE_KEY", ""))
+        res = tmp.auth.refresh_session(rt)
+        if res and getattr(res, "user", None):
+            st.session_state.user = {"id": res.user.id, "email": res.user.email}
+            ensure_user_record(client, res.user.id, res.user.email)
+            new_rt = getattr(getattr(res, "session", None), "refresh_token", None)
+            if new_rt:
+                persist_session(new_rt)
+            return True
+    except Exception:
+        # expired / invalid cookie — drop it and show the login screen
+        clear_persisted_session()
+    return False
+
 
 def init_auth_session():
     """Initialize authentication session state"""
@@ -91,6 +170,7 @@ def signup_user(client: Client, email: str, password: str) -> tuple[bool, str]:
                 'id': response.user.id,
                 'email': response.user.email
             }
+            persist_session(getattr(getattr(response, "session", None), "refresh_token", None))
             return True, "Account created successfully! Welcome to StreamGenie!"
         else:
             return False, "Failed to create account. Please try again."
@@ -123,6 +203,7 @@ def login_user(client: Client, email: str, password: str) -> tuple[bool, str]:
             }
             # Self-heal: guarantee the public.users FK parent row exists
             ensure_user_record(client, response.user.id, response.user.email)
+            persist_session(getattr(getattr(response, "session", None), "refresh_token", None))
             return True, f"Welcome back, {email}!"
         else:
             return False, "Invalid email or password."
@@ -228,6 +309,7 @@ def handle_password_recovery(client: Client) -> bool:
 def logout_user(client: Client):
     """Log out the current user"""
     try:
+        clear_persisted_session()
         client.auth.sign_out()
         st.session_state.user = None
         st.success("Logged out successfully!")

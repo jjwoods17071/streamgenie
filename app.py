@@ -1072,6 +1072,11 @@ auth.inject_recovery_hash_shim()
 if auth.handle_password_recovery(client):
     st.stop()
 
+# Persistent login: if the in-memory session was wiped (phone screen-lock / tab
+# reconnect) but a refresh-token cookie exists, restore the session silently.
+if not auth.is_authenticated():
+    auth.restore_session(client)
+
 # Check if user is authenticated
 if not auth.is_authenticated():
     # Show login/signup page
