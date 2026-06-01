@@ -149,12 +149,36 @@ def parse_netflix_titles(raw: bytes) -> List[str]:
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def match_title(title: str) -> Optional[Dict[str, Any]]:
-    """Best TMDB TV match for a title, with current status."""
+    """Best TMDB TV match for a title, with current status.
+    Filters out movie→TV false positives (e.g. the film 'Damsel' matching an
+    obscure TV series of the same name) and near-zero-signal fluke matches."""
     try:
         res = _get("/search/tv", query=title).get("results", [])
         if not res:
             return None
         top = res[0]
+        norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+        q = norm(title)
+
+        # Movie-vs-TV disambiguation: if the most popular result across movies+TV
+        # is a MOVIE whose name matches the query, the user likely watched the film.
+        try:
+            multi = [m for m in _get("/search/multi", query=title).get("results", [])
+                     if m.get("media_type") in ("movie", "tv")]
+            if multi:
+                best = max(multi, key=lambda m: m.get("popularity", 0) or 0)
+                best_name = best.get("title") or best.get("name") or ""
+                if (best.get("media_type") == "movie" and norm(best_name) == q
+                        and (best.get("popularity", 0) or 0) > (top.get("popularity", 0) or 0) * 1.3):
+                    return None
+        except Exception:
+            pass
+
+        # Quality gate: drop obscure near-zero-signal series unless the name matches exactly
+        if ((top.get("vote_count") or 0) < 3 and (top.get("popularity") or 0) < 3
+                and norm(top.get("name", "")) != q):
+            return None
+
         det = _get(f"/tv/{top['id']}")
         return {
             "tmdb_id": top["id"], "title": top.get("name", title),

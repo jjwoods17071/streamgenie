@@ -477,6 +477,49 @@ def render_show_row(r, view_mode, client, wcounts):
     st.divider()
 
 
+def render_upcoming(rows):
+    """Agenda of upcoming episodes across the whole watchlist, grouped by timeframe."""
+    today = dt.date.today()
+    up = []
+    for r in rows:
+        ad = r.get("next_air_date")
+        if not ad:
+            continue
+        try:
+            d = dt.date.fromisoformat(ad)
+        except Exception:
+            continue
+        if d >= today:
+            up.append((d, r))
+    if not up:
+        return
+    up.sort(key=lambda x: x[0])
+    soon = any((d - today).days <= 7 for d, _ in up)
+    with st.expander(f"📅 Upcoming Episodes ({len(up)})", expanded=soon):
+        groups = [
+            ("⏰ This week", [x for x in up if (x[0] - today).days <= 7]),
+            ("📅 This month", [x for x in up if 7 < (x[0] - today).days <= 30]),
+            ("🔜 Later", [x for x in up if (x[0] - today).days > 30]),
+        ]
+        for label, items in groups:
+            if not items:
+                continue
+            st.markdown(f"**{label}**")
+            for d, r in items:
+                days = (d - today).days
+                ne = get_next_episode(r["tmdb_id"])
+                ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
+                c = st.columns([1, 6])
+                with c[0]:
+                    pp = r.get("poster_path")
+                    if pp:
+                        st.image(f"https://image.tmdb.org/t/p/w92{pp}", width=45)
+                with c[1]:
+                    when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+                    st.markdown(f"**{r['title']}**" + (f" · {ep}" if ep else ""))
+                    st.caption(f"📅 {d.isoformat()} · {when}")
+
+
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
 
@@ -2166,6 +2209,9 @@ else:
         st.download_button("📥 Download watchlist.csv", buf.getvalue(), file_name="watchlist.csv", mime="text/csv", use_container_width=True)
 
     st.write("---")
+
+    # 📅 Upcoming episodes across the whole watchlist
+    render_upcoming(rows)
 
     # Get current view mode
     view_mode = st.session_state.get('view_mode', 'grid')
