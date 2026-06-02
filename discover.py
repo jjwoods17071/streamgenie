@@ -92,36 +92,26 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
     picks = st.multiselect("Your streaming services", list(PROVIDERS.keys()),
                            default=st.session_state.get("disc_providers", default),
                            key="disc_providers")
-    if not st.button("🔎 Find new & returning shows", key="disc_go"):
+    # Run the search on click; persist results so the list stays put after each add.
+    if st.button("🔎 Find new & returning shows", key="disc_go"):
+        ids = tuple(i for p in picks for i in PROVIDERS[p])
+        st.session_state["disc_results"] = discover_returning(ids, region)
+
+    found = st.session_state.get("disc_results")
+    if not found:
         return
 
-    ids = tuple(i for p in picks for i in PROVIDERS[p])
     owned = {int(x) for x in watchlist_ids if x is not None}
-    found = discover_returning(ids, region)
-    shows = [s for s in found if int(s["tmdb_id"]) not in owned]
-    excluded = len(found) - len(shows)
-    if not shows:
-        st.info("Nothing new found — everything popular on your services is already on your watchlist (or no services selected).")
-        return
+    not_owned = [s for s in found if int(s["tmdb_id"]) not in owned]
+    already = len(found) - len(not_owned)
+    note = f"**{len(not_owned)}** returning shows on your services not yet tracked"
+    if already:
+        note += f"  ·  **{already}** already on your watchlist (shown in blue)"
+    st.success(note + ".")
 
-    note = f"**{len(shows)}** returning shows on your services not yet tracked."
-    if excluded:
-        note += f"  ·  filtered out **{excluded}** already on your watchlist."
-    st.success(note)
-    if st.button(f"➕ Add all {len(shows)}", key="disc_add_all"):
-        n = 0
-        for s in shows:
-            try:
-                add_fn(s["tmdb_id"], s["title"], s["overview"], s["poster_path"])
-                n += 1
-            except Exception:
-                pass
-        st.success(f"Added {n} shows!")
-        st.rerun()
-
-    for s in shows[:24]:
+    for s in found[:30]:
         with st.container(border=True):
-            c = st.columns([1, 5, 1])
+            c = st.columns([1, 5, 2])
             with c[0]:
                 pu = poster(s["poster_path"])
                 if pu:
@@ -131,9 +121,13 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
                 if s["overview"]:
                     st.caption(s["overview"][:160])
             with c[2]:
-                if st.button("➕", key=f"disc_add_{s['tmdb_id']}", help="Add to watchlist"):
-                    add_fn(s["tmdb_id"], s["title"], s["overview"], s["poster_path"])
-                    st.rerun()
+                if int(s["tmdb_id"]) in owned:
+                    st.markdown(":blue[✓ In your list]")
+                else:
+                    # on_click keeps the results in place; the show flips to blue after adding
+                    st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
+                              on_click=add_fn,
+                              args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"]))
 
 
 # ---------------- Netflix history import ----------------
