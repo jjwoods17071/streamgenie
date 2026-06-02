@@ -2116,6 +2116,49 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
+# ── Icon-library demo route (?demo=icons): emoji vs Material Symbols vs Font Awesome ──
+if st.query_params.get("demo") == "icons":
+    st.markdown("<style>@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css');</style>",
+                unsafe_allow_html=True)
+    st.title("🎨 Icon library comparison")
+    st.caption("Same concepts in three systems. Note: only **Material Symbols** render inside Streamlit "
+               "buttons/tabs — Font Awesome only works in plain markdown.")
+    _demo = [
+        ("Search", "🔍", ":material/search:", "fa-magnifying-glass"),
+        ("Add", "➕", ":material/add_circle:", "fa-circle-plus"),
+        ("Remove", "🗑️", ":material/delete:", "fa-trash"),
+        ("TV / Show", "📺", ":material/tv:", "fa-tv"),
+        ("Calendar", "📅", ":material/calendar_today:", "fa-calendar"),
+        ("Rating", "⭐", ":material/star:", "fa-star"),
+        ("Trending", "🔥", ":material/trending_up:", "fa-fire"),
+        ("New", "✨", ":material/auto_awesome:", "fa-wand-magic-sparkles"),
+        ("Settings", "⚙️", ":material/settings:", "fa-gear"),
+        ("Watched", "✓", ":material/check_circle:", "fa-circle-check"),
+        ("Episodes", "📖", ":material/menu_book:", "fa-book-open"),
+        ("Now airing", "🟢", ":material/radio_button_checked:", "fa-circle-dot"),
+        ("Back", "⬅️", ":material/arrow_back:", "fa-arrow-left"),
+        ("Watchlist", "📌", ":material/bookmark:", "fa-bookmark"),
+        ("Upcoming", "🔜", ":material/upcoming:", "fa-clock"),
+    ]
+    hc = st.columns([2, 1, 1, 1])
+    for col, lab in zip(hc, ["**Concept**", "**Emoji (now)**", "**Material**", "**Font Awesome**"]):
+        col.markdown(lab)
+    for name, emo, mat, fa in _demo:
+        c = st.columns([2, 1, 1, 1])
+        c[0].markdown(name)
+        c[1].markdown(f"<span style='font-size:1.6rem'>{emo}</span>", unsafe_allow_html=True)
+        c[2].markdown(f"### {mat}")
+        c[3].markdown(f"<i class='fa-solid {fa}' style='font-size:1.5rem'></i>", unsafe_allow_html=True)
+    st.divider()
+    st.markdown("#### Inside a button (this is the deciding test):")
+    bc = st.columns(3)
+    bc[0].button("🔍 Emoji", key="demo_b1")
+    bc[1].button(":material/search: Material", key="demo_b2")
+    bc[2].button("<i class='fa-solid fa-magnifying-glass'></i> Font Awesome", key="demo_b3")
+    st.caption("☝️ The Font Awesome button shows the raw tag as text — that's the limitation.")
+    st.button("⬅️ Back to the app", key="demo_back", on_click=lambda: st.query_params.clear())
+    st.stop()
+
 # ── Show-detail page (PDP) router: ?show=<id> takes over the page. Driven by the URL
 #    so the browser Back button returns to the list (and the page is bookmarkable). ──
 if "show" in st.query_params:
