@@ -469,11 +469,18 @@ def render_show_row(r, view_mode, client, wcounts):
                 delete_show(client, r["tmdb_id"], r["region"], provider_name)
                 st.rerun()
 
+    # Episode Guide — one toggle button (no redundant expander+button); lazy-loaded,
+    # shows a season selector with all seasons once open.
     eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
-    with st.expander("📺 Episode Guide"):
-        if st.session_state.get(eg_key) or st.button("Load episode guide", key=f"{eg_key}_btn"):
+    if st.session_state.get(eg_key):
+        if st.button("📺 Hide Episode Guide", key=f"{eg_key}_btn", use_container_width=True):
+            st.session_state[eg_key] = False
+            st.rerun()
+        render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id())
+    else:
+        if st.button("📺 Episode Guide", key=f"{eg_key}_btn", use_container_width=True):
             st.session_state[eg_key] = True
-            render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id())
+            st.rerun()
     st.divider()
 
 
