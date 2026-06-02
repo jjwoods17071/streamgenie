@@ -1820,6 +1820,11 @@ st.markdown("""
 /* Hide the image fullscreen/expand button (serves no purpose here) */
 [data-testid="StyledFullScreenButton"]{display:none !important;}
 button[title="View fullscreen"]{display:none !important;}
+/* Hide the heading anchor-link icons — clicking one dumps a #slug fragment
+   (e.g. ?show=66732#the-great-war) into the address bar that our nav never clears. */
+[data-testid="stHeaderActionElements"]{display:none !important;}
+.stMarkdown h1 > a, .stMarkdown h2 > a, .stMarkdown h3 > a,
+.stMarkdown h4 > a, .stMarkdown h5 > a, .stMarkdown h6 > a{display:none !important;}
 /* Tighten the big default top whitespace so we use the space better */
 .block-container{padding-top:2.2rem !important;}
 header[data-testid="stHeader"]{height:0;}
