@@ -902,7 +902,12 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             except Exception:
                 wl_row = None
         if wl_row is not None:
-            st.caption("✓ On your watchlist")
+            _prov = (wl_row.get("provider_name") or "").strip()
+            _generic = _prov in ("", "Multiple Providers", "Multiple")
+            if _generic:
+                st.caption("✓ On your watchlist")
+            else:
+                st.markdown(f"✓ On your watchlist  ·  📺 Watch on **{normalize_provider_name(_prov)}**")
             def _pdp_remove():
                 delete_show(client, tmdb_id, wl_row.get("region") or DEFAULT_REGION,
                             wl_row.get("provider_name", DEFAULT_PROVIDER))
