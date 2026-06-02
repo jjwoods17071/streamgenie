@@ -317,6 +317,31 @@ def get_related_shows(tv_id:int) -> List[Dict[str, Any]]:
         return []
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_tvmaze_overviews(tv_id:int) -> Dict[Any, str]:
+    """Fallback episode summaries from TVmaze (free, no key), keyed by (season, episode).
+    Fills in episodes where TMDB has no overview. Maps via the show's IMDb id."""
+    import re as _re
+    try:
+        imdb = (tmdb_get(f"/tv/{tv_id}/external_ids") or {}).get("imdb_id")
+        if not imdb:
+            return {}
+        rr = requests.get("https://api.tvmaze.com/lookup/shows", params={"imdb": imdb}, timeout=15)
+        if rr.status_code != 200:
+            return {}
+        show = rr.json()
+        eps = requests.get(f"https://api.tvmaze.com/shows/{show['id']}/episodes", timeout=15).json()
+        out = {}
+        for e in eps:
+            s, n = e.get("season"), e.get("number")
+            txt = _re.sub("<[^>]+>", "", e.get("summary") or "").strip()
+            if s and n and txt:
+                out[(s, n)] = txt
+        return out
+    except Exception:
+        return {}
+
+
 def _availability_line(d: Dict[str, Any]) -> str:
     """One-line availability/status summary from show metadata (markdown)."""
     today = dt.date.today()
@@ -406,6 +431,9 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
         st.caption("No episodes listed for this season yet.")
         return
 
+    # Enrich: fill episodes lacking a TMDB overview from TVmaze (cached per show)
+    _tvmaze = get_tvmaze_overviews(tv_id) if any(not (e.get("overview") or "").strip() for e in eps) else {}
+
     today = dt.date.today()
     track = bool(client is not None and user_id and watched.table_available(client))
     wset = watched.get_watched(client, user_id, tv_id) if track else set()
@@ -446,9 +474,9 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
                 st.image(f"https://image.tmdb.org/t/p/w185{still}", use_column_width=True)
         with ec[1]:
             st.markdown(f"**E{en:02d} · {name}**" + ("  🔜" if upcoming else ""))
-            ov = ep.get("overview")
+            ov = (ep.get("overview") or "").strip() or _tvmaze.get((sel, en), "")
             if ov:
-                st.caption(ov)
+                st.write(ov)   # readable body text (was a tiny grey caption)
         with ec[2]:
             st.caption(f"📅 {ad}")
             if rating:
