@@ -12,6 +12,7 @@ import os
 import re
 import io
 import csv
+import difflib
 import datetime as dt
 from typing import List, Dict, Any, Callable, Set, Optional
 
@@ -158,25 +159,45 @@ def match_title(title: str) -> Optional[Dict[str, Any]]:
             return None
         top = res[0]
         norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+        toks = lambda s: set(re.sub(r"[^a-z0-9 ]", " ", (s or "").lower()).split())
         q = norm(title)
+        qt = toks(title)
+        tn = norm(top.get("name", ""))
+        tnt = toks(top.get("name", ""))
+        ratio = difflib.SequenceMatcher(None, q, tn).ratio()
 
-        # Movie-vs-TV disambiguation: if the most popular result across movies+TV
-        # is a MOVIE whose name matches the query, the user likely watched the film.
+        # Movie-vs-TV disambiguation: if the most popular result across movies+TV is a
+        # MOVIE whose name matches the watched title (exact OR strong fuzzy OR containment)
+        # and it's at least as popular as the TV hit, the user watched the FILM — skip.
         try:
             multi = [m for m in _get("/search/multi", query=title).get("results", [])
                      if m.get("media_type") in ("movie", "tv")]
             if multi:
                 best = max(multi, key=lambda m: m.get("popularity", 0) or 0)
-                best_name = best.get("title") or best.get("name") or ""
-                if (best.get("media_type") == "movie" and norm(best_name) == q
-                        and (best.get("popularity", 0) or 0) > (top.get("popularity", 0) or 0) * 1.3):
+                bn = norm(best.get("title") or best.get("name") or "")
+                movie_is_q = (bn == q
+                              or difflib.SequenceMatcher(None, q, bn).ratio() >= 0.80
+                              or (len(q) >= 4 and (q in bn or bn in q)))
+                if (best.get("media_type") == "movie" and movie_is_q and tn != q
+                        and (best.get("popularity", 0) or 0) >= (top.get("popularity", 0) or 0)):
                     return None
         except Exception:
             pass
 
+        # Title-correspondence gate: the TV hit must actually correspond to the watched
+        # title — exact match, strong fuzzy, or the TV name is a subset of the query
+        # (Netflix added qualifiers). This rejects loose fuzzy hits where the TV show
+        # only shares a word, e.g. "Game Night"→"Hollywood Game Night",
+        # "Maestro"→"Maestro in Blue", "Ice Road"→"Ice Road Truckers".
+        exact = (tn == q)
+        strong_fuzzy = ratio >= 0.82
+        tv_subset_of_query = bool(tnt) and tnt.issubset(qt)
+        if not (exact or strong_fuzzy or tv_subset_of_query):
+            return None
+
         # Quality gate: drop obscure near-zero-signal series unless the name matches exactly
         if ((top.get("vote_count") or 0) < 3 and (top.get("popularity") or 0) < 3
-                and norm(top.get("name", "")) != q):
+                and tn != q):
             return None
 
         det = _get(f"/tv/{top['id']}")
