@@ -424,10 +424,10 @@ def render_show_row(r, view_mode, client, wcounts):
                 delete_show(client, r["tmdb_id"], r["region"], provider_name)
                 st.rerun()
     else:
-        cols = st.columns([2, 3, 2, 2, 1])
+        cols = st.columns([1, 4, 2, 2, 1])
         with cols[0]:
             if poster_path:
-                st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
+                st.image(f"https://image.tmdb.org/t/p/w185{poster_path}", width=92)
             else:
                 st.write(ICONS["movie"])
         with cols[1]:
