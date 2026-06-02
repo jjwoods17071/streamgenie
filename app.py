@@ -608,24 +608,17 @@ def clickable_title(title: str, show: Dict[str, Any]) -> None:
 
 
 def clickable_poster(tmdb_id, poster_path) -> None:
-    """Render a poster that opens the show's detail page (PDP) when clicked.
-    st.image isn't natively clickable, so this is an <img> inside an <a> that
-    navigates to ?show=<tmdb_id>; the main script translates that into PDP nav."""
+    """Render a poster with an invisible Streamlit button overlaid on top (see the
+    .sgposter CSS). Clicking the poster opens the detail page via an in-app rerun —
+    NOT a full-page reload, which would drop the login session."""
+    _OPENSEQ[0] += 1
     if poster_path:
-        st.markdown(
-            f'<a href="?show={tmdb_id}" target="_self">'
-            f'<img src="https://image.tmdb.org/t/p/w342{poster_path}" '
-            'style="width:100%;border-radius:6px;display:block;cursor:pointer"></a>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<img class="sgposter" src="https://image.tmdb.org/t/p/w342{poster_path}">',
+                    unsafe_allow_html=True)
     else:
-        st.markdown(
-            f'<a href="?show={tmdb_id}" target="_self">'
-            '<div style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:6px;'
-            'aspect-ratio:2/3;display:flex;align-items:center;justify-content:center;'
-            'font-size:2.2rem;color:#fff;cursor:pointer">📺</div></a>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="sgposter sgph">📺</div>', unsafe_allow_html=True)
+    if st.button("View details", key=f"pp_{tmdb_id}_{_OPENSEQ[0]}", use_container_width=True):
+        open_show_page({"tmdb_id": tmdb_id})
 
 
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
@@ -1366,6 +1359,17 @@ if not auth.is_authenticated():
 # User is authenticated - show user menu and continue with app
 auth.render_user_menu(client)
 
+# Clickable-poster styling: invisible button overlaid on each poster image so a
+# click opens the detail page via an in-app rerun (no page reload → keeps login).
+st.markdown("""
+<style>
+.sgposter{width:100%;height:240px;object-fit:cover;border-radius:8px;display:block;}
+div.sgph{background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
+div[data-testid="element-container"]:has(.sgposter) + div[data-testid="element-container"]:has(button){margin-top:-240px;height:240px;position:relative;z-index:3;}
+div[data-testid="element-container"]:has(.sgposter) + div[data-testid="element-container"] button{height:240px;opacity:0;}
+</style>
+""", unsafe_allow_html=True)
+
 # Self-heal once per session: ensure this auth user has a public.users row
 # (FK parent for shows/notifications). Covers dashboard-created or restore-orphaned users.
 if not st.session_state.get('_user_record_ensured'):
@@ -1995,14 +1999,6 @@ else:
     region = DEFAULT_REGION
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
-
-# Poster clicks navigate via ?show=<tmdb_id> → translate into session-state PDP nav
-if "show" in st.query_params:
-    try:
-        st.session_state["pdp_show"] = {"tmdb_id": int(st.query_params["show"])}
-    except Exception:
-        pass
-    del st.query_params["show"]
 
 # ── Show-detail page (PDP) router: when a show card is clicked, take over the page ──
 if st.session_state.get("pdp_show"):
