@@ -706,10 +706,76 @@ def clickable_poster(tmdb_id, poster_path) -> None:
               on_click=open_show_page, args=({"tmdb_id": tmdb_id, "poster_path": poster_path},))
 
 
+def _render_event_series(show: Dict[str, Any], league: str, client=None) -> None:
+    """Detail page for a followed event-model series (F1 / golf / UFC / tennis) —
+    the season calendar of races/tournaments/cards stands in for 'episodes'."""
+    name = show.get("title") or sports.league_label(league)
+    logo = show.get("poster_path") or sports.league_logo(league)
+    sched = sports.get_event_schedule(league)
+    cur = sched.get("current")
+    events = sched.get("events") or []
+    today = dt.date.today().isoformat()
+
+    hc = st.columns([1, 3])
+    with hc[0]:
+        if logo:
+            st.image(logo, use_column_width=True)
+    with hc[1]:
+        st.markdown(f"## {name}")
+        st.markdown(sports.league_label(league))
+        if cur:
+            _net = f' · 📺 {cur["network"]}' if cur.get("network") else ""
+            _ven = f' · {cur["venue"]}' if cur.get("venue") else ""
+            _tag = "✅ Latest" if cur.get("completed") else "🟢 Next"
+            st.markdown(
+                f'<div style="background:rgba(34,197,94,.12);border-radius:8px;padding:10px 14px">'
+                f'<b>{_tag}:</b> {cur["name"]}'
+                f'<span style="opacity:.8"> — {cur["date"]}{_ven}{_net}</span></div>',
+                unsafe_allow_html=True)
+        if client is not None:
+            def _rm():
+                delete_show(client, show.get("tmdb_id"), show.get("region") or DEFAULT_REGION,
+                            show.get("provider_name", "Sports"))
+                st.query_params.clear()
+            st.button(":material/delete: Remove from watchlist", key=f"ev_del_{league}", on_click=_rm)
+    st.divider()
+
+    if not events:
+        if cur:
+            st.caption("Showing the current event — a full season calendar isn't published for this series.")
+        else:
+            st.info("No schedule available right now.")
+        return
+
+    upcoming = [e for e in events if (e.get("start") or "") >= today]
+    past = [e for e in events if (e.get("start") or "") < today]
+
+    def _ev_row(e):
+        c = st.columns([3, 2])
+        with c[0]:
+            st.markdown(f"**{e['label']}**")
+        with c[1]:
+            span = e["start"] + (f" → {e['end']}" if e.get("end") and e["end"] != e["start"] else "")
+            st.caption(f"📅 {span}")
+
+    st.markdown(f"### 🔜 Upcoming events ({len(upcoming)})")
+    if not upcoming:
+        st.caption("Season complete — see results below.")
+    for e in upcoming[:30]:
+        _ev_row(e)
+    if past:
+        with st.expander(f"✅ Completed events ({len(past)})"):
+            for e in reversed(past):
+                _ev_row(e)
+
+
 def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Detail page for a followed team (NFL/MLB/NBA/NHL) — schedule as 'episodes' (games)."""
     st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
     league, team_id = sports.decode_id(show.get("tmdb_id"))
+    if sports.is_event_league(league):
+        _render_event_series(show, league, client)
+        return
     name = show.get("title") or "Team"
     logo = show.get("poster_path")
     games = sports.get_team_schedule(league, team_id) if league else []
@@ -2710,51 +2776,73 @@ with _main_grow:
         _leagues = list(sports.LEAGUES.keys())
         if st.session_state.get("sports_league") not in _leagues:
             st.session_state["sports_league"] = _leagues[0]
-        # League picker — logos
-        _lc = st.columns(len(_leagues))
-        for _i, _lk0 in enumerate(_leagues):
-            with _lc[_i]:
-                _llogo = sports.league_logo(_lk0)
-                if _llogo:
-                    st.image(_llogo, use_column_width=True)
-                _is_sel = st.session_state["sports_league"] == _lk0
-                if st.button(sports.league_label(_lk0), key=f"lgsel_{_lk0}", use_container_width=True,
-                             type="primary" if _is_sel else "secondary"):
-                    st.session_state["sports_league"] = _lk0
-                    st.rerun()
+        # League picker — logos, wrapped into rows (16 leagues)
+        _lper = 6
+        for _ri in range(0, len(_leagues), _lper):
+            _lc = st.columns(_lper)
+            for _ci, _lk0 in enumerate(_leagues[_ri:_ri + _lper]):
+                with _lc[_ci]:
+                    _llogo = sports.league_logo(_lk0)
+                    if _llogo:
+                        st.image(_llogo, use_column_width=True)
+                    _is_sel = st.session_state["sports_league"] == _lk0
+                    if st.button(sports.league_label(_lk0), key=f"lgsel_{_lk0}", use_container_width=True,
+                                 type="primary" if _is_sel else "secondary"):
+                        st.session_state["sports_league"] = _lk0
+                        st.rerun()
         _lk = st.session_state["sports_league"]
         _lab = sports.league_label(_lk).split()[-1]
-        _teams = sports.get_teams(_lk)
-        if not _teams:
-            st.info("Couldn't load teams right now — try again shortly.")
+
+        if sports.is_event_league(_lk):
+            # Event series (F1 / golf / UFC / tennis): follow the whole series, not a team.
+            _label_full = sports.league_label(_lk)
+            st.markdown(f"#### {_label_full}")
+            st.caption("Follow the whole series — the next race/tournament/card shows up in **Upcoming**, "
+                       "with the full season calendar on its page.")
+            _sid = sports.encode_series_id(_lk)
+            if _sid in _wl_ids:
+                st.markdown(":blue[✓ Following this series]")
+            else:
+                def _follow_series(_id=_sid, _lkx=_lk, _label=_label_full):
+                    _s = sports.get_event_schedule(_lkx)
+                    _cur = _s.get("current")
+                    upsert_show(client, _id, _label, "US", True,
+                                (_cur["date"] if _cur else None),
+                                f"{_label} — season", sports.league_logo(_lkx), _label)
+                st.button(":material/add: Follow this series", key=f"followseries_{_lk}",
+                          on_click=_follow_series)
         else:
-            st.markdown(f"#### {sports.league_label(_lk)} — pick a team to follow")
-            _q = st.text_input("Filter teams", "", key=f"team_filter_{_lk}",
-                               placeholder="Type to filter…", label_visibility="collapsed")
-            if _q:
-                _ql = _q.lower()
-                _teams = [t for t in _teams
-                          if _ql in (t.get("name") or "").lower() or _ql in (t.get("abbrev") or "").lower()]
-            _per = 6
-            for _i in range(0, len(_teams), _per):
-                _gc = st.columns(_per)
-                for _j, _t in enumerate(_teams[_i:_i + _per]):
-                    with _gc[_j]:
-                        if _t.get("logo"):
-                            st.image(_t["logo"], use_column_width=True)
-                        st.caption(f"**{_t.get('abbrev') or _t['name']}**")
-                        _neg = sports.encode_id(_lk, _t["id"])
-                        if _neg in _wl_ids:
-                            st.markdown(":blue[✓ Following]")
-                        else:
-                            def _follow(_team=_t, _id=_neg, _lkx=_lk, _league=_lab):
-                                _g = sports.get_team_schedule(_lkx, _team["id"])
-                                _ng = sports.next_game(_g)
-                                upsert_show(client, _id, _team["name"], "US", True,
-                                            (_ng["date"] if _ng else None),
-                                            f"{_league} team", _team.get("logo"), _league)
-                            st.button(":material/add: Follow", key=f"follow_{_lk}_{_t['id']}",
-                                      use_container_width=True, on_click=_follow)
+            _teams = sports.get_teams(_lk)
+            if not _teams:
+                st.info("Couldn't load teams right now — try again shortly.")
+            else:
+                st.markdown(f"#### {sports.league_label(_lk)} — pick a team to follow")
+                _q = st.text_input("Filter teams", "", key=f"team_filter_{_lk}",
+                                   placeholder="Type to filter…", label_visibility="collapsed")
+                if _q:
+                    _ql = _q.lower()
+                    _teams = [t for t in _teams
+                              if _ql in (t.get("name") or "").lower() or _ql in (t.get("abbrev") or "").lower()]
+                _per = 6
+                for _i in range(0, len(_teams), _per):
+                    _gc = st.columns(_per)
+                    for _j, _t in enumerate(_teams[_i:_i + _per]):
+                        with _gc[_j]:
+                            if _t.get("logo"):
+                                st.image(_t["logo"], use_column_width=True)
+                            st.caption(f"**{_t.get('abbrev') or _t['name']}**")
+                            _neg = sports.encode_id(_lk, _t["id"])
+                            if _neg in _wl_ids:
+                                st.markdown(":blue[✓ Following]")
+                            else:
+                                def _follow(_team=_t, _id=_neg, _lkx=_lk, _league=_lab):
+                                    _g = sports.get_team_schedule(_lkx, _team["id"])
+                                    _ng = sports.next_game(_g)
+                                    upsert_show(client, _id, _team["name"], "US", True,
+                                                (_ng["date"] if _ng else None),
+                                                f"{_league} team", _team.get("logo"), _league)
+                                st.button(":material/add: Follow", key=f"follow_{_lk}_{_t['id']}",
+                                          use_container_width=True, on_click=_follow)
 
     # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
     try:

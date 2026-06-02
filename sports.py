@@ -26,12 +26,39 @@ LEAGUES = {
     "wc":   ("soccer", "fifa.world",      "🌍 World Cup", 9, None),
     "cfb":  ("football",   "college-football",         "🏈 College FB", 10, None),
     "cbb":  ("basketball", "mens-college-basketball",  "🏀 College BB", 11, None),
+    # Event-model series: you follow the whole series, "episodes" are races/tournaments/cards.
+    "f1":   ("racing", "f1",   "🏎️ F1",        12, None),
+    "golf": ("golf",   "pga",  "⛳ PGA Tour",   13, None),
+    "ufc":  ("mma",    "ufc",  "🥊 UFC",        14, None),
+    "atp":  ("tennis", "atp",  "🎾 ATP",        15, None),
+    "wta":  ("tennis", "wta",  "🎾 WTA",        16, None),
 }
-SOCCER = {"epl", "ucl", "mls", "wc"}   # leagues that can draw → W-D-L records
+SOCCER = {"epl", "ucl", "mls", "wc"}      # leagues that can draw → W-D-L records
+EVENT = {"f1", "golf", "ufc", "atp", "wta"}   # series, not head-to-head teams
+SEASON_CAL = {"f1", "golf", "ufc"}        # event leagues with a labeled season calendar
 _IDX_TO_LEAGUE = {v[3]: k for k, v in LEAGUES.items()}
+
+# ESPN serves some league logos from non-default paths; others have none at all.
+_LOGO_OVERRIDE = {
+    "epl": "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png",
+    "ucl": "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png",
+    "mls": "https://a.espncdn.com/i/leaguelogos/soccer/500/19.png",
+    "wc":  "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png",
+    "cfb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
+    "cbb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
+}
+_NO_LOGO = {"golf", "atp", "wta"}         # ESPN has no league badge for these
+
+
+def is_event_league(league) -> bool:
+    return league in EVENT
 
 
 def league_logo(league: str):
+    if league in _LOGO_OVERRIDE:
+        return _LOGO_OVERRIDE[league]
+    if league in _NO_LOGO:
+        return None
     lg = LEAGUES.get(league, (None, None))[1]
     return f"https://a.espncdn.com/i/teamlogos/leagues/500/{lg}.png" if lg else None
 
@@ -162,3 +189,62 @@ def record(games, team_name):
 
 def record_str(league: str, w: int, l: int, d: int) -> str:
     return f"{w}-{d}-{l}" if league in SOCCER else f"{w}-{l}"
+
+
+# ---------------- Event-model series (F1 / golf / UFC / tennis) ----------------
+def encode_series_id(league: str) -> int:
+    """Negative watchlist id for following a whole series (team_id slot = 0)."""
+    return encode_id(league, 0)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_event_schedule(league: str):
+    """Season calendar + current/next event for an event-model series.
+
+    Returns {"events": [{label, start, end}], "current": {...} or None}. The
+    season calendar comes from leagues[0].calendar (labeled for F1/golf/UFC; just
+    daily dates for tennis, which we drop), and the current event from events[0]."""
+    try:
+        sp, lg = LEAGUES[league][0], LEAGUES[league][1]
+        d = requests.get(f"{_BASE}/{sp}/{lg}/scoreboard", headers=_UA, timeout=20).json()
+        lg0 = (d.get("leagues") or [{}])[0]
+        events = []
+        for c in (lg0.get("calendar") or []):
+            if isinstance(c, dict) and c.get("label"):
+                events.append({
+                    "label": c.get("label"),
+                    "start": (c.get("startDate") or "")[:10],
+                    "end": (c.get("endDate") or "")[:10],
+                })
+        events.sort(key=lambda e: e["start"] or "")
+
+        cur = None
+        ev = d.get("events") or []
+        if ev and ev[0]:
+            e = ev[0]
+            comp = (e.get("competitions") or [{}])[0]
+            stype = ((comp.get("status") or {}).get("type")
+                     or (e.get("status") or {}).get("type") or {})
+            net = ""
+            bc = comp.get("broadcasts") or []
+            if bc:
+                m = bc[0]
+                names = m.get("names") or []
+                if not names and m.get("media"):
+                    sn = (m["media"] or {}).get("shortName")
+                    names = [sn] if sn else []
+                net = ", ".join(n for n in names if n)
+            venue = ((comp.get("venue") or {}).get("fullName")
+                     or (e.get("venue") or {}).get("fullName"))
+            cur = {
+                "name": e.get("name") or e.get("shortName"),
+                "date": (e.get("date") or "")[:10],
+                "datetime": e.get("date") or "",
+                "venue": venue,
+                "status": stype.get("description") or stype.get("name"),
+                "completed": bool(stype.get("completed")),
+                "network": net,
+            }
+        return {"events": events, "current": cur}
+    except Exception:
+        return {"events": [], "current": None}
