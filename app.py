@@ -285,6 +285,8 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
     try:
         d = tv_details(tv_id)
         return {
+            "name": d.get("name"),
+            "poster_path": d.get("poster_path"),
             "overview": d.get("overview"),
             "status": d.get("status"),
             "number_of_seasons": d.get("number_of_seasons"),
@@ -605,21 +607,42 @@ def clickable_title(title: str, show: Dict[str, Any]) -> None:
         open_show_page(show)
 
 
+def clickable_poster(tmdb_id, poster_path) -> None:
+    """Render a poster that opens the show's detail page (PDP) when clicked.
+    st.image isn't natively clickable, so this is an <img> inside an <a> that
+    navigates to ?show=<tmdb_id>; the main script translates that into PDP nav."""
+    if poster_path:
+        st.markdown(
+            f'<a href="?show={tmdb_id}" target="_self">'
+            f'<img src="https://image.tmdb.org/t/p/w342{poster_path}" '
+            'style="width:100%;border-radius:6px;display:block;cursor:pointer"></a>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<a href="?show={tmdb_id}" target="_self">'
+            '<div style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:6px;'
+            'aspect-ratio:2/3;display:flex;align-items:center;justify-content:center;'
+            'font-size:2.2rem;color:#fff;cursor:pointer">📺</div></a>',
+            unsafe_allow_html=True,
+        )
+
+
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Full-page show detail (PDP): poster + summary + availability + ALL seasons
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
     tmdb_id = show.get("tmdb_id")
-    title = show.get("title") or "Show"
     if st.button("← Back to list", key="pdp_back"):
         st.session_state.pop("pdp_show", None)
         st.rerun()
 
     meta = get_show_meta(tmdb_id) or {}
+    title = show.get("title") or meta.get("name") or "Show"
     cur = _current_season(meta)
 
     hc = st.columns([1, 2.5])
     with hc[0]:
-        pp = show.get("poster_path")
+        pp = show.get("poster_path") or meta.get("poster_path")
         if pp:
             st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
         else:
@@ -703,11 +726,7 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
         cols = st.columns(per_row)
         for j, r in enumerate(rows[i:i + per_row]):
             with cols[j]:
-                pp = r.get("poster_path")
-                if pp:
-                    st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
-                else:
-                    st.write(ICONS["movie"])
+                clickable_poster(r['tmdb_id'], r.get("poster_path"))
                 if st.button(r['title'], key=f"open_{r['tmdb_id']}_{r.get('provider_name')}",
                              use_container_width=True, help="Open show details"):
                     open_show_page(r)
@@ -775,9 +794,7 @@ def render_upcoming(rows, as_tab=False):
                 ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
                 c = st.columns([1, 4])
                 with c[0]:
-                    pp = r.get("poster_path")
-                    if pp:
-                        st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
+                    clickable_poster(r['tmdb_id'], r.get("poster_path"))
                 with c[1]:
                     when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
                     clickable_title(r['title'], r)
@@ -1979,6 +1996,14 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
+# Poster clicks navigate via ?show=<tmdb_id> → translate into session-state PDP nav
+if "show" in st.query_params:
+    try:
+        st.session_state["pdp_show"] = {"tmdb_id": int(st.query_params["show"])}
+    except Exception:
+        pass
+    del st.query_params["show"]
+
 # ── Show-detail page (PDP) router: when a show card is clicked, take over the page ──
 if st.session_state.get("pdp_show"):
     render_show_page(st.session_state["pdp_show"], client, get_user_id())
@@ -2115,20 +2140,7 @@ with _main_search:
                 img_url = f"https://image.tmdb.org/t/p/w342{poster_path}" if poster_path else None
 
                 with cols[0]:
-                    if img_url:
-                        st.image(img_url, use_column_width=True)
-                    else:
-                        # Show a placeholder when no poster is available
-                        st.markdown("""
-                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                    border-radius: 8px;
-                                    padding: 40px 20px;
-                                    text-align: center;
-                                    color: white;
-                                    font-size: 3rem;">
-                            📺
-                        </div>
-                        """, unsafe_allow_html=True)
+                    clickable_poster(tmdb_id, poster_path)
 
                 with cols[1]:
                     clickable_title(title, {"tmdb_id": tmdb_id, "title": title, "poster_path": poster_path, "overview": overview})
@@ -2278,10 +2290,7 @@ with _main_new:
 
             # Poster
             with cols[0]:
-                if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
-                else:
-                    st.write(ICONS["tv"])
+                clickable_poster(tmdb_id, poster_path)
 
             # Title and info
             with cols[1]:
@@ -2331,10 +2340,7 @@ with _main_trending:
 
             # Poster
             with cols[0]:
-                if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
-                else:
-                    st.write(ICONS["tv"])
+                clickable_poster(tmdb_id, poster_path)
 
             # Title and info
             with cols[1]:
@@ -2385,10 +2391,7 @@ with _main_top:
 
             # Poster
             with cols[0]:
-                if poster_path:
-                    st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
-                else:
-                    st.write(ICONS["tv"])
+                clickable_poster(tmdb_id, poster_path)
 
             # Title and info
             with cols[1]:
