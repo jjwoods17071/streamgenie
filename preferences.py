@@ -175,7 +175,8 @@ def should_send_email(client: Client, user_id: str, notification_type: str) -> b
             "series_finale": "email_series_finale",
             "series_cancelled": "email_series_cancelled",
             "show_added": "email_show_added",
-            "status_change": "email_show_added"  # Map status_change to show_added
+            "status_change": "email_show_added",  # Map status_change to show_added
+            "leaving_soon": "email_leaving_soon"
         }
 
         pref_key = type_mapping.get(notification_type, None)
@@ -215,7 +216,8 @@ def should_create_inapp_notification(client: Client, user_id: str, notification_
             "series_finale": "inapp_series_finale",
             "series_cancelled": "inapp_series_cancelled",
             "show_added": "inapp_show_added",
-            "status_change": "inapp_show_added"
+            "status_change": "inapp_show_added",
+            "leaving_soon": "inapp_leaving_soon"
         }
 
         pref_key = type_mapping.get(notification_type, None)

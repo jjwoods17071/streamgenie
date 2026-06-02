@@ -1452,6 +1452,17 @@ auth.inject_recovery_hash_shim()
 if auth.handle_password_recovery(client):
     st.stop()
 
+# ── TEMP test-mode: bypass login and run as jjwoods@gmail.com to speed up testing.
+#    Set DEV_LOGIN_BYPASS = False (or remove this block) to re-enable real login. ──
+DEV_LOGIN_BYPASS = True
+_TEST_USER = {"id": "d10fc919-ec74-42c0-846e-16d763eac844", "email": "jjwoods@gmail.com"}
+if DEV_LOGIN_BYPASS and not auth.is_authenticated():
+    st.session_state.user = dict(_TEST_USER)
+    try:
+        auth.ensure_user_record(client, _TEST_USER["id"], _TEST_USER["email"])
+    except Exception:
+        pass
+
 # Persistent login: if the in-memory session was wiped (phone screen-lock / tab
 # reconnect) but a refresh-token cookie exists, restore the session silently.
 if not auth.is_authenticated():
@@ -2027,6 +2038,12 @@ if show_settings:
                  "A show is added to your watchlist or otherwise changes status.",
                  "email_show_added", False, "inapp_show_added", True),
             ]
+            # Leaving-soon row appears once its DB columns exist (after the migration)
+            if "inapp_leaving_soon" in user_prefs:
+                _NOTIFS.append((
+                    ":material/schedule: Leaving soon",
+                    "A show you track is about to leave a streaming service.",
+                    "email_leaving_soon", False, "inapp_leaving_soon", True))
 
             hdr = st.columns([5, 1.3, 1.3])
             hdr[0].markdown("**Notification**")
