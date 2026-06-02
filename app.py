@@ -1473,6 +1473,21 @@ st.markdown("""
 /* Hide the image fullscreen/expand button (serves no purpose here) */
 [data-testid="StyledFullScreenButton"]{display:none !important;}
 button[title="View fullscreen"]{display:none !important;}
+/* Tighten the big default top whitespace so we use the space better */
+.block-container{padding-top:2.2rem !important;}
+header[data-testid="stHeader"]{height:0;}
+/* Punch up the main nav tabs: bigger, bolder, clearer active state */
+div[data-testid="stTabs"] > div > div[role="tablist"]{
+    gap:0.25rem; border-bottom:2px solid rgba(128,128,128,0.25); margin-bottom:0.4rem;}
+div[data-testid="stTabs"] button[role="tab"]{
+    padding:0.45rem 1.0rem; border-radius:8px 8px 0 0;}
+div[data-testid="stTabs"] button[role="tab"] p{
+    font-size:1.06rem; font-weight:700;}
+div[data-testid="stTabs"] button[role="tab"]:hover{background:rgba(128,128,128,0.10);}
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{background:rgba(28,131,225,0.10);}
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p{color:#1c83e1;}
+/* Search tab → far right of the nav bar */
+div[data-testid="stTabs"] > div > div[role="tablist"] > button[role="tab"]:last-of-type{margin-left:auto;}
 /* Full poster, natural 2:3 aspect (no cropping) */
 .sgposter{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
 div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
@@ -2137,10 +2152,11 @@ _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
 def _add_discovered(tmdb_id, title, overview, poster_path):
     upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
 
-_main_upcoming, _main_watch, _main_search, _main_new, _main_trending, _main_top, _main_grow = st.tabs([
-    ":material/upcoming: Upcoming", ":material/tv: Your Watchlist", ":material/search: Search",
+_main_upcoming, _main_watch, _main_new, _main_trending, _main_top, _main_grow, _main_search = st.tabs([
+    ":material/upcoming: Upcoming", ":material/tv: Your Watchlist",
     ":material/fiber_new: New This Month", ":material/trending_up: Trending",
     ":material/star: Top Rated", ":material/playlist_add: Grow Watchlist",
+    ":material/search: Search",
 ])
 
 with _main_upcoming:
