@@ -96,12 +96,18 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
         return
 
     ids = tuple(i for p in picks for i in PROVIDERS[p])
-    shows = [s for s in discover_returning(ids, region) if s["tmdb_id"] not in watchlist_ids]
+    owned = {int(x) for x in watchlist_ids if x is not None}
+    found = discover_returning(ids, region)
+    shows = [s for s in found if int(s["tmdb_id"]) not in owned]
+    excluded = len(found) - len(shows)
     if not shows:
-        st.info("Nothing new found (everything popular is already on your watchlist, or no services selected).")
+        st.info("Nothing new found — everything popular on your services is already on your watchlist (or no services selected).")
         return
 
-    st.success(f"{len(shows)} returning shows on your services not yet tracked.")
+    note = f"**{len(shows)}** returning shows on your services not yet tracked."
+    if excluded:
+        note += f"  ·  filtered out **{excluded}** already on your watchlist."
+    st.success(note)
     if st.button(f"➕ Add all {len(shows)}", key="disc_add_all"):
         n = 0
         for s in shows:
@@ -220,27 +226,33 @@ def render_netflix_import(watchlist_ids: Set[int], add_fn: Callable) -> None:
     titles = parse_netflix_titles(up.getvalue())
     st.write(f"Found **{len(titles)}** unique titles in your history. Matching to TMDB…")
 
-    returning, other = [], 0
+    owned = {int(x) for x in watchlist_ids if x is not None}
+    returning, ended, already, seen = [], 0, 0, set()
     prog = st.progress(0.0)
     for i, t in enumerate(titles[:200]):  # cap to keep it responsive
         m = match_title(t)
         prog.progress((i + 1) / min(len(titles), 200))
         if not m:
             continue
-        if m["tmdb_id"] in watchlist_ids:
+        tid = int(m["tmdb_id"])
+        if tid in owned:                 # already on the watchlist → filter out
+            already += 1
             continue
+        if tid in seen:                  # duplicate match within this import
+            continue
+        seen.add(tid)
         if m["status"] in ("Returning Series", "In Production", "Planned"):
             returning.append(m)
         else:
-            other += 1
+            ended += 1
     prog.empty()
 
     if not returning:
-        st.info(f"No new still-returning series found ({other} matched titles are ended/already tracked).")
+        st.info(f"No new still-returning series found — filtered out {already} already on your watchlist and {ended} ended.")
         return
 
     st.success(f"{len(returning)} still-returning series not yet on your watchlist "
-               f"({other} others were ended or already tracked).")
+               f"(filtered out {already} already tracked + {ended} ended).")
     if st.button(f"➕ Add all {len(returning)} returning series", key="nflx_add_all", type="primary"):
         n = 0
         for m in returning:

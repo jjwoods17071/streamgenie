@@ -589,14 +589,18 @@ def _current_season(meta: Dict[str, Any]):
 
 
 def open_show_page(show: Dict[str, Any]) -> None:
-    """Navigate to the show-detail page via a ?show=<id> query param. This creates a
-    real browser-history entry (so the browser Back button returns to the list, and
-    the page is bookmarkable) while still being an in-app rerun (no full reload → the
-    login session is preserved). The full row is cached so the PDP has title/poster."""
+    """on_click callback: open the PDP via a ?show=<id> query param. Runs BEFORE the
+    rerun, so the router (top of script) sees the new param on the first pass — single
+    click, no race. Creates a real history entry (browser Back returns to the list) and
+    is bookmarkable; still an in-app rerun (no reload → login preserved)."""
     sid = show.get("tmdb_id")
     st.session_state.setdefault("_showcache", {})[sid] = show
     st.query_params["show"] = str(sid)
-    st.rerun()
+
+
+def close_show_page() -> None:
+    """on_click callback: return to the list by clearing the ?show param."""
+    st.query_params.clear()
 
 
 _OPENSEQ = [0]  # reset to 0 every Streamlit rerun (whole script re-executes)
@@ -607,9 +611,9 @@ def clickable_title(title: str, show: Dict[str, Any]) -> None:
     The per-run sequence makes the key unique even if the same show appears in
     several tabs (New/Trending/Top) in the same render."""
     _OPENSEQ[0] += 1
-    if st.button(title, key=f"open_{show.get('tmdb_id')}_{_OPENSEQ[0]}",
-                 use_container_width=True, help="Open show details"):
-        open_show_page(show)
+    st.button(title, key=f"open_{show.get('tmdb_id')}_{_OPENSEQ[0]}",
+              use_container_width=True, help="Open show details",
+              on_click=open_show_page, args=(show,))
 
 
 def clickable_poster(tmdb_id, poster_path) -> None:
@@ -622,17 +626,15 @@ def clickable_poster(tmdb_id, poster_path) -> None:
                     unsafe_allow_html=True)
     else:
         st.markdown('<div class="sgposter sgph">📺</div>', unsafe_allow_html=True)
-    if st.button("View details", key=f"pp_{tmdb_id}_{_OPENSEQ[0]}", use_container_width=True):
-        open_show_page({"tmdb_id": tmdb_id})
+    st.button("View details", key=f"pp_{tmdb_id}_{_OPENSEQ[0]}", use_container_width=True,
+              on_click=open_show_page, args=({"tmdb_id": tmdb_id, "poster_path": poster_path},))
 
 
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Full-page show detail (PDP): poster + summary + availability + ALL seasons
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
     tmdb_id = show.get("tmdb_id")
-    if st.button("← Back to list", key="pdp_back"):
-        st.query_params.clear()
-        st.rerun()
+    st.button("← Back to list", key="pdp_back", on_click=close_show_page)
 
     meta = get_show_meta(tmdb_id) or {}
     title = show.get("title") or meta.get("name") or "Show"
@@ -663,20 +665,19 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 wl_row = None
         if wl_row is not None:
             st.caption("✓ On your watchlist")
-            if st.button("🗑️ Remove from watchlist", key=f"pdp_del_{tmdb_id}"):
+            def _pdp_remove():
                 delete_show(client, tmdb_id, wl_row.get("region") or DEFAULT_REGION,
                             wl_row.get("provider_name", DEFAULT_PROVIDER))
-                st.query_params.clear()
-                st.rerun()
+                st.query_params.clear()   # back to the list after removing
+            st.button("🗑️ Remove from watchlist", key=f"pdp_del_{tmdb_id}", on_click=_pdp_remove)
         elif client is not None:
-            if st.button("➕ Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary"):
+            def _pdp_add():
                 _nxt = meta.get("next_episode_to_air")
                 _nad = _nxt.get("air_date") if isinstance(_nxt, dict) else None
                 upsert_show(client, tmdb_id, title, DEFAULT_REGION, True, _nad,
                             (meta.get("overview") or show.get("overview") or ""),
                             show.get("poster_path"), "Multiple Providers")
-                st.success("Added to your watchlist!")
-                st.rerun()
+            st.button("➕ Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary", on_click=_pdp_add)
 
     ov = (meta.get("overview") or show.get("overview") or "").strip()
     if ov:
@@ -725,9 +726,9 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
         for j, r in enumerate(rows[i:i + per_row]):
             with cols[j]:
                 clickable_poster(r['tmdb_id'], r.get("poster_path"))
-                if st.button(r['title'], key=f"open_{r['tmdb_id']}_{r.get('provider_name')}",
-                             use_container_width=True, help="Open show details"):
-                    open_show_page(r)
+                st.button(r['title'], key=f"open_{r['tmdb_id']}_{r.get('provider_name')}",
+                          use_container_width=True, help="Open show details",
+                          on_click=open_show_page, args=(r,))
                 nad = r.get("next_air_date")
                 shown = False
                 if nad:
