@@ -1368,14 +1368,16 @@ auth.render_user_menu(client)
 # click opens the detail page via an in-app rerun (no page reload → keeps login).
 st.markdown("""
 <style>
-.sgposter{width:100%;height:240px;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
-div.sgph{background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
-/* Overlay the button that immediately follows a poster image, invisibly, on top of it.
-   Cover both Streamlit element-container test-id conventions. */
-[data-testid="stElementContainer"]:has(.sgposter) + [data-testid="stElementContainer"]{margin-top:-240px;height:240px;position:relative;z-index:3;}
-[data-testid="stElementContainer"]:has(.sgposter) + [data-testid="stElementContainer"] button{height:240px;width:100%;opacity:0;cursor:pointer;}
-[data-testid="element-container"]:has(.sgposter) + [data-testid="element-container"]{margin-top:-240px;height:240px;position:relative;z-index:3;}
-[data-testid="element-container"]:has(.sgposter) + [data-testid="element-container"] button{height:240px;width:100%;opacity:0;cursor:pointer;}
+/* Full poster, natural 2:3 aspect (no cropping) */
+.sgposter{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
+div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
+/* Overlay the following button invisibly over the poster. margin-% is relative to
+   WIDTH, so -150% = 1.5×width = the 2:3 poster's height; the button uses the same
+   aspect-ratio so it covers the poster exactly at any column width. */
+[data-testid="stElementContainer"]:has(.sgposter) + [data-testid="stElementContainer"]{margin-top:-150%;position:relative;z-index:3;}
+[data-testid="stElementContainer"]:has(.sgposter) + [data-testid="stElementContainer"] button{width:100%;aspect-ratio:2/3;opacity:0;cursor:pointer;}
+[data-testid="element-container"]:has(.sgposter) + [data-testid="element-container"]{margin-top:-150%;position:relative;z-index:3;}
+[data-testid="element-container"]:has(.sgposter) + [data-testid="element-container"] button{width:100%;aspect-ratio:2/3;opacity:0;cursor:pointer;}
 </style>
 """, unsafe_allow_html=True)
 
