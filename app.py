@@ -719,7 +719,16 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     if st.session_state.get(sel_key) not in nums:
         st.session_state[sel_key] = cur if cur in nums else nums[-1]
 
-    st.markdown("### Seasons  ·  🟢 = current season")
+    st.markdown("### Seasons  ·  🟢 = current  ·  blue bar = your watch progress")
+    # Watched-episode counts per season → the per-brick progress bars (resume helper)
+    track = bool(client is not None and user_id and watched.table_available(client))
+    watched_by_season: Dict[int, int] = {}
+    if track:
+        try:
+            for (sn, en) in watched.get_watched(client, user_id, tmdb_id):
+                watched_by_season[sn] = watched_by_season.get(sn, 0) + 1
+        except Exception:
+            watched_by_season = {}
     per_row = 6
     for i in range(0, len(seasons), per_row):
         bcols = st.columns(per_row)
@@ -733,6 +742,16 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                              type="primary" if is_sel else "secondary"):
                     st.session_state[sel_key] = n
                     st.rerun()
+                if track:
+                    wn = min(watched_by_season.get(n, 0), ec) if ec else 0
+                    pct = int(round(100 * wn / ec)) if ec else 0
+                    done = bool(ec and wn >= ec)
+                    cap = "—" if not ec else (("✓ " if done else "") + f"{wn}/{ec}")
+                    st.markdown(
+                        f'<div style="background:#e9e9e9;border-radius:4px;height:7px;margin-top:2px;overflow:hidden">'
+                        f'<div style="width:{pct}%;background:#1c83e1;height:100%"></div></div>'
+                        f'<div style="font-size:0.66rem;color:#888;text-align:center;line-height:1.5">{cap}</div>',
+                        unsafe_allow_html=True)
 
     sel = st.session_state.get(sel_key, nums[-1])
     head = f"#### {labels.get(sel, f'Season {sel}')}"
