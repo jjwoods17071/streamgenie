@@ -16,6 +16,7 @@ import leaving_soon  # Admin-curated "leaving soon" list
 import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
 import dismissed  # "Not interested" dismissals for discovery carousels
+import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
 # Load environment variables
 load_dotenv()
@@ -679,13 +680,24 @@ def clickable_title(title: str, show: Dict[str, Any]) -> None:
               on_click=open_show_page, args=(show,))
 
 
+def _poster_src(poster_path):
+    """Full image URL for a poster_path — passes through real URLs (sports team logos)
+    and prefixes the TMDB CDN for TMDB paths."""
+    if not poster_path:
+        return None
+    p = str(poster_path)
+    return p if p.startswith("http") else f"https://image.tmdb.org/t/p/w342{p}"
+
+
 def clickable_poster(tmdb_id, poster_path) -> None:
     """Render a poster with an invisible Streamlit button overlaid on top (see the
     .sgposter CSS). Clicking the poster opens the detail page via an in-app rerun —
     NOT a full-page reload, which would drop the login session."""
     _OPENSEQ[0] += 1
-    if poster_path:
-        st.markdown(f'<img class="sgposter" src="https://image.tmdb.org/t/p/w342{poster_path}">',
+    src = _poster_src(poster_path)
+    if src:
+        _fit = "contain" if str(poster_path).startswith("http") else "cover"
+        st.markdown(f'<img class="sgposter" style="object-fit:{_fit}" src="{src}">',
                     unsafe_allow_html=True)
     else:
         st.markdown('<div class="sgposter sgph">📺</div>', unsafe_allow_html=True)
@@ -693,10 +705,77 @@ def clickable_poster(tmdb_id, poster_path) -> None:
               on_click=open_show_page, args=({"tmdb_id": tmdb_id, "poster_path": poster_path},))
 
 
+def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
+    """Detail page for a followed NFL team — schedule as 'episodes' (games)."""
+    st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
+    team_id = sports.espn_team_id(show.get("tmdb_id"))
+    name = show.get("title") or "Team"
+    logo = show.get("poster_path")
+    games = sports.get_team_schedule(team_id)
+    ng = sports.next_game(games)
+
+    w = l = 0
+    for g in games:
+        if g.get("completed") and g.get("home_score") not in (None, "") and g.get("away_score") not in (None, ""):
+            try:
+                hs, as_ = float(g["home_score"]), float(g["away_score"])
+            except Exception:
+                continue
+            ours, theirs = (hs, as_) if g.get("home") == name else (as_, hs)
+            if ours > theirs:
+                w += 1
+            elif ours < theirs:
+                l += 1
+
+    hc = st.columns([1, 3])
+    with hc[0]:
+        if logo:
+            st.image(logo, use_column_width=True)
+    with hc[1]:
+        st.markdown(f"## {name}")
+        st.markdown(f":material/sports_football: **NFL**" + (f"  ·  **{w}-{l}**" if (w or l) else ""))
+        if ng:
+            extra = f"  ·  📺 {ng['network']}" if ng.get("network") else ""
+            st.success(f"🟢 **Next game:** {ng['away']} @ {ng['home']} — {ng['date']}{extra}")
+        if client is not None:
+            def _rm():
+                delete_show(client, show.get("tmdb_id"), show.get("region") or DEFAULT_REGION,
+                            show.get("provider_name", "NFL"))
+                st.query_params.clear()
+            st.button(":material/delete: Remove from watchlist", key=f"sp_del_{team_id}", on_click=_rm)
+
+    st.caption(f"📍 CBS/Fox regional coverage varies by market — check the "
+               f"[506sports coverage maps]({sports.COVERAGE_MAP_URL}).")
+    st.divider()
+    st.markdown("### Schedule  ·  🟢 = next game")
+    if not games:
+        st.info("No schedule available right now.")
+        return
+    for g in games:
+        is_next = bool(ng and g.get("datetime") == ng.get("datetime"))
+        c = st.columns([2, 5, 2])
+        with c[0]:
+            st.markdown(f"**Wk {g.get('week', '?')}**")
+            st.caption(g.get("date") or "TBA")
+        with c[1]:
+            line = f"{g.get('away')} @ {g.get('home')}"
+            if g.get("completed") and g.get("home_score") not in (None, ""):
+                line += f"  —  {g.get('away_score')}–{g.get('home_score')}"
+            st.markdown((("🟢 **" + line + "**") if is_next else line))
+            if g.get("network"):
+                st.caption(f"📺 {g['network']}")
+        with c[2]:
+            st.caption(g.get("status") or ("Final" if g.get("completed") else "Scheduled"))
+        st.markdown("<hr style='margin:2px 0;opacity:0.15'>", unsafe_allow_html=True)
+
+
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Full-page show detail (PDP): poster + summary + availability + ALL seasons
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
     tmdb_id = show.get("tmdb_id")
+    if sports.is_sports_id(tmdb_id):
+        render_sports_page(show, client, user_id)
+        return
     st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
 
     meta = get_show_meta(tmdb_id) or {}
@@ -982,6 +1061,10 @@ def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List
     updated_shows = []
 
     for show in shows:
+        # Sports-team rows (negative ids) aren't TMDB shows — leave their game date as-is
+        if (show.get("tmdb_id") or 0) < 0:
+            updated_shows.append(show)
+            continue
         next_air_date = show.get("next_air_date")
         needs_refresh = False
 
@@ -2454,11 +2537,43 @@ with _main_top:
 
 
 with _main_grow:
-    dtab1, dtab2 = st.tabs(["🔎 New & Returning on Your Services", "📥 Import Netflix History"])
+    dtab1, dtab2, dtab3 = st.tabs([
+        "🔎 New & Returning on Your Services", "📥 Import Netflix History",
+        ":material/sports_football: Follow an NFL Team"])
     with dtab1:
         discover.render_discover_section(region, _wl_ids, _add_discovered)
     with dtab2:
         discover.render_netflix_import(_wl_ids, _add_discovered)
+    with dtab3:
+        st.caption("Follow an NFL team and its games show up in **Upcoming** like episodes — "
+                   "with TV networks and a link to regional coverage maps.")
+        _teams = sports.get_nfl_teams()
+        if not _teams:
+            st.info("Couldn't load NFL teams right now — try again shortly.")
+        else:
+            _pick = st.selectbox("Team", [t["name"] for t in _teams], key="sports_pick")
+            _t = next((x for x in _teams if x["name"] == _pick), None)
+            if _t:
+                _neg = -int(_t["id"])
+                cc = st.columns([1, 4])
+                with cc[0]:
+                    if _t.get("logo"):
+                        st.image(_t["logo"], width=84)
+                with cc[1]:
+                    _g = sports.get_team_schedule(_t["id"])
+                    _ng = sports.next_game(_g)
+                    if _ng:
+                        st.markdown(f"**Next game:** {_ng['away']} @ {_ng['home']} — {_ng['date']}"
+                                    + (f"  ·  📺 {_ng['network']}" if _ng.get('network') else ""))
+                    if _neg in _wl_ids:
+                        st.markdown(":blue[✓ Already following]")
+                    else:
+                        def _follow(_team=_t, _id=_neg, _next=_ng):
+                            upsert_show(client, _id, _team["name"], "US", True,
+                                        (_next["date"] if _next else None),
+                                        "NFL team", _team.get("logo"), "NFL")
+                        st.button(":material/add: Follow this team", key=f"follow_{_t['id']}",
+                                  type="primary", on_click=_follow)
 
     # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
     try:
@@ -2500,6 +2615,9 @@ with _main_watch:
     if rows:
         user_id = get_user_id()
         for row in rows:
+            # Skip sports-team rows (negative ids aren't TMDB shows)
+            if (row.get('tmdb_id') or 0) < 0:
+                continue
             # Check if production_status is missing or null
             if not row.get('production_status'):
                 try:
