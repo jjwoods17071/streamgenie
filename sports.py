@@ -20,7 +20,14 @@ LEAGUES = {
     "nba":  ("basketball", "nba",  "🏀 NBA",  3, "https://506sports.com/nba.php"),
     "nhl":  ("hockey",     "nhl",  "🏒 NHL",  4, "https://506sports.com/nhl.php"),
     "wnba": ("basketball", "wnba", "🏀 WNBA", 5, None),
+    "epl":  ("soccer", "eng.1",           "⚽ EPL", 6, None),
+    "ucl":  ("soccer", "uefa.champions",  "⚽ UCL", 7, None),
+    "mls":  ("soccer", "usa.1",           "⚽ MLS", 8, None),
+    "wc":   ("soccer", "fifa.world",      "🌍 World Cup", 9, None),
+    "cfb":  ("football",   "college-football",         "🏈 College FB", 10, None),
+    "cbb":  ("basketball", "mens-college-basketball",  "🏀 College BB", 11, None),
 }
+SOCCER = {"epl", "ucl", "mls", "wc"}   # leagues that can draw → W-D-L records
 _IDX_TO_LEAGUE = {v[3]: k for k, v in LEAGUES.items()}
 
 
@@ -135,8 +142,8 @@ def next_game(games):
 
 
 def record(games, team_name):
-    """W-L from completed games for the followed team."""
-    w = l = 0
+    """(wins, losses, draws) from completed games for the followed team."""
+    w = l = d = 0
     for g in games:
         if g.get("completed") and g.get("home_score") not in (None, "") and g.get("away_score") not in (None, ""):
             try:
@@ -148,4 +155,10 @@ def record(games, team_name):
                 w += 1
             elif ours < theirs:
                 l += 1
-    return w, l
+            else:
+                d += 1
+    return w, l, d
+
+
+def record_str(league: str, w: int, l: int, d: int) -> str:
+    return f"{w}-{d}-{l}" if league in SOCCER else f"{w}-{l}"

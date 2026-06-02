@@ -713,7 +713,7 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     logo = show.get("poster_path")
     games = sports.get_team_schedule(league, team_id) if league else []
     ng = sports.next_game(games)
-    w, l = sports.record(games, name)
+    w, l, d = sports.record(games, name)
 
     def _logo_img(u, h=104):
         return f'<img src="{u}" style="height:{h}px;vertical-align:middle;margin:0 8px">' if u else ""
@@ -724,7 +724,8 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             st.image(logo, use_column_width=True)
     with hc[1]:
         st.markdown(f"## {name}")
-        st.markdown(sports.league_label(league) + (f"  ·  **{w}-{l}**" if (w or l) else ""))
+        st.markdown(sports.league_label(league)
+                    + (f"  ·  **{sports.record_str(league, w, l, d)}**" if (w or l or d) else ""))
         if ng:
             _net = f' · 📺 {ng["network"]}' if ng.get("network") else ""
             st.markdown(
@@ -2590,6 +2591,12 @@ with _main_grow:
             st.info("Couldn't load teams right now — try again shortly.")
         else:
             st.markdown(f"#### {sports.league_label(_lk)} — pick a team to follow")
+            _q = st.text_input("Filter teams", "", key=f"team_filter_{_lk}",
+                               placeholder="Type to filter…", label_visibility="collapsed")
+            if _q:
+                _ql = _q.lower()
+                _teams = [t for t in _teams
+                          if _ql in (t.get("name") or "").lower() or _ql in (t.get("abbrev") or "").lower()]
             _per = 6
             for _i in range(0, len(_teams), _per):
                 _gc = st.columns(_per)
