@@ -55,6 +55,8 @@ def send_email(to_email: str, subject: str, html_body: str, reply_to: str = "jjw
         msg["To"] = to_email
         if reply_to:
             msg["Reply-To"] = reply_to
+        if "postmark" in cfg["host"].lower():
+            msg["X-PM-Message-Stream"] = "outbound"  # Default Transactional Stream
         msg.attach(MIMEText(html_body, "html"))
         with smtplib.SMTP(cfg["host"], cfg["port"], timeout=20) as server:
             server.ehlo()
