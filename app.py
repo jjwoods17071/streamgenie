@@ -445,6 +445,11 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
     today = dt.date.today()
     track = bool(client is not None and user_id and watched.table_available(client))
     wset = watched.get_watched(client, user_id, tv_id) if track else set()
+    # Checkbox widgets keep their own state by key, ignoring value= on rerun. Bump this
+    # nonce on a season-level change so the per-episode checkboxes are recreated fresh
+    # from the DB (otherwise "Mark season watched" updates the DB but the boxes don't move).
+    nonce_key = f"{key_prefix}_nonce_{sel}"
+    nonce = st.session_state.get(nonce_key, 0)
 
     if track:
         aired = [e for e in eps if (e.get("air_date") and e["air_date"] <= today.isoformat())]
@@ -457,10 +462,12 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
             if bc[0].button("✓ Mark season watched", key=f"{key_prefix}_markall_{sel}",
                             use_container_width=True):
                 watched.set_season(client, user_id, tv_id, sel, aired_nums, True)
+                st.session_state[nonce_key] = nonce + 1
                 st.rerun()
             if bc[1].button("Clear season", key=f"{key_prefix}_clearall_{sel}",
                             use_container_width=True):
                 watched.set_season(client, user_id, tv_id, sel, aired_nums, False)
+                st.session_state[nonce_key] = nonce + 1
                 st.rerun()
 
     for ep in eps:
@@ -500,7 +507,7 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
                 else:
                     is_watched = (sel, en) in wset
                     new_val = st.checkbox("✓", value=is_watched,
-                                          key=f"{key_prefix}_w_{sel}_{en}",
+                                          key=f"{key_prefix}_w_{sel}_{en}_{nonce}",
                                           help="Mark watched")
                     if new_val != is_watched:
                         watched.set_watched(client, user_id, tv_id, sel, en, new_val)
@@ -1121,6 +1128,13 @@ def render_upcoming(rows, as_tab=False):
                   help="Unpin from top" if is_pinned else "Pin to top",
                   on_click=_toggle_pin, args=(tid, not is_pinned))
 
+    def _remove_button(r, ctx="up"):
+        tid = r.get("tmdb_id")
+        st.button("🗑", key=f"rm_{ctx}_{tid}", help="Remove from your list",
+                  on_click=delete_show,
+                  args=(client, tid, r.get("region") or DEFAULT_REGION,
+                        r.get("provider_name") or DEFAULT_PROVIDER))
+
     def _row(r, d=None, show_pin=True, ctx="up"):
         ne = get_next_episode(r["tmdb_id"])
         ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
@@ -1140,6 +1154,7 @@ def render_upcoming(rows, as_tab=False):
         if show_pin:
             with c[2]:
                 _pin_button(r, ctx)
+                _remove_button(r, ctx)
 
     def _body():
         # 📌 Pinned — actively-watched shows kept at the very top (even with no air date)
@@ -1198,6 +1213,7 @@ def render_upcoming(rows, as_tab=False):
                 st.caption(f":blue[**{n} ready to watch**]")
             with c[2]:
                 _pin_button(r, "av")
+                _remove_button(r, "av")
         if len(avail) > len(top):
             with st.expander(f"➕ {len(avail) - len(top)} more shows with episodes ready"):
                 for n, r in avail[len(top):]:
@@ -1207,6 +1223,7 @@ def render_upcoming(rows, as_tab=False):
                         st.caption(f":blue[{n} ready to watch]")
                     with cc[1]:
                         _pin_button(r, "avx")
+                        _remove_button(r, "avx")
         st.divider()
 
     if as_tab:
