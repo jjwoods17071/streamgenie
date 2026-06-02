@@ -608,12 +608,12 @@ def render_show_row(r, view_mode, client, wcounts):
     # Show Details — summary + availability + season bricks + episode guide; lazy-loaded.
     eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
     if st.session_state.get(eg_key):
-        if st.button("📖 Hide Details", key=f"{eg_key}_btn", use_container_width=True):
+        if st.button(":material/menu_book: Hide Details", key=f"{eg_key}_btn", use_container_width=True):
             st.session_state[eg_key] = False
             st.rerun()
         render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id(), overview=r.get("overview"))
     else:
-        if st.button("📖 Show Details & Episodes", key=f"{eg_key}_btn", use_container_width=True):
+        if st.button(":material/menu_book: Show Details & Episodes", key=f"{eg_key}_btn", use_container_width=True):
             st.session_state[eg_key] = True
             st.rerun()
     st.divider()
@@ -687,7 +687,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Full-page show detail (PDP): poster + summary + availability + ALL seasons
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
     tmdb_id = show.get("tmdb_id")
-    st.button("← Back to list", key="pdp_back", on_click=close_show_page)
+    st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
 
     meta = get_show_meta(tmdb_id) or {}
     title = show.get("title") or meta.get("name") or "Show"
@@ -722,7 +722,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 delete_show(client, tmdb_id, wl_row.get("region") or DEFAULT_REGION,
                             wl_row.get("provider_name", DEFAULT_PROVIDER))
                 st.query_params.clear()   # back to the list after removing
-            st.button("🗑️ Remove from watchlist", key=f"pdp_del_{tmdb_id}", on_click=_pdp_remove)
+            st.button(":material/delete: Remove from watchlist", key=f"pdp_del_{tmdb_id}", on_click=_pdp_remove)
         elif client is not None:
             def _pdp_add():
                 _nxt = meta.get("next_episode_to_air")
@@ -730,7 +730,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 upsert_show(client, tmdb_id, title, DEFAULT_REGION, True, _nad,
                             (meta.get("overview") or show.get("overview") or ""),
                             show.get("poster_path"), "Multiple Providers")
-            st.button("➕ Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary", on_click=_pdp_add)
+            st.button(":material/add: Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary", on_click=_pdp_add)
 
     ov = (meta.get("overview") or show.get("overview") or "").strip()
     if ov:
@@ -792,7 +792,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     related = get_related_shows(tmdb_id)
     if related:
         st.divider()
-        st.markdown("### 🧬 Related shows & spin-offs")
+        st.markdown("### :material/hub: Related shows & spin-offs")
         st.caption("Tap a poster to open it, or ➕ to add it to your watchlist.")
         owned_ids = set()
         if client is not None:
@@ -814,7 +814,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                         def _add_related(_rs=rs):
                             upsert_show(client, _rs["tmdb_id"], _rs["title"], DEFAULT_REGION, True, None,
                                         _rs.get("overview", ""), _rs.get("poster_path"), "Multiple Providers")
-                        st.button("➕ Add", key=f"rel_add_{tmdb_id}_{rs['tmdb_id']}",
+                        st.button(":material/add: Add", key=f"rel_add_{tmdb_id}_{rs['tmdb_id']}",
                                   use_container_width=True, on_click=_add_related)
 
 
@@ -2116,49 +2116,6 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
-# ── Icon-library demo route (?demo=icons): emoji vs Material Symbols vs Font Awesome ──
-if st.query_params.get("demo") == "icons":
-    st.markdown("<style>@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css');</style>",
-                unsafe_allow_html=True)
-    st.title("🎨 Icon library comparison")
-    st.caption("Same concepts in three systems. Note: only **Material Symbols** render inside Streamlit "
-               "buttons/tabs — Font Awesome only works in plain markdown.")
-    _demo = [
-        ("Search", "🔍", ":material/search:", "fa-magnifying-glass"),
-        ("Add", "➕", ":material/add_circle:", "fa-circle-plus"),
-        ("Remove", "🗑️", ":material/delete:", "fa-trash"),
-        ("TV / Show", "📺", ":material/tv:", "fa-tv"),
-        ("Calendar", "📅", ":material/calendar_today:", "fa-calendar"),
-        ("Rating", "⭐", ":material/star:", "fa-star"),
-        ("Trending", "🔥", ":material/trending_up:", "fa-fire"),
-        ("New", "✨", ":material/auto_awesome:", "fa-wand-magic-sparkles"),
-        ("Settings", "⚙️", ":material/settings:", "fa-gear"),
-        ("Watched", "✓", ":material/check_circle:", "fa-circle-check"),
-        ("Episodes", "📖", ":material/menu_book:", "fa-book-open"),
-        ("Now airing", "🟢", ":material/radio_button_checked:", "fa-circle-dot"),
-        ("Back", "⬅️", ":material/arrow_back:", "fa-arrow-left"),
-        ("Watchlist", "📌", ":material/bookmark:", "fa-bookmark"),
-        ("Upcoming", "🔜", ":material/upcoming:", "fa-clock"),
-    ]
-    hc = st.columns([2, 1, 1, 1])
-    for col, lab in zip(hc, ["**Concept**", "**Emoji (now)**", "**Material**", "**Font Awesome**"]):
-        col.markdown(lab)
-    for name, emo, mat, fa in _demo:
-        c = st.columns([2, 1, 1, 1])
-        c[0].markdown(name)
-        c[1].markdown(f"<span style='font-size:1.6rem'>{emo}</span>", unsafe_allow_html=True)
-        c[2].markdown(f"### {mat}")
-        c[3].markdown(f"<i class='fa-solid {fa}' style='font-size:1.5rem'></i>", unsafe_allow_html=True)
-    st.divider()
-    st.markdown("#### Inside a button (this is the deciding test):")
-    bc = st.columns(3)
-    bc[0].button("🔍 Emoji", key="demo_b1")
-    bc[1].button(":material/search: Material", key="demo_b2")
-    bc[2].button("<i class='fa-solid fa-magnifying-glass'></i> Font Awesome", key="demo_b3")
-    st.caption("☝️ The Font Awesome button shows the raw tag as text — that's the limitation.")
-    st.button("⬅️ Back to the app", key="demo_back", on_click=lambda: st.query_params.clear())
-    st.stop()
-
 # ── Show-detail page (PDP) router: ?show=<id> takes over the page. Driven by the URL
 #    so the browser Back button returns to the list (and the page is bookmarkable). ──
 if "show" in st.query_params:
@@ -2181,7 +2138,9 @@ def _add_discovered(tmdb_id, title, overview, poster_path):
     upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
 
 _main_upcoming, _main_watch, _main_search, _main_new, _main_trending, _main_top, _main_grow = st.tabs([
-    "📅 Upcoming", "📺 Your Watchlist", "🔍 Search", "✨ New This Month", "🔥 Trending", "⭐ Top Rated", "🎯 Grow Watchlist",
+    ":material/upcoming: Upcoming", ":material/tv: Your Watchlist", ":material/search: Search",
+    ":material/fiber_new: New This Month", ":material/trending_up: Trending",
+    ":material/star: Top Rated", ":material/playlist_add: Grow Watchlist",
 ])
 
 with _main_upcoming:
@@ -2411,7 +2370,7 @@ with _main_new:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error")
-                if st.button("🚫", key=f"dis_new_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
+                if st.button(":material/block:", key=f"dis_new_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
                     dismissed.dismiss(client, get_user_id(), tmdb_id)
                     st.rerun()
     else:
@@ -2462,7 +2421,7 @@ with _main_trending:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error")
-                if st.button("🚫", key=f"dis_trend_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
+                if st.button(":material/block:", key=f"dis_trend_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
                     dismissed.dismiss(client, get_user_id(), tmdb_id)
                     st.rerun()
     else:
@@ -2513,7 +2472,7 @@ with _main_top:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error")
-                if st.button("🚫", key=f"dis_top_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
+                if st.button(":material/block:", key=f"dis_top_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
                     dismissed.dismiss(client, get_user_id(), tmdb_id)
                     st.rerun()
     else:
@@ -2547,11 +2506,11 @@ with _main_watch:
         if 'view_mode' not in st.session_state:
             st.session_state.view_mode = 'grid'
     with header_cols[2]:
-        if st.button("⊞", key="grid_view", help="Grid view", use_container_width=True):
+        if st.button(":material/grid_view:", key="grid_view", help="Grid view", use_container_width=True):
             st.session_state.view_mode = 'grid'
             st.rerun()
     with header_cols[3]:
-        if st.button("☰", key="list_view", help="List view", use_container_width=True):
+        if st.button(":material/view_list:", key="list_view", help="List view", use_container_width=True):
             st.session_state.view_mode = 'list'
             st.rerun()
 
