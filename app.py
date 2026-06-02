@@ -15,6 +15,7 @@ import show_status  # Show status tracking from TMDB
 import leaving_soon  # Admin-curated "leaving soon" list
 import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
+import dismissed  # "Not interested" dismissals for discovery carousels
 
 # Load environment variables
 load_dotenv()
@@ -482,6 +483,42 @@ def render_show_row(r, view_mode, client, wcounts):
             st.session_state[eg_key] = True
             st.rerun()
     st.divider()
+
+
+def render_grid_gallery(rows, client, wcounts, per_row=5):
+    """True poster-tile gallery for the grid view (vs. the detailed list rows)."""
+    today = dt.date.today()
+    for i in range(0, len(rows), per_row):
+        cols = st.columns(per_row)
+        for j, r in enumerate(rows[i:i + per_row]):
+            with cols[j]:
+                pp = r.get("poster_path")
+                if pp:
+                    st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_container_width=True)
+                else:
+                    st.write(ICONS["movie"])
+                st.markdown(f"**{r['title']}**")
+                nad = r.get("next_air_date")
+                shown = False
+                if nad:
+                    try:
+                        days = (dt.date.fromisoformat(nad) - today).days
+                        if days >= 0:
+                            ne = get_next_episode(r["tmdb_id"])
+                            ep = f"S{ne['season']}E{ne['episode']} · " if ne and ne.get("season") else ""
+                            st.caption(f"📅 {ep}{'TODAY' if days == 0 else f'in {days}d'}")
+                            shown = True
+                    except Exception:
+                        pass
+                if not shown:
+                    st.caption(r.get("production_status") or "—")
+                wc = wcounts.get(r["tmdb_id"], 0)
+                if wc:
+                    st.caption(f"✓ {wc} watched")
+                if st.button(ICONS["delete"], key=f"gdel_{r['tmdb_id']}_{r.get('provider_name')}",
+                             help="Remove", use_container_width=True):
+                    delete_show(client, r["tmdb_id"], r["region"], r.get("provider_name", DEFAULT_PROVIDER))
+                    st.rerun()
 
 
 def render_upcoming(rows):
@@ -1978,9 +2015,12 @@ if q:
 st.write("---")
 
 # Collapsible promotional sections with watchlist-style layout
+# Dismissed ("not interested") set — filters the discovery carousels below
+_dismissed_ids = dismissed.get_dismissed(client, get_user_id())
+
 with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=False):
     st.caption("Shows that premiered in the last 30 days")
-    new_shows = get_new_shows(region, limit=3)
+    new_shows = [s for s in get_new_shows(region, limit=12) if s.get("id") not in _dismissed_ids][:5]
 
     if new_shows:
         for show in new_shows:
@@ -2015,7 +2055,7 @@ with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=Fa
                     st.markdown(f"**{first_air}**")
                     st.caption(f"{ICONS['calendar']} Premiered")
 
-            # Add button
+            # Actions
             with cols[3]:
                 if st.button(f"{ICONS['add']}", key=f"new_show_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
@@ -2024,12 +2064,15 @@ with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=Fa
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error")
+                if st.button("🚫", key=f"dis_new_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
+                    dismissed.dismiss(client, get_user_id(), tmdb_id)
+                    st.rerun()
     else:
         st.info("No new shows in the last 30 days")
 
 with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", expanded=False):
     st.caption("Most popular and talked-about shows this week")
-    trending_shows = get_trending_shows(limit=3)
+    trending_shows = [s for s in get_trending_shows(limit=12) if s.get("id") not in _dismissed_ids][:5]
 
     if trending_shows:
         for show in trending_shows:
@@ -2065,7 +2108,7 @@ with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", 
                     st.markdown(f"**{year}**")
                 st.caption(f"{ICONS['trending']} Trending")
 
-            # Add button
+            # Actions
             with cols[3]:
                 if st.button(f"{ICONS['add']}", key=f"trending_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
@@ -2074,12 +2117,15 @@ with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", 
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error")
+                if st.button("🚫", key=f"dis_trend_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
+                    dismissed.dismiss(client, get_user_id(), tmdb_id)
+                    st.rerun()
     else:
         st.info("No trending shows available")
 
 with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!", expanded=False):
     st.caption("All-time highest rated shows on TMDB")
-    top_rated_shows = get_top_rated_shows(limit=3)
+    top_rated_shows = [s for s in get_top_rated_shows(limit=12) if s.get("id") not in _dismissed_ids][:5]
 
     if top_rated_shows:
         for show in top_rated_shows:
@@ -2124,6 +2170,9 @@ with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!"
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error")
+                if st.button("🚫", key=f"dis_top_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
+                    dismissed.dismiss(client, get_user_id(), tmdb_id)
+                    st.rerun()
     else:
         st.info("No top rated shows available")
 
@@ -2271,23 +2320,24 @@ else:
     for r in rows:
         _groups[_status_group(r)].append(r)
 
+    def _render_group(group, empty_msg):
+        if not group:
+            st.info(empty_msg)
+            return
+        if view_mode == 'grid':
+            render_grid_gallery(group, client, _wcounts)   # poster-tile gallery
+        else:
+            for r in group:
+                render_show_row(r, 'list', client, _wcounts)  # detailed rows w/ episode guide
+
     _t_active, _t_canceled, _t_ended = st.tabs([
         f"📺 Active ({len(_groups['active'])})",
         f"🚫 Canceled ({len(_groups['canceled'])})",
         f"✅ Ended ({len(_groups['ended'])})",
     ])
     with _t_active:
-        if not _groups['active']:
-            st.info("No active shows.")
-        for r in _groups['active']:
-            render_show_row(r, view_mode, client, _wcounts)
+        _render_group(_groups['active'], "No active shows.")
     with _t_canceled:
-        if not _groups['canceled']:
-            st.info("No canceled shows. 🎉")
-        for r in _groups['canceled']:
-            render_show_row(r, view_mode, client, _wcounts)
+        _render_group(_groups['canceled'], "No canceled shows. 🎉")
     with _t_ended:
-        if not _groups['ended']:
-            st.info("No ended shows yet.")
-        for r in _groups['ended']:
-            render_show_row(r, view_mode, client, _wcounts)
+        _render_group(_groups['ended'], "No ended shows yet.")
