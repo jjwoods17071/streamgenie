@@ -78,6 +78,13 @@ def _score(c):
     return s
 
 
+def _logo(c):
+    t = c.get("team") or {}
+    if t.get("logos"):
+        return (t["logos"][0] or {}).get("href")
+    return t.get("logo")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_team_schedule(league: str, team_id: str):
     """A team's season schedule (oldest→newest) as a list of game dicts."""
@@ -100,6 +107,8 @@ def get_team_schedule(league: str, team_id: str):
                 "datetime": e.get("date") or "",
                 "home": (home.get("team") or {}).get("displayName"),
                 "away": (away.get("team") or {}).get("displayName"),
+                "home_logo": _logo(home),
+                "away_logo": _logo(away),
                 "home_score": _score(home),
                 "away_score": _score(away),
                 "status": stype.get("description") or stype.get("name"),

@@ -715,6 +715,9 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     ng = sports.next_game(games)
     w, l = sports.record(games, name)
 
+    def _logo_img(u, h=28):
+        return f'<img src="{u}" style="height:{h}px;vertical-align:middle;margin:0 4px">' if u else ""
+
     hc = st.columns([1, 3])
     with hc[0]:
         if logo:
@@ -723,8 +726,15 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
         st.markdown(f"## {name}")
         st.markdown(sports.league_label(league) + (f"  ·  **{w}-{l}**" if (w or l) else ""))
         if ng:
-            extra = f"  ·  📺 {ng['network']}" if ng.get("network") else ""
-            st.success(f"🟢 **Next game:** {ng['away']} @ {ng['home']} — {ng['date']}{extra}")
+            _net = f' · 📺 {ng["network"]}' if ng.get("network") else ""
+            st.markdown(
+                f'<div style="background:rgba(34,197,94,.12);border-radius:8px;padding:8px 12px;'
+                f'display:flex;align-items:center;flex-wrap:wrap">'
+                f'🟢&nbsp;<b>Next:</b>{_logo_img(ng.get("away_logo"), 30)}<b>{ng["away"]}</b>'
+                f'<span style="opacity:.55;margin:0 5px">@</span>'
+                f'{_logo_img(ng.get("home_logo"), 30)}<b>{ng["home"]}</b>'
+                f'<span style="opacity:.8">&nbsp;— {ng["date"]}{_net}</span></div>',
+                unsafe_allow_html=True)
         if client is not None:
             def _rm():
                 delete_show(client, show.get("tmdb_id"), show.get("region") or DEFAULT_REGION,
@@ -749,10 +759,16 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             if wk:
                 st.caption(g.get("date") or "TBA")
         with c[1]:
-            line = f"{g.get('away')} @ {g.get('home')}"
+            score = ""
             if g.get("completed") and g.get("home_score") not in (None, ""):
-                line += f"  —  {g.get('away_score')}–{g.get('home_score')}"
-            st.markdown(("🟢 **" + line + "**") if highlight else line)
+                score = f' <span style="opacity:.65">— {g.get("away_score")}–{g.get("home_score")}</span>'
+            wt = "font-weight:700;" if highlight else ""
+            st.markdown(
+                f'<div style="{wt}display:flex;align-items:center;flex-wrap:wrap">'
+                f'{"🟢 " if highlight else ""}{_logo_img(g.get("away_logo"))}{g.get("away")}'
+                f'<span style="opacity:.55;margin:0 6px">@</span>'
+                f'{_logo_img(g.get("home_logo"))}{g.get("home")}{score}</div>',
+                unsafe_allow_html=True)
             if g.get("network"):
                 st.caption(f"📺 {g['network']}")
         with c[2]:
