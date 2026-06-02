@@ -865,6 +865,39 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 _game_row(g)
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _tmdb_provider_logos() -> Dict[str, Any]:
+    """US streaming-provider logos from TMDB, keyed by provider_id AND lowercased name."""
+    try:
+        d = tmdb_get("/watch/providers/tv", {"language": "en-US", "watch_region": "US"})
+        by_id, by_name = {}, {}
+        for p in d.get("results", []):
+            lp = p.get("logo_path")
+            if not lp:
+                continue
+            url = f"https://image.tmdb.org/t/p/w92{lp}"
+            by_id[p.get("provider_id")] = url
+            by_name[(p.get("provider_name") or "").lower()] = url
+        return {"by_id": by_id, "by_name": by_name}
+    except Exception:
+        return {"by_id": {}, "by_name": {}}
+
+
+def provider_logo_url(name: str) -> Optional[str]:
+    """Logo URL for a stored provider_name. Matches by the same TMDB provider IDs the
+    Grow tab uses (exact), then falls back to a name match."""
+    if not name:
+        return None
+    data = _tmdb_provider_logos()
+    nl = name.lower()
+    for our_name, ids in discover.PROVIDERS.items():
+        if our_name.lower() == nl:
+            for i in ids:
+                if i in data["by_id"]:
+                    return data["by_id"][i]
+    return data["by_name"].get(nl) or data["by_name"].get(normalize_provider_name(name).lower())
+
+
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Full-page show detail (PDP): poster + summary + availability + ALL seasons
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
@@ -907,7 +940,16 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             if _generic:
                 st.caption("✓ On your watchlist")
             else:
-                st.markdown(f"✓ On your watchlist  ·  📺 Watch on **{normalize_provider_name(_prov)}**")
+                _plogo = provider_logo_url(_prov)
+                _pname = normalize_provider_name(_prov)
+                if _plogo:
+                    st.markdown(
+                        f'✓ On your watchlist &nbsp;·&nbsp; Watch on '
+                        f'<img src="{_plogo}" title="{_pname}" '
+                        f'style="height:26px;border-radius:5px;vertical-align:middle;margin-left:4px"> '
+                        f'<b>{_pname}</b>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f"✓ On your watchlist  ·  Watch on **{_pname}**")
             def _pdp_remove():
                 delete_show(client, tmdb_id, wl_row.get("region") or DEFAULT_REGION,
                             wl_row.get("provider_name", DEFAULT_PROVIDER))
