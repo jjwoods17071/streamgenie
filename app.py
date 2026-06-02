@@ -1442,6 +1442,9 @@ auth.render_user_menu(client)
 # click opens the detail page via an in-app rerun (no page reload → keeps login).
 st.markdown("""
 <style>
+/* Hide the image fullscreen/expand button (serves no purpose here) */
+[data-testid="StyledFullScreenButton"]{display:none !important;}
+button[title="View fullscreen"]{display:none !important;}
 /* Full poster, natural 2:3 aspect (no cropping) */
 .sgposter{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
 div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
