@@ -336,7 +336,7 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -
         ec = st.columns([1.3, 4, 1, 0.8]) if track else st.columns([1.3, 4, 1])
         with ec[0]:
             if still:
-                st.image(f"https://image.tmdb.org/t/p/w185{still}", use_container_width=True)
+                st.image(f"https://image.tmdb.org/t/p/w185{still}", use_column_width=True)
         with ec[1]:
             st.markdown(f"**E{en:02d} · {name}**" + ("  🔜" if upcoming else ""))
             ov = ep.get("overview")
@@ -494,7 +494,7 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
             with cols[j]:
                 pp = r.get("poster_path")
                 if pp:
-                    st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_container_width=True)
+                    st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
                 else:
                     st.write(ICONS["movie"])
                 st.markdown(f"**{r['title']}**")

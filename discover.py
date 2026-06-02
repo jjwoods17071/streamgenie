@@ -118,7 +118,7 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
             with c[0]:
                 pu = poster(s["poster_path"])
                 if pu:
-                    st.image(pu, use_container_width=True)
+                    st.image(pu, use_column_width=True)
             with c[1]:
                 st.markdown(f"**{s['title']}** ({s['year']})  ⭐ {s['vote']:.1f}")
                 if s["overview"]:
