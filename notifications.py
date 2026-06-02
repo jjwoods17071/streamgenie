@@ -6,8 +6,7 @@ import streamlit as st
 from supabase import Client
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-import sendgrid
-from sendgrid.helpers.mail import Mail, Email, To, Content
+import mailer
 import os
 import preferences  # User notification preferences
 
@@ -89,13 +88,10 @@ def send_notification_email(
 
         user_email = result.data[0]["email"]
 
-        # Get SendGrid API key
-        sg_api_key = os.getenv("SENDGRID_API_KEY")
-        if not sg_api_key:
-            print("SendGrid API key not found")
+        # Email transport configured? (SMTP via mailer — Postmark/Gmail/etc.)
+        if not mailer.is_configured():
+            print("Email not configured")
             return
-
-        sg = sendgrid.SendGridAPIClient(api_key=sg_api_key)
 
         # Build email content
         subject = f"StreamGenie: {title}"
@@ -138,15 +134,10 @@ def send_notification_email(
             </html>
             """
 
-        from_email = Email("joe@outdoorkitchenstore.com")
-        to_email = To(user_email)
-        content = Content("text/html", html_content)
-
-        mail = Mail(from_email, to_email, subject, content)
-        mail.reply_to = Email("jjwoods@gmail.com")
-
-        sg.send(mail)
-        print(f"Email sent to {user_email}")
+        if mailer.send_email(user_email, subject, html_content):
+            print(f"Email sent to {user_email}")
+        else:
+            print(f"Email send failed for {user_email}")
 
     except Exception as e:
         print(f"Error sending email: {e}")

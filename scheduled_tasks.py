@@ -209,12 +209,9 @@ class TaskScheduler:
     def _send_weekly_preview_email(self, user_email: str, shows: list):
         """Send weekly preview email to a user"""
         try:
-            import sendgrid
-            from sendgrid.helpers.mail import Mail, Email, To, Content
-
-            sg_api_key = os.getenv("SENDGRID_API_KEY")
-            if not sg_api_key:
-                logger.warning("SendGrid API key not configured")
+            import mailer
+            if not mailer.is_configured():
+                logger.warning("Email transport not configured")
                 return
 
             # Group shows by day
@@ -268,16 +265,8 @@ class TaskScheduler:
             </html>
             """
 
-            from_email = Email(os.getenv("SENDGRID_FROM_EMAIL", "joe@outdoorkitchenstore.com"))
-            to_email = To(user_email)
             subject = f"🍿 This Week: {len(shows)} New Episodes"
-            content = Content("text/html", html_content)
-
-            mail = Mail(from_email, to_email, subject, content)
-            mail.reply_to = Email("jjwoods@gmail.com")
-
-            sg = sendgrid.SendGridAPIClient(api_key=sg_api_key)
-            sg.send(mail)
+            mailer.send_email(user_email, subject, html_content)
 
             logger.info(f"Weekly preview email sent to {user_email}")
 

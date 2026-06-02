@@ -946,14 +946,12 @@ def normalize_provider_name(provider_name: str) -> str:
 # --------------- EMAIL REMINDERS ---------------
 def send_email_reminder(user_email: str, show_title: str, provider_name: str, next_air_date: str, poster_path: Optional[str] = None):
     """Send an email reminder for a show airing today."""
-    if not SENDGRID_API_KEY:
-        st.warning("SendGrid API key not configured. Set SENDGRID_API_KEY environment variable.")
+    import mailer
+    if not mailer.is_configured():
+        st.warning("Email not configured. Set SMTP_HOST/SMTP_USER/SMTP_PASS/EMAIL_FROM.")
         return False
 
     try:
-        from sendgrid import SendGridAPIClient
-        from sendgrid.helpers.mail import Mail
-
         # Format the email
         poster_img = ""
         if poster_path:
@@ -980,17 +978,11 @@ def send_email_reminder(user_email: str, show_title: str, provider_name: str, ne
         </html>
         """
 
-        message = Mail(
-            from_email=SENDGRID_FROM_EMAIL,
-            to_emails=user_email,
-            subject=f'🎬 {show_title} airs today on {provider_name}!',
-            html_content=html_content
+        return mailer.send_email(
+            user_email,
+            f'🎬 {show_title} airs today on {provider_name}!',
+            html_content,
         )
-
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
-        response = sg.send(message)
-
-        return response.status_code == 202
 
     except Exception as e:
         st.error(f"Failed to send email: {e}")
@@ -1271,8 +1263,9 @@ if show_settings:
 
             with col_test:
                 if st.button("📧 Test Email", use_container_width=True, disabled=not user_email):
-                    if not SENDGRID_API_KEY:
-                        st.error(f"{ICONS['error']} SendGrid API key not configured. Set SENDGRID_API_KEY environment variable.")
+                    import mailer
+                    if not mailer.is_configured():
+                        st.error(f"{ICONS['error']} Email not configured. Set SMTP_HOST/SMTP_USER/SMTP_PASS/EMAIL_FROM (Postmark/Gmail).")
                     else:
                         # Send a test email
                         success = send_email_reminder(
@@ -1294,13 +1287,15 @@ if show_settings:
             st.caption(f"{ICONS['email']} Email: {user_email or 'Not set'}")
             reminders_status = f"{ICONS['check']} Enabled" if reminders_enabled and user_email else f"{ICONS['error']} Disabled"
             st.caption(f"{ICONS['notifications']} Reminders: {reminders_status}")
-            api_status = f"{ICONS['check']} Configured" if SENDGRID_API_KEY else f"{ICONS['error']} Not set"
-            st.caption(f"{ICONS['key']} SendGrid API: {api_status}")
+            import mailer as _mailer
+            _email_ok = _mailer.is_configured()
+            api_status = f"{ICONS['check']} Configured" if _email_ok else f"{ICONS['error']} Not set"
+            st.caption(f"{ICONS['key']} Email (SMTP): {api_status}")
 
-            if SENDGRID_API_KEY and reminders_enabled and user_email:
+            if _email_ok and reminders_enabled and user_email:
                 st.info("📬 You'll receive emails at 8:00 AM when shows air!")
-            elif not SENDGRID_API_KEY:
-                st.warning("⚠️ To enable reminders, set the SENDGRID_API_KEY environment variable.\n\nGet a free API key at https://sendgrid.com")
+            elif not _email_ok:
+                st.warning("⚠️ To enable reminders, set SMTP_HOST/SMTP_USER/SMTP_PASS/EMAIL_FROM (e.g. Postmark or Gmail).")
 
         if user_is_admin:
             with tab2:
