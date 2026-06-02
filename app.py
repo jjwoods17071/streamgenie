@@ -706,26 +706,14 @@ def clickable_poster(tmdb_id, poster_path) -> None:
 
 
 def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
-    """Detail page for a followed NFL team — schedule as 'episodes' (games)."""
+    """Detail page for a followed team (NFL/MLB/NBA/NHL) — schedule as 'episodes' (games)."""
     st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
-    team_id = sports.espn_team_id(show.get("tmdb_id"))
+    league, team_id = sports.decode_id(show.get("tmdb_id"))
     name = show.get("title") or "Team"
     logo = show.get("poster_path")
-    games = sports.get_team_schedule(team_id)
+    games = sports.get_team_schedule(league, team_id) if league else []
     ng = sports.next_game(games)
-
-    w = l = 0
-    for g in games:
-        if g.get("completed") and g.get("home_score") not in (None, "") and g.get("away_score") not in (None, ""):
-            try:
-                hs, as_ = float(g["home_score"]), float(g["away_score"])
-            except Exception:
-                continue
-            ours, theirs = (hs, as_) if g.get("home") == name else (as_, hs)
-            if ours > theirs:
-                w += 1
-            elif ours < theirs:
-                l += 1
+    w, l = sports.record(games, name)
 
     hc = st.columns([1, 3])
     with hc[0]:
@@ -733,40 +721,57 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             st.image(logo, use_column_width=True)
     with hc[1]:
         st.markdown(f"## {name}")
-        st.markdown(f":material/sports_football: **NFL**" + (f"  ·  **{w}-{l}**" if (w or l) else ""))
+        st.markdown(sports.league_label(league) + (f"  ·  **{w}-{l}**" if (w or l) else ""))
         if ng:
             extra = f"  ·  📺 {ng['network']}" if ng.get("network") else ""
             st.success(f"🟢 **Next game:** {ng['away']} @ {ng['home']} — {ng['date']}{extra}")
         if client is not None:
             def _rm():
                 delete_show(client, show.get("tmdb_id"), show.get("region") or DEFAULT_REGION,
-                            show.get("provider_name", "NFL"))
+                            show.get("provider_name", "Sports"))
                 st.query_params.clear()
             st.button(":material/delete: Remove from watchlist", key=f"sp_del_{team_id}", on_click=_rm)
 
-    st.caption(f"📍 CBS/Fox regional coverage varies by market — check the "
-               f"[506sports coverage maps]({sports.COVERAGE_MAP_URL}).")
+    cov = sports.coverage_map_url(league)
+    if cov:
+        st.caption(f"📍 Regional TV coverage varies by market — check the "
+                   f"[506sports coverage maps]({cov}).")
     st.divider()
-    st.markdown("### Schedule  ·  🟢 = next game")
     if not games:
         st.info("No schedule available right now.")
         return
-    for g in games:
-        is_next = bool(ng and g.get("datetime") == ng.get("datetime"))
+
+    def _game_row(g, highlight=False):
         c = st.columns([2, 5, 2])
         with c[0]:
-            st.markdown(f"**Wk {g.get('week', '?')}**")
-            st.caption(g.get("date") or "TBA")
+            wk = g.get("week")
+            st.markdown(f"**Wk {wk}**" if wk else f"**{g.get('date') or 'TBA'}**")
+            if wk:
+                st.caption(g.get("date") or "TBA")
         with c[1]:
             line = f"{g.get('away')} @ {g.get('home')}"
             if g.get("completed") and g.get("home_score") not in (None, ""):
                 line += f"  —  {g.get('away_score')}–{g.get('home_score')}"
-            st.markdown((("🟢 **" + line + "**") if is_next else line))
+            st.markdown(("🟢 **" + line + "**") if highlight else line)
             if g.get("network"):
                 st.caption(f"📺 {g['network']}")
         with c[2]:
             st.caption(g.get("status") or ("Final" if g.get("completed") else "Scheduled"))
         st.markdown("<hr style='margin:2px 0;opacity:0.15'>", unsafe_allow_html=True)
+
+    today = dt.date.today().isoformat()
+    upcoming = [g for g in games if (g.get("date") or "") >= today and not g.get("completed")]
+    recent = [g for g in games if g.get("completed")]
+
+    st.markdown(f"### Upcoming games ({len(upcoming)})  ·  🟢 = next")
+    for g in upcoming[:25]:
+        _game_row(g, highlight=bool(ng and g.get("datetime") == ng.get("datetime")))
+    if len(upcoming) > 25:
+        st.caption(f"…and {len(upcoming) - 25} more this season")
+    if recent:
+        with st.expander(f"Recent results ({len(recent)})"):
+            for g in reversed(recent[-15:]):
+                _game_row(g)
 
 
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
@@ -2545,22 +2550,25 @@ with _main_grow:
     with dtab2:
         discover.render_netflix_import(_wl_ids, _add_discovered)
     with dtab3:
-        st.caption("Follow an NFL team and its games show up in **Upcoming** like episodes — "
-                   "with TV networks and a link to regional coverage maps.")
-        _teams = sports.get_nfl_teams()
+        st.caption("Follow a team — its games show up in **Upcoming** like episodes, with TV "
+                   "networks and a link to regional coverage maps.")
+        _lk = st.radio("League", list(sports.LEAGUES.keys()),
+                       format_func=sports.league_label, horizontal=True, key="sports_league")
+        _teams = sports.get_teams(_lk)
         if not _teams:
-            st.info("Couldn't load NFL teams right now — try again shortly.")
+            st.info("Couldn't load teams right now — try again shortly.")
         else:
-            _pick = st.selectbox("Team", [t["name"] for t in _teams], key="sports_pick")
+            _pick = st.selectbox("Team", [t["name"] for t in _teams], key=f"sports_pick_{_lk}")
             _t = next((x for x in _teams if x["name"] == _pick), None)
             if _t:
-                _neg = -int(_t["id"])
+                _neg = sports.encode_id(_lk, _t["id"])
+                _lab = sports.league_label(_lk).split()[-1]   # e.g. "NFL"
                 cc = st.columns([1, 4])
                 with cc[0]:
                     if _t.get("logo"):
                         st.image(_t["logo"], width=84)
                 with cc[1]:
-                    _g = sports.get_team_schedule(_t["id"])
+                    _g = sports.get_team_schedule(_lk, _t["id"])
                     _ng = sports.next_game(_g)
                     if _ng:
                         st.markdown(f"**Next game:** {_ng['away']} @ {_ng['home']} — {_ng['date']}"
@@ -2568,11 +2576,11 @@ with _main_grow:
                     if _neg in _wl_ids:
                         st.markdown(":blue[✓ Already following]")
                     else:
-                        def _follow(_team=_t, _id=_neg, _next=_ng):
+                        def _follow(_team=_t, _id=_neg, _next=_ng, _league=_lab):
                             upsert_show(client, _id, _team["name"], "US", True,
                                         (_next["date"] if _next else None),
-                                        "NFL team", _team.get("logo"), "NFL")
-                        st.button(":material/add: Follow this team", key=f"follow_{_t['id']}",
+                                        f"{_league} team", _team.get("logo"), _league)
+                        st.button(":material/add: Follow this team", key=f"follow_{_lk}_{_t['id']}",
                                   type="primary", on_click=_follow)
 
     # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist

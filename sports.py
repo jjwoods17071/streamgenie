@@ -1,19 +1,41 @@
 """
-Follow an NFL team like a TV show — powered by ESPN's free public JSON API.
-Each team is stored in the watchlist with a NEGATIVE tmdb_id ( = -espn_team_id ) so it
-flows through all the existing plumbing (cards, ?show= nav, watchlist) without a schema
-change; the app detects sports rows by tmdb_id < 0. Games are the "episodes".
-506sports provides regional CBS/Fox coverage maps (image-based) we link out to.
+Follow a sports team like a TV show — powered by ESPN's free public JSON API.
+Supports NFL / MLB / NBA / NHL. Each team is stored in the watchlist with a NEGATIVE
+tmdb_id that encodes BOTH the league and the ESPN team id, so teams flow through all
+the existing card/nav/watchlist plumbing with no schema change. The app detects sports
+rows by tmdb_id < 0. Games are the "episodes". 506sports has regional coverage maps.
 """
 import datetime as dt
 import requests
 import streamlit as st
 
 _UA = {"User-Agent": "Mozilla/5.0"}
-_ESPN = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
+_BASE = "https://site.api.espn.com/apis/site/v2/sports"
+_OFFSET = 10_000_000  # league-id namespace size
 
-# 506sports NFL regional coverage maps (which CBS/Fox game your market gets)
-COVERAGE_MAP_URL = "https://506sports.com/nfl/index.php"
+# key -> (espn sport, espn league, label, league-index, 506sports coverage-map url)
+LEAGUES = {
+    "nfl": ("football",   "nfl", "🏈 NFL", 1, "https://506sports.com/nfl/index.php"),
+    "mlb": ("baseball",   "mlb", "⚾ MLB", 2, "https://506sports.com/mlb.php"),
+    "nba": ("basketball", "nba", "🏀 NBA", 3, "https://506sports.com/nba.php"),
+    "nhl": ("hockey",     "nhl", "🏒 NHL", 4, "https://506sports.com/nhl.php"),
+}
+_IDX_TO_LEAGUE = {v[3]: k for k, v in LEAGUES.items()}
+
+
+def encode_id(league: str, team_id) -> int:
+    """Negative watchlist id that encodes league + ESPN team id."""
+    return -(LEAGUES[league][3] * _OFFSET + int(team_id))
+
+
+def decode_id(tmdb_id):
+    """(league, team_id) from a negative sports id, or (None, None)."""
+    try:
+        aid = -int(tmdb_id)
+        idx, team_id = divmod(aid, _OFFSET)
+        return _IDX_TO_LEAGUE.get(idx), str(team_id)
+    except Exception:
+        return None, None
 
 
 def is_sports_id(tmdb_id) -> bool:
@@ -23,15 +45,20 @@ def is_sports_id(tmdb_id) -> bool:
         return False
 
 
-def espn_team_id(tmdb_id) -> str:
-    return str(-int(tmdb_id))
+def league_label(league: str) -> str:
+    return LEAGUES.get(league, (None, None, "Sports", 0, None))[2]
+
+
+def coverage_map_url(league: str):
+    return LEAGUES.get(league, (None, None, None, None, None))[4]
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def get_nfl_teams():
-    """All 32 NFL teams: {id, name, abbrev, logo}."""
+def get_teams(league: str):
+    """All teams in a league: {id, name, abbrev, logo}."""
     try:
-        d = requests.get(f"{_ESPN}/teams", headers=_UA, timeout=20).json()
+        sp, lg = LEAGUES[league][0], LEAGUES[league][1]
+        d = requests.get(f"{_BASE}/{sp}/{lg}/teams", headers=_UA, timeout=20).json()
         teams = d["sports"][0]["leagues"][0]["teams"]
         out = []
         for x in teams:
@@ -52,10 +79,11 @@ def _score(c):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_team_schedule(team_id: str):
-    """A team's season schedule as a list of games (oldest→newest)."""
+def get_team_schedule(league: str, team_id: str):
+    """A team's season schedule (oldest→newest) as a list of game dicts."""
     try:
-        d = requests.get(f"{_ESPN}/teams/{team_id}/schedule", headers=_UA, timeout=20).json()
+        sp, lg = LEAGUES[league][0], LEAGUES[league][1]
+        d = requests.get(f"{_BASE}/{sp}/{lg}/teams/{team_id}/schedule", headers=_UA, timeout=20).json()
         games = []
         for e in d.get("events", []):
             comp = (e.get("competitions") or [{}])[0]
@@ -72,9 +100,6 @@ def get_team_schedule(team_id: str):
                 "datetime": e.get("date") or "",
                 "home": (home.get("team") or {}).get("displayName"),
                 "away": (away.get("team") or {}).get("displayName"),
-                "home_abbr": (home.get("team") or {}).get("abbreviation"),
-                "away_abbr": (away.get("team") or {}).get("abbreviation"),
-                "home_logo": (home.get("team") or {}).get("logos", [{}])[0].get("href") if (home.get("team") or {}).get("logos") else None,
                 "home_score": _score(home),
                 "away_score": _score(away),
                 "status": stype.get("description") or stype.get("name"),
@@ -94,14 +119,18 @@ def next_game(games):
     return up[0] if up else None
 
 
-def team_record(games):
-    """W-L from completed games where we can tell (uses score compare only when both present)."""
+def record(games, team_name):
+    """W-L from completed games for the followed team."""
     w = l = 0
     for g in games:
         if g.get("completed") and g.get("home_score") not in (None, "") and g.get("away_score") not in (None, ""):
             try:
                 hs, as_ = float(g["home_score"]), float(g["away_score"])
-                # we don't know which side is "our" team here; record computed in app where team known
             except Exception:
-                pass
-    return None  # record computed in the app layer where the followed team is known
+                continue
+            ours, theirs = (hs, as_) if g.get("home") == team_name else (as_, hs)
+            if ours > theirs:
+                w += 1
+            elif ours < theirs:
+                l += 1
+    return w, l
