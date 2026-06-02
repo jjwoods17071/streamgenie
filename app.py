@@ -1363,10 +1363,14 @@ auth.render_user_menu(client)
 # click opens the detail page via an in-app rerun (no page reload → keeps login).
 st.markdown("""
 <style>
-.sgposter{width:100%;height:240px;object-fit:cover;border-radius:8px;display:block;}
+.sgposter{width:100%;height:240px;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
 div.sgph{background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
-div[data-testid="element-container"]:has(.sgposter) + div[data-testid="element-container"]:has(button){margin-top:-240px;height:240px;position:relative;z-index:3;}
-div[data-testid="element-container"]:has(.sgposter) + div[data-testid="element-container"] button{height:240px;opacity:0;}
+/* Overlay the button that immediately follows a poster image, invisibly, on top of it.
+   Cover both Streamlit element-container test-id conventions. */
+[data-testid="stElementContainer"]:has(.sgposter) + [data-testid="stElementContainer"]{margin-top:-240px;height:240px;position:relative;z-index:3;}
+[data-testid="stElementContainer"]:has(.sgposter) + [data-testid="stElementContainer"] button{height:240px;width:100%;opacity:0;cursor:pointer;}
+[data-testid="element-container"]:has(.sgposter) + [data-testid="element-container"]{margin-top:-240px;height:240px;position:relative;z-index:3;}
+[data-testid="element-container"]:has(.sgposter) + [data-testid="element-container"] button{height:240px;width:100%;opacity:0;cursor:pointer;}
 </style>
 """, unsafe_allow_html=True)
 
