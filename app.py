@@ -279,21 +279,108 @@ def get_next_episode(tv_id:int) -> Optional[Dict[str, Any]]:
     return None
 
 
-def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None) -> None:
-    """Season selector + episode list for one show (used inside a per-show expander).
-    If client+user_id are given and the watched_episodes table exists, shows per-episode
-    'watched' checkboxes."""
-    info = get_show_seasons(tv_id)
-    seasons = info.get("seasons") or []
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_show_meta(tv_id:int) -> Dict[str, Any]:
+    """Cached high-level show metadata for the detail panel (6h TTL)."""
+    try:
+        d = tv_details(tv_id)
+        return {
+            "overview": d.get("overview"),
+            "status": d.get("status"),
+            "number_of_seasons": d.get("number_of_seasons"),
+            "number_of_episodes": d.get("number_of_episodes"),
+            "first_air_date": d.get("first_air_date"),
+            "next_episode_to_air": d.get("next_episode_to_air"),
+            "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
+        }
+    except Exception:
+        return {}
+
+
+def _availability_line(d: Dict[str, Any]) -> str:
+    """One-line availability/status summary from show metadata (markdown)."""
+    today = dt.date.today()
+    status = d.get("status") or ""
+    nseasons = d.get("number_of_seasons") or 0
+    neps = d.get("number_of_episodes") or 0
+    first = d.get("first_air_date") or ""
+    nxt = d.get("next_episode_to_air")
+    badge = {
+        "Returning Series": "📺 Returning", "Ended": "✅ Ended",
+        "Canceled": "🚫 Canceled", "In Production": "🎬 In production",
+        "Planned": "🗓️ Planned",
+    }.get(status, status)
+    is_new = False
+    if first:
+        try:
+            if (today - dt.date.fromisoformat(first)).days <= 120 and status in ("Returning Series", "In Production"):
+                is_new = True
+        except Exception:
+            pass
+    parts = []
+    if is_new:
+        parts.append("🆕 **New**")
+    if badge:
+        parts.append(badge)
+    if first:
+        parts.append(f"Premiered {first}")
+    if nseasons:
+        parts.append(f"{nseasons} season" + ("s" if nseasons != 1 else ""))
+    if neps:
+        parts.append(f"{neps} episode" + ("s" if neps != 1 else ""))
+    line = " · ".join(parts)
+    if isinstance(nxt, dict) and nxt.get("air_date"):
+        ad = nxt["air_date"]
+        try:
+            days = (dt.date.fromisoformat(ad) - today).days
+            when = "today" if days == 0 else (f"in {days} days" if days > 0 else f"{abs(days)} days ago")
+            line += f"\n\n⏭️ **Next:** S{nxt.get('season_number')}E{nxt.get('episode_number')} — {ad} ({when})"
+        except Exception:
+            line += f"\n\n⏭️ **Next:** {ad}"
+    elif status in ("Returning Series", "In Production"):
+        line += "\n\n⏭️ Next episode date TBA"
+    return line
+
+
+def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None, overview=None) -> None:
+    """Rich detail panel: summary + availability + season 'bricks' + episode guide.
+    Tap a season brick to load that season's episodes (with watched tracking when available)."""
+    meta = get_show_meta(tv_id)
+    ov = (meta.get("overview") or overview or "").strip()
+    if ov:
+        st.markdown(ov)
+    if meta:
+        st.caption(_availability_line(meta))
+    seasons = meta.get("seasons") or []
     if not seasons:
         st.caption("No season data available from TMDB.")
         return
-    season_nums = [s["season_number"] for s in seasons]
     labels = {s["season_number"]: (s.get("name") or f"Season {s['season_number']}") for s in seasons}
-    # default to the most recent season
-    sel = st.selectbox("Season", season_nums, index=len(season_nums) - 1,
-                       format_func=lambda n: labels.get(n, f"Season {n}"),
-                       key=f"{key_prefix}_season")
+    nums = [s["season_number"] for s in seasons]
+    sel_key = f"{key_prefix}_selseason"
+    if st.session_state.get(sel_key) not in nums:
+        st.session_state[sel_key] = nums[-1]   # default to most recent season
+    st.markdown("**Seasons** — tap one for its episode guide")
+    per_row = 6
+    for i in range(0, len(seasons), per_row):
+        bcols = st.columns(per_row)
+        for j, s in enumerate(seasons[i:i + per_row]):
+            n = s["season_number"]
+            ecount = s.get("episode_count") or 0
+            with bcols[j]:
+                is_sel = st.session_state.get(sel_key) == n
+                if st.button(f"S{n} · {ecount}ep", key=f"{key_prefix}_brick_{n}",
+                             use_container_width=True,
+                             type="primary" if is_sel else "secondary"):
+                    st.session_state[sel_key] = n
+                    st.rerun()
+    sel = st.session_state.get(sel_key, nums[-1])
+    st.markdown(f"#### {labels.get(sel, f'Season {sel}')}")
+    _render_season_episodes(tv_id, sel, key_prefix, client, user_id)
+
+
+def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, user_id=None) -> None:
+    """Episode list (with optional watched tracking) for one selected season."""
     eps = get_season_episodes(tv_id, sel)
     if not eps:
         st.caption("No episodes listed for this season yet.")
@@ -470,16 +557,15 @@ def render_show_row(r, view_mode, client, wcounts):
                 delete_show(client, r["tmdb_id"], r["region"], provider_name)
                 st.rerun()
 
-    # Episode Guide — one toggle button (no redundant expander+button); lazy-loaded,
-    # shows a season selector with all seasons once open.
+    # Show Details — summary + availability + season bricks + episode guide; lazy-loaded.
     eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
     if st.session_state.get(eg_key):
-        if st.button("📺 Hide Episode Guide", key=f"{eg_key}_btn", use_container_width=True):
+        if st.button("📖 Hide Details", key=f"{eg_key}_btn", use_container_width=True):
             st.session_state[eg_key] = False
             st.rerun()
-        render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id())
+        render_episode_guide(r["tmdb_id"], eg_key, client, get_user_id(), overview=r.get("overview"))
     else:
-        if st.button("📺 Episode Guide", key=f"{eg_key}_btn", use_container_width=True):
+        if st.button("📖 Show Details & Episodes", key=f"{eg_key}_btn", use_container_width=True):
             st.session_state[eg_key] = True
             st.rerun()
     st.divider()
