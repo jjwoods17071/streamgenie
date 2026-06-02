@@ -1048,14 +1048,14 @@ def render_upcoming(rows, as_tab=False):
 
     pinned_ids = get_pinned_ids() if as_tab else set()
 
-    def _pin_button(r):
+    def _pin_button(r, ctx="up"):
         tid = r.get("tmdb_id")
         is_pinned = tid in pinned_ids
-        st.button("📌" if is_pinned else "📍", key=f"pin_{tid}",
+        st.button("📌" if is_pinned else "📍", key=f"pin_{ctx}_{tid}",
                   help="Unpin from top" if is_pinned else "Pin to top",
                   on_click=_toggle_pin, args=(tid, not is_pinned))
 
-    def _row(r, d=None, show_pin=True):
+    def _row(r, d=None, show_pin=True, ctx="up"):
         ne = get_next_episode(r["tmdb_id"])
         ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
         c = st.columns([1, 4, 1]) if show_pin else st.columns([1, 5])
@@ -1073,7 +1073,7 @@ def render_upcoming(rows, as_tab=False):
                 st.caption("⏳ no episode scheduled yet")
         if show_pin:
             with c[2]:
-                _pin_button(r)
+                _pin_button(r, ctx)
 
     def _body():
         # 📌 Pinned — actively-watched shows kept at the very top (even with no air date)
@@ -1083,7 +1083,7 @@ def render_upcoming(rows, as_tab=False):
             if pinned_rows:
                 st.markdown("**📌 Pinned**")
                 for r in pinned_rows:
-                    _row(r, up_by_id.get(r.get("tmdb_id")))
+                    _row(r, up_by_id.get(r.get("tmdb_id")), ctx="pin")
                 st.divider()
 
         # 📅 Upcoming episodes by timeframe (pinned excluded — already shown above)
@@ -1131,7 +1131,7 @@ def render_upcoming(rows, as_tab=False):
                 clickable_title(r['title'], r)
                 st.caption(f":blue[**{n} ready to watch**]")
             with c[2]:
-                _pin_button(r)
+                _pin_button(r, "av")
         if len(avail) > len(top):
             with st.expander(f"➕ {len(avail) - len(top)} more shows with episodes ready"):
                 for n, r in avail[len(top):]:
@@ -1140,7 +1140,7 @@ def render_upcoming(rows, as_tab=False):
                         clickable_title(r['title'], r)
                         st.caption(f":blue[{n} ready to watch]")
                     with cc[1]:
-                        _pin_button(r)
+                        _pin_button(r, "avx")
         st.divider()
 
     if as_tab:
