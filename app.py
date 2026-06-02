@@ -424,10 +424,10 @@ def render_show_row(r, view_mode, client, wcounts):
                 delete_show(client, r["tmdb_id"], r["region"], provider_name)
                 st.rerun()
     else:
-        cols = st.columns([0.5, 3, 2, 2, 1])
+        cols = st.columns([2, 3, 2, 2, 1])
         with cols[0]:
             if poster_path:
-                st.image(f"https://image.tmdb.org/t/p/w185{poster_path}", width=64)
+                st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
             else:
                 st.write(ICONS["movie"])
         with cols[1]:
@@ -560,11 +560,11 @@ def render_upcoming(rows, as_tab=False):
                 days = (d - today).days
                 ne = get_next_episode(r["tmdb_id"])
                 ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
-                c = st.columns([1, 6])
+                c = st.columns([1, 4])
                 with c[0]:
                     pp = r.get("poster_path")
                     if pp:
-                        st.image(f"https://image.tmdb.org/t/p/w92{pp}", width=45)
+                        st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
                 with c[1]:
                     when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
                     st.markdown(f"**{r['title']}**" + (f" · {ep}" if ep else ""))
@@ -1889,7 +1889,7 @@ with _main_search:
                 # Add padding above each result
                 st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
 
-                cols = st.columns([1, 3, 6])
+                cols = st.columns([2, 3, 5])
                 poster_path = r.get("poster_path")
                 title = r.get("name") or r.get("original_name") or "Untitled"
                 tmdb_id = r.get("id")
@@ -2056,7 +2056,7 @@ with _main_new:
             vote_average = show.get("vote_average", 0)
 
             # Use same column layout as watchlist: Poster | Title+Info | Date | Actions
-            cols = st.columns([1, 4, 3, 2])
+            cols = st.columns([2, 4, 2, 2])
 
             # Poster
             with cols[0]:
@@ -2109,7 +2109,7 @@ with _main_trending:
             overview = show.get("overview", "")
 
             # Use same column layout as watchlist: Poster | Title+Info | Date | Actions
-            cols = st.columns([1, 4, 3, 2])
+            cols = st.columns([2, 4, 2, 2])
 
             # Poster
             with cols[0]:
@@ -2163,7 +2163,7 @@ with _main_top:
             overview = show.get("overview", "")
 
             # Use same column layout as watchlist: Poster | Title+Info | Date | Actions
-            cols = st.columns([1, 4, 3, 2])
+            cols = st.columns([2, 4, 2, 2])
 
             # Poster
             with cols[0]:
