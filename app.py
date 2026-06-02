@@ -521,8 +521,12 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
                     st.rerun()
 
 
-def render_upcoming(rows):
-    """Agenda of upcoming episodes across the whole watchlist, grouped by timeframe."""
+def render_upcoming(rows, as_tab=False):
+    """Agenda of upcoming episodes across the whole watchlist, grouped by timeframe.
+
+    as_tab=True renders the list directly (for the dedicated Upcoming tab) with an
+    empty-state message; otherwise it renders inside a collapsible expander.
+    """
     today = dt.date.today()
     up = []
     for r in rows:
@@ -536,10 +540,13 @@ def render_upcoming(rows):
         if d >= today:
             up.append((d, r))
     if not up:
+        if as_tab:
+            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Search tab to see what's coming up.")
         return
     up.sort(key=lambda x: x[0])
     soon = any((d - today).days <= 7 for d, _ in up)
-    with st.expander(f"📅 Upcoming Episodes ({len(up)})", expanded=soon):
+
+    def _body():
         groups = [
             ("⏰ This week", [x for x in up if (x[0] - today).days <= 7]),
             ("📅 This month", [x for x in up if 7 < (x[0] - today).days <= 30]),
@@ -562,6 +569,13 @@ def render_upcoming(rows):
                     when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
                     st.markdown(f"**{r['title']}**" + (f" · {ep}" if ep else ""))
                     st.caption(f"📅 {d.isoformat()} · {when}")
+
+    if as_tab:
+        st.subheader(f"📅 Upcoming Episodes ({len(up)})")
+        _body()
+    else:
+        with st.expander(f"📅 Upcoming Episodes ({len(up)})", expanded=soon):
+            _body()
 
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
@@ -1752,273 +1766,283 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
-# Vertical layout: Search on top, watchlist below
-search_header = st.columns([8, 1])
-with search_header[0]:
-    st.subheader(f"{ICONS['search']} Search TV Shows")
-with search_header[1]:
-    if st.button(f"{ICONS['home']} Reset", help="Clear search and return to top", use_container_width=True):
-        st.session_state.clear_search = True
+# ── Main page: tabbed layout (Search / discovery / watchlist) ──
+_dismissed_ids = dismissed.get_dismissed(client, get_user_id())
+_wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
+
+def _add_discovered(tmdb_id, title, overview, poster_path):
+    upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
+
+_main_upcoming, _main_watch, _main_search, _main_new, _main_trending, _main_top, _main_grow = st.tabs([
+    "📅 Upcoming", "📺 Your Watchlist", "🔍 Search", "✨ New This Month", "🔥 Trending", "⭐ Top Rated", "🎯 Grow Watchlist",
+])
+
+with _main_upcoming:
+    _up_rows = refresh_stale_air_dates(client, list_shows(client))
+    render_upcoming(_up_rows, as_tab=True)
+
+with _main_search:
+    # Vertical layout: Search on top, watchlist below
+    search_header = st.columns([8, 1])
+    with search_header[0]:
+        st.subheader(f"{ICONS['search']} Search TV Shows")
+    with search_header[1]:
+        if st.button(f"{ICONS['home']} Reset", help="Clear search and return to top", use_container_width=True):
+            st.session_state.clear_search = True
+            st.rerun()
+
+    st.caption(f"Searching in region: **{region}** — Shows availability for all streaming services")
+
+    # Use session state to track when to clear search
+    if 'clear_search' not in st.session_state:
+        st.session_state.clear_search = False
+
+    # Clear the search if flag is set
+    if st.session_state.clear_search:
+        st.session_state.clear_search = False
         st.rerun()
 
-st.caption(f"Searching in region: **{region}** — Shows availability for all streaming services")
+    q = st.text_input("Search for a TV show", "", placeholder="Wednesday, Stranger Things, Squid Game...", key="search_input")
+    if q:
+        try:
+            results = search_tv(q)
+        except Exception as e:
+            st.error(f"TMDB error: {e}")
+            results = []
 
-# Use session state to track when to clear search
-if 'clear_search' not in st.session_state:
-    st.session_state.clear_search = False
+        if not results:
+            st.info("No results. Try a different title.")
+        else:
+            # Add filters
+            with st.expander(f"{ICONS['filter']} Filter Results", expanded=False):
+                # Mobile-friendly: Stack filters vertically instead of side-by-side
 
-# Clear the search if flag is set
-if st.session_state.clear_search:
-    st.session_state.clear_search = False
-    st.rerun()
+                # Genre filter
+                all_genres = set()
+                for r in results:
+                    genre_ids = r.get("genre_ids", [])
+                    all_genres.update(genre_ids)
 
-q = st.text_input("Search for a TV show", "", placeholder="Wednesday, Stranger Things, Squid Game...", key="search_input")
-if q:
-    try:
-        results = search_tv(q)
-    except Exception as e:
-        st.error(f"TMDB error: {e}")
-        results = []
+                # TMDB genre mapping
+                genre_map = {
+                    10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
+                    80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
+                    10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality",
+                    10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
+                    10768: "War & Politics", 37: "Western"
+                }
 
-    if not results:
-        st.info("No results. Try a different title.")
-    else:
-        # Add filters
-        with st.expander(f"{ICONS['filter']} Filter Results", expanded=False):
-            # Mobile-friendly: Stack filters vertically instead of side-by-side
-
-            # Genre filter
-            all_genres = set()
-            for r in results:
-                genre_ids = r.get("genre_ids", [])
-                all_genres.update(genre_ids)
-
-            # TMDB genre mapping
-            genre_map = {
-                10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
-                80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
-                10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality",
-                10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
-                10768: "War & Politics", 37: "Western"
-            }
-
-            available_genres = sorted([genre_map.get(gid, f"Genre {gid}") for gid in all_genres])
-            selected_genres = st.multiselect(
-                "Filter by Genre",
-                available_genres,
-                default=[],
-                help="Select one or more genres to filter"
-            )
-
-            # Year filter
-            years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
-            years = [int(y) for y in years if y.isdigit()]
-
-            if years and len(set(years)) > 1:  # Only show slider if there's a range
-                min_year = min(years)
-                max_year = max(years)
-                year_range = st.slider(
-                    "Filter by Year",
-                    min_value=min_year,
-                    max_value=max_year,
-                    value=(min_year, max_year),
-                    help="Adjust the range to filter by premiere year"
+                available_genres = sorted([genre_map.get(gid, f"Genre {gid}") for gid in all_genres])
+                selected_genres = st.multiselect(
+                    "Filter by Genre",
+                    available_genres,
+                    default=[],
+                    help="Select one or more genres to filter"
                 )
-            elif years:
-                # All shows from same year
-                year_range = (min(years), max(years))
-                st.caption(f"All results from {min(years)}")
-            else:
-                year_range = None
 
-        # Apply filters
-        filtered_results = results
+                # Year filter
+                years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
+                years = [int(y) for y in years if y.isdigit()]
 
-        if selected_genres:
-            # Get genre IDs from selected genre names
-            reverse_genre_map = {v: k for k, v in genre_map.items()}
-            selected_genre_ids = [reverse_genre_map[g] for g in selected_genres if g in reverse_genre_map]
-
-            filtered_results = [
-                r for r in filtered_results
-                if any(gid in r.get("genre_ids", []) for gid in selected_genre_ids)
-            ]
-
-        if year_range:
-            filtered_results = [
-                r for r in filtered_results
-                if r.get("first_air_date") and r.get("first_air_date")[:4].isdigit()
-                and year_range[0] <= int(r.get("first_air_date")[:4]) <= year_range[1]
-            ]
-
-        # Show result count
-        if filtered_results != results:
-            st.caption(f"Showing {len(filtered_results)} of {len(results)} results")
-
-        for r in filtered_results[:20]:
-            # Add padding above each result
-            st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
-
-            cols = st.columns([1, 3, 6])
-            poster_path = r.get("poster_path")
-            title = r.get("name") or r.get("original_name") or "Untitled"
-            tmdb_id = r.get("id")
-            overview = (r.get("overview") or "").strip()
-            img_url = f"https://image.tmdb.org/t/p/w342{poster_path}" if poster_path else None
-
-            with cols[0]:
-                if img_url:
-                    st.image(img_url, use_column_width=True)
+                if years and len(set(years)) > 1:  # Only show slider if there's a range
+                    min_year = min(years)
+                    max_year = max(years)
+                    year_range = st.slider(
+                        "Filter by Year",
+                        min_value=min_year,
+                        max_value=max_year,
+                        value=(min_year, max_year),
+                        help="Adjust the range to filter by premiere year"
+                    )
+                elif years:
+                    # All shows from same year
+                    year_range = (min(years), max(years))
+                    st.caption(f"All results from {min(years)}")
                 else:
-                    # Show a placeholder when no poster is available
-                    st.markdown("""
-                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                border-radius: 8px;
-                                padding: 40px 20px;
-                                text-align: center;
-                                color: white;
-                                font-size: 3rem;">
-                        📺
-                    </div>
-                    """, unsafe_allow_html=True)
+                    year_range = None
 
-            with cols[1]:
-                st.markdown(f"**{title}**")
-                st.caption(f"TMDB ID: {tmdb_id}")
+            # Apply filters
+            filtered_results = results
 
-            with cols[2]:
-                st.write((overview[:280] + "…") if len(overview) > 280 else overview or "_No synopsis available._")
+            if selected_genres:
+                # Get genre IDs from selected genre names
+                reverse_genre_map = {v: k for k, v in genre_map.items()}
+                selected_genre_ids = [reverse_genre_map[g] for g in selected_genres if g in reverse_genre_map]
 
-                # Show all available providers directly (no expander)
-                try:
-                    det = tv_details(tmdb_id)
-                    prov = tv_watch_providers(tmdb_id)
-                    next_air = discover_next_air_date(det)
+                filtered_results = [
+                    r for r in filtered_results
+                    if any(gid in r.get("genre_ids", []) for gid in selected_genre_ids)
+                ]
 
-                    # Get all providers in the region
-                    all_providers = get_all_providers_in_region(prov, region)
+            if year_range:
+                filtered_results = [
+                    r for r in filtered_results
+                    if r.get("first_air_date") and r.get("first_air_date")[:4].isdigit()
+                    and year_range[0] <= int(r.get("first_air_date")[:4]) <= year_range[1]
+                ]
 
-                    # Show next air date at the top
-                    if next_air:
-                        try:
-                            d = dt.date.fromisoformat(next_air)
-                            days = (d - dt.date.today()).days
-                            when = "today" if days == 0 else (f"in {days} days" if days > 0 else f"{abs(days)} days ago")
-                            st.info(f"📅 Next episode: {next_air} ({when})")
-                        except Exception:
-                            st.info(f"📅 Next episode: {next_air}")
+            # Show result count
+            if filtered_results != results:
+                st.caption(f"Showing {len(filtered_results)} of {len(results)} results")
 
-                    # Collect all unique provider names and normalize them
-                    # Use a dict to track unique providers (deduplication)
-                    unique_providers = {}
-                    for providers_list in all_providers.values():
-                        for provider in providers_list:
-                            normalized = normalize_provider_name(provider)
-                            if normalized not in unique_providers:
-                                unique_providers[normalized] = provider
-                    available_provider_names = sorted(unique_providers.keys())
+            for r in filtered_results[:20]:
+                # Add padding above each result
+                st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
 
-                    if available_provider_names:
-                        st.caption("💡 Click a service to add to watchlist")
+                cols = st.columns([1, 3, 6])
+                poster_path = r.get("poster_path")
+                title = r.get("name") or r.get("original_name") or "Untitled"
+                tmdb_id = r.get("id")
+                overview = (r.get("overview") or "").strip()
+                img_url = f"https://image.tmdb.org/t/p/w342{poster_path}" if poster_path else None
 
-                        # Create logo grid (4 per row for better spacing)
-                        for i in range(0, len(available_provider_names), 4):
-                            logo_cols = st.columns(4)
-                            for j, col in enumerate(logo_cols):
-                                if i + j < len(available_provider_names):
-                                    provider = available_provider_names[i + j]
-                                    normalized_provider = normalize_provider_name(provider)
-                                    with col:
-                                        logo_url = get_provider_logo_url(normalized_provider)
-
-                                        # Show logo and make entire area clickable
-                                        if logo_url:
-                                            # Show logo
-                                            st.image(logo_url, width=80)
-                                            # Clickable button with provider name
-                                            clicked = st.button(
-                                                f"➕ {normalized_provider}",
-                                                key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
-                                                use_container_width=True,
-                                                type="primary"
-                                            )
-                                        else:
-                                            # Show provider name as button when logo not available
-                                            clicked = st.button(
-                                                f"➕ {normalized_provider}",
-                                                key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
-                                                use_container_width=True,
-                                                type="primary"
-                                            )
-
-                                        if clicked:
-                                            try:
-                                                on_provider = is_on_provider_in_region(prov, provider, region)
-                                                upsert_show(client, tmdb_id, title, region, on_provider, next_air, overview, poster_path, normalized_provider)
-                                                st.success(f"{ICONS['check']} Added '{title}' to watchlist for {normalized_provider}!")
-                                                st.session_state.clear_search = True
-                                                st.rerun()
-                                            except Exception as e:
-                                                st.error(f"Failed: {e}")
+                with cols[0]:
+                    if img_url:
+                        st.image(img_url, use_column_width=True)
                     else:
-                        # If no providers available, might be broadcast TV
+                        # Show a placeholder when no poster is available
+                        st.markdown("""
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                    border-radius: 8px;
+                                    padding: 40px 20px;
+                                    text-align: center;
+                                    color: white;
+                                    font-size: 3rem;">
+                            📺
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                with cols[1]:
+                    st.markdown(f"**{title}**")
+                    st.caption(f"TMDB ID: {tmdb_id}")
+
+                with cols[2]:
+                    st.write((overview[:280] + "…") if len(overview) > 280 else overview or "_No synopsis available._")
+
+                    # Show all available providers directly (no expander)
+                    try:
+                        det = tv_details(tmdb_id)
+                        prov = tv_watch_providers(tmdb_id)
+                        next_air = discover_next_air_date(det)
+
+                        # Get all providers in the region
+                        all_providers = get_all_providers_in_region(prov, region)
+
+                        # Show next air date at the top
                         if next_air:
-                            # Has air date but no streaming = likely broadcast TV
-                            st.info(f"📺 This show airs on broadcast/cable TV")
-                            st.caption("Add it to track upcoming episodes:")
+                            try:
+                                d = dt.date.fromisoformat(next_air)
+                                days = (d - dt.date.today()).days
+                                when = "today" if days == 0 else (f"in {days} days" if days > 0 else f"{abs(days)} days ago")
+                                st.info(f"📅 Next episode: {next_air} ({when})")
+                            except Exception:
+                                st.info(f"📅 Next episode: {next_air}")
 
-                            # Add Broadcast TV option
-                            if st.button("➕ 📺 Broadcast/Cable TV", key=f"add_broadcast_{tmdb_id}", use_container_width=True):
-                                try:
-                                    upsert_show(client, tmdb_id, title, region, True, next_air, overview, poster_path, "Broadcast TV")
-                                    st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
-                                    st.session_state.clear_search = True
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Failed: {e}")
+                        # Collect all unique provider names and normalize them
+                        # Use a dict to track unique providers (deduplication)
+                        unique_providers = {}
+                        for providers_list in all_providers.values():
+                            for provider in providers_list:
+                                normalized = normalize_provider_name(provider)
+                                if normalized not in unique_providers:
+                                    unique_providers[normalized] = provider
+                        available_provider_names = sorted(unique_providers.keys())
 
-                            st.write("---")
-                            st.caption("Or track it for when it comes to streaming:")
+                        if available_provider_names:
+                            st.caption("💡 Click a service to add to watchlist")
+
+                            # Create logo grid (4 per row for better spacing)
+                            for i in range(0, len(available_provider_names), 4):
+                                logo_cols = st.columns(4)
+                                for j, col in enumerate(logo_cols):
+                                    if i + j < len(available_provider_names):
+                                        provider = available_provider_names[i + j]
+                                        normalized_provider = normalize_provider_name(provider)
+                                        with col:
+                                            logo_url = get_provider_logo_url(normalized_provider)
+
+                                            # Show logo and make entire area clickable
+                                            if logo_url:
+                                                # Show logo
+                                                st.image(logo_url, width=80)
+                                                # Clickable button with provider name
+                                                clicked = st.button(
+                                                    f"➕ {normalized_provider}",
+                                                    key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
+                                                    use_container_width=True,
+                                                    type="primary"
+                                                )
+                                            else:
+                                                # Show provider name as button when logo not available
+                                                clicked = st.button(
+                                                    f"➕ {normalized_provider}",
+                                                    key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
+                                                    use_container_width=True,
+                                                    type="primary"
+                                                )
+
+                                            if clicked:
+                                                try:
+                                                    on_provider = is_on_provider_in_region(prov, provider, region)
+                                                    upsert_show(client, tmdb_id, title, region, on_provider, next_air, overview, poster_path, normalized_provider)
+                                                    st.success(f"{ICONS['check']} Added '{title}' to watchlist for {normalized_provider}!")
+                                                    st.session_state.clear_search = True
+                                                    st.rerun()
+                                                except Exception as e:
+                                                    st.error(f"Failed: {e}")
                         else:
-                            st.info(f"📺 Not currently available on streaming platforms in {region}")
-                            st.caption("This show may air on broadcast/cable TV. Add to track when it becomes available:")
+                            # If no providers available, might be broadcast TV
+                            if next_air:
+                                # Has air date but no streaming = likely broadcast TV
+                                st.info(f"📺 This show airs on broadcast/cable TV")
+                                st.caption("Add it to track upcoming episodes:")
 
-                        # Show streaming services and broadcast/cable networks
-                        top_services = [
-                            "Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+",
-                            "ESPN", "ABC", "NBC", "CBS", "Fox", "Broadcast TV"
-                        ]
+                                # Add Broadcast TV option
+                                if st.button("➕ 📺 Broadcast/Cable TV", key=f"add_broadcast_{tmdb_id}", use_container_width=True):
+                                    try:
+                                        upsert_show(client, tmdb_id, title, region, True, next_air, overview, poster_path, "Broadcast TV")
+                                        st.success(f"{ICONS['check']} Added '{title}' to watchlist!")
+                                        st.session_state.clear_search = True
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed: {e}")
 
-                        for i in range(0, len(top_services), 3):
-                            logo_cols = st.columns(3)
-                            for j, col in enumerate(logo_cols):
-                                if i + j < len(top_services):
-                                    provider = top_services[i + j]
-                                    with col:
-                                        # Show provider name with Add button
-                                        if st.button(f"➕ {provider}", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True, type="secondary"):
-                                            try:
-                                                upsert_show(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider)
-                                                st.success(f"{ICONS['check']} Added '{title}' to watchlist for {provider}!")
-                                                st.session_state.clear_search = True
-                                                st.rerun()
-                                            except Exception as e:
-                                                st.error(f"Failed: {e}")
+                                st.write("---")
+                                st.caption("Or track it for when it comes to streaming:")
+                            else:
+                                st.info(f"📺 Not currently available on streaming platforms in {region}")
+                                st.caption("This show may air on broadcast/cable TV. Add to track when it becomes available:")
 
-                except Exception as e:
-                    st.error(f"Lookup error: {e}")
+                            # Show streaming services and broadcast/cable networks
+                            top_services = [
+                                "Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+",
+                                "ESPN", "ABC", "NBC", "CBS", "Fox", "Broadcast TV"
+                            ]
 
-            # Add padding below each result
-            st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
+                            for i in range(0, len(top_services), 3):
+                                logo_cols = st.columns(3)
+                                for j, col in enumerate(logo_cols):
+                                    if i + j < len(top_services):
+                                        provider = top_services[i + j]
+                                        with col:
+                                            # Show provider name with Add button
+                                            if st.button(f"➕ {provider}", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}", use_container_width=True, type="secondary"):
+                                                try:
+                                                    upsert_show(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider)
+                                                    st.success(f"{ICONS['check']} Added '{title}' to watchlist for {provider}!")
+                                                    st.session_state.clear_search = True
+                                                    st.rerun()
+                                                except Exception as e:
+                                                    st.error(f"Failed: {e}")
 
-# Promotional Sections - Between search and watchlist
-st.write("---")
+                    except Exception as e:
+                        st.error(f"Lookup error: {e}")
 
-# Collapsible promotional sections with watchlist-style layout
-# Dismissed ("not interested") set — filters the discovery carousels below
-_dismissed_ids = dismissed.get_dismissed(client, get_user_id())
+                # Add padding below each result
+                st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
 
-with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=False):
+
+with _main_new:
     st.caption("Shows that premiered in the last 30 days")
     new_shows = [s for s in get_new_shows(region, limit=12) if s.get("id") not in _dismissed_ids][:5]
 
@@ -2070,7 +2094,8 @@ with st.expander(f"{ICONS['new']} New This Month - Just Premiered!", expanded=Fa
     else:
         st.info("No new shows in the last 30 days")
 
-with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", expanded=False):
+
+with _main_trending:
     st.caption("Most popular and talked-about shows this week")
     trending_shows = [s for s in get_trending_shows(limit=12) if s.get("id") not in _dismissed_ids][:5]
 
@@ -2123,7 +2148,8 @@ with st.expander(f"{ICONS['fire']} Trending This Week - What's Hot Right Now!", 
     else:
         st.info("No trending shows available")
 
-with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!", expanded=False):
+
+with _main_top:
     st.caption("All-time highest rated shows on TMDB")
     top_rated_shows = [s for s in get_top_rated_shows(limit=12) if s.get("id") not in _dismissed_ids][:5]
 
@@ -2176,168 +2202,164 @@ with st.expander(f"{ICONS['star']} Top Rated Shows - Critically Acclaimed Hits!"
     else:
         st.info("No top rated shows available")
 
-# 🎯 Grow your watchlist — provider discovery + Netflix import
-_wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
 
-def _add_discovered(tmdb_id, title, overview, poster_path):
-    upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
-
-with st.expander("🎯 Grow your watchlist — find new shows on your services"):
+with _main_grow:
     dtab1, dtab2 = st.tabs(["🔎 New & Returning on Your Services", "📥 Import Netflix History"])
     with dtab1:
         discover.render_discover_section(region, _wl_ids, _add_discovered)
     with dtab2:
         discover.render_netflix_import(_wl_ids, _add_discovered)
 
-# ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
-try:
-    leaving_soon.render_user_section(client, watchlist_tmdb_ids=_wl_ids)
-except Exception:
-    pass
+    # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
+    try:
+        leaving_soon.render_user_section(client, watchlist_tmdb_ids=_wl_ids)
+    except Exception:
+        pass
 
-# Watchlist section below search
-st.write("---")
 
-# Header with icon actions and view toggle
-header_cols = st.columns([7, 1, 1, 1])
-with header_cols[0]:
-    st.subheader(f"{ICONS['tv']} Your Watchlist")
-with header_cols[1]:
-    # Initialize view mode if not set
-    if 'view_mode' not in st.session_state:
-        st.session_state.view_mode = 'grid'
-with header_cols[2]:
-    if st.button("⊞", key="grid_view", help="Grid view", use_container_width=True):
-        st.session_state.view_mode = 'grid'
-        st.rerun()
-with header_cols[3]:
-    if st.button("☰", key="list_view", help="List view", use_container_width=True):
-        st.session_state.view_mode = 'list'
-        st.rerun()
-
-# Export button
-if st.button(f"{ICONS['download']} Export CSV", key="export_csv_btn", use_container_width=False):
-    st.session_state.show_export = True
-
-export_csv = st.session_state.get('show_export', False)
-
-rows = list_shows(client)
-
-# Auto-update production status for shows that don't have it
-if rows:
-    user_id = get_user_id()
-    for row in rows:
-        # Check if production_status is missing or null
-        if not row.get('production_status'):
-            try:
-                # Silently update status in background
-                show_status.update_show_status(client, user_id, row['tmdb_id'], row['title'])
-            except Exception:
-                pass  # Silently fail, don't interrupt display
-    # Refresh rows after updates
-    rows = list_shows(client)
-
-# Auto-refresh stale air dates (past dates get updated with next upcoming episode)
-if rows:
-    rows = refresh_stale_air_dates(client, rows)
-
-if not rows:
-    st.info("Your watchlist is empty. Search and add shows from above.")
-else:
-
-    if export_csv:
-        import csv, io
-        df = []
-        for r in rows:
-            provider_name = r.get("provider_name", DEFAULT_PROVIDER)
-            df.append({
-                "Title": r["title"],
-                "Region": r["region"],
-                "Provider": provider_name,
-                "Available?": "Yes" if r["on_provider"] else "No",
-                "Next Air Date": r["next_air_date"] or "",
-                "Status": format_status(bool(r["on_provider"]), r["next_air_date"], provider_name),
-            })
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=list(df[0].keys()))
-        writer.writeheader()
-        writer.writerows(df)
-        st.download_button("📥 Download watchlist.csv", buf.getvalue(), file_name="watchlist.csv", mime="text/csv", use_container_width=True)
-
+with _main_watch:
+    # Watchlist section below search
     st.write("---")
 
-    # 📅 Upcoming episodes across the whole watchlist
-    render_upcoming(rows)
+    # Header with icon actions and view toggle
+    header_cols = st.columns([7, 1, 1, 1])
+    with header_cols[0]:
+        st.subheader(f"{ICONS['tv']} Your Watchlist")
+    with header_cols[1]:
+        # Initialize view mode if not set
+        if 'view_mode' not in st.session_state:
+            st.session_state.view_mode = 'grid'
+    with header_cols[2]:
+        if st.button("⊞", key="grid_view", help="Grid view", use_container_width=True):
+            st.session_state.view_mode = 'grid'
+            st.rerun()
+    with header_cols[3]:
+        if st.button("☰", key="list_view", help="List view", use_container_width=True):
+            st.session_state.view_mode = 'list'
+            st.rerun()
 
-    # Get current view mode
-    view_mode = st.session_state.get('view_mode', 'grid')
+    # Export button
+    if st.button(f"{ICONS['download']} Export CSV", key="export_csv_btn", use_container_width=False):
+        st.session_state.show_export = True
 
-    # Sort control — single dropdown, works in both grid and list views
-    SORT_OPTS = {
-        "Next episode (soonest)": ("date", "asc"),
-        "Next episode (latest)": ("date", "desc"),
-        "Recently added": ("added", "desc"),
-        "Oldest added": ("added", "asc"),
-        "Title (A\u2013Z)": ("title", "asc"),
-        "Title (Z\u2013A)": ("title", "desc"),
-        "Provider": ("service", "asc"),
-    }
-    _opt_keys = list(SORT_OPTS.keys())
-    sc = st.columns([2, 3])
-    with sc[0]:
-        sort_label = st.selectbox("Sort by", _opt_keys, key="sort_label")
-    sort_by, sort_order = SORT_OPTS[sort_label]
+    export_csv = st.session_state.get('show_export', False)
 
-    if sort_by == "title":
-        rows = sorted(rows, key=lambda x: x["title"].lower(), reverse=(sort_order == "desc"))
-    elif sort_by == "date":
-        def _date_key(r):
-            d = r.get("next_air_date")
-            if not d:
-                return "9999-99-99" if sort_order == "asc" else "0000-00-00"
-            return d
-        rows = sorted(rows, key=_date_key, reverse=(sort_order == "desc"))
-    elif sort_by == "service":
-        rows = sorted(rows, key=lambda x: normalize_provider_name(x.get("provider_name", "")).lower(), reverse=(sort_order == "desc"))
-    elif sort_by == "added":
-        rows = sorted(rows, key=lambda x: x.get("created_at") or "", reverse=(sort_order == "desc"))
+    rows = list_shows(client)
 
-    st.caption(f"Tracking {len(rows)} show(s) \u2022 {sort_label}")
+    # Auto-update production status for shows that don't have it
+    if rows:
+        user_id = get_user_id()
+        for row in rows:
+            # Check if production_status is missing or null
+            if not row.get('production_status'):
+                try:
+                    # Silently update status in background
+                    show_status.update_show_status(client, user_id, row['tmdb_id'], row['title'])
+                except Exception:
+                    pass  # Silently fail, don't interrupt display
+        # Refresh rows after updates
+        rows = list_shows(client)
 
-    # Watched-episode counts for badges (one query; {} if table not yet created)
-    _wcounts = watched.watched_counts(client, get_user_id())
+    # Auto-refresh stale air dates (past dates get updated with next upcoming episode)
+    if rows:
+        rows = refresh_stale_air_dates(client, rows)
 
-    def _status_group(rr):
-        ss = (rr.get("show_status") or "")
-        ps = (rr.get("production_status") or "")
-        if ss == "Canceled" or ps == "CANCELED":
-            return "canceled"
-        if ss == "Ended" or ps == "ENDED":
-            return "ended"
-        return "active"
+    if not rows:
+        st.info("Your watchlist is empty. Search and add shows from above.")
+    else:
 
-    _groups = {"active": [], "canceled": [], "ended": []}
-    for r in rows:
-        _groups[_status_group(r)].append(r)
+        if export_csv:
+            import csv, io
+            df = []
+            for r in rows:
+                provider_name = r.get("provider_name", DEFAULT_PROVIDER)
+                df.append({
+                    "Title": r["title"],
+                    "Region": r["region"],
+                    "Provider": provider_name,
+                    "Available?": "Yes" if r["on_provider"] else "No",
+                    "Next Air Date": r["next_air_date"] or "",
+                    "Status": format_status(bool(r["on_provider"]), r["next_air_date"], provider_name),
+                })
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=list(df[0].keys()))
+            writer.writeheader()
+            writer.writerows(df)
+            st.download_button("📥 Download watchlist.csv", buf.getvalue(), file_name="watchlist.csv", mime="text/csv", use_container_width=True)
 
-    def _render_group(group, empty_msg):
-        if not group:
-            st.info(empty_msg)
-            return
-        if view_mode == 'grid':
-            render_grid_gallery(group, client, _wcounts)   # poster-tile gallery
-        else:
-            for r in group:
-                render_show_row(r, 'list', client, _wcounts)  # detailed rows w/ episode guide
+        st.write("---")
 
-    _t_active, _t_canceled, _t_ended = st.tabs([
-        f"📺 Active ({len(_groups['active'])})",
-        f"🚫 Canceled ({len(_groups['canceled'])})",
-        f"✅ Ended ({len(_groups['ended'])})",
-    ])
-    with _t_active:
-        _render_group(_groups['active'], "No active shows.")
-    with _t_canceled:
-        _render_group(_groups['canceled'], "No canceled shows. 🎉")
-    with _t_ended:
-        _render_group(_groups['ended'], "No ended shows yet.")
+        # (Upcoming episodes now live in their own top-level "📅 Upcoming" tab)
+
+        # Get current view mode
+        view_mode = st.session_state.get('view_mode', 'grid')
+
+        # Sort control — single dropdown, works in both grid and list views
+        SORT_OPTS = {
+            "Next episode (soonest)": ("date", "asc"),
+            "Next episode (latest)": ("date", "desc"),
+            "Recently added": ("added", "desc"),
+            "Oldest added": ("added", "asc"),
+            "Title (A\u2013Z)": ("title", "asc"),
+            "Title (Z\u2013A)": ("title", "desc"),
+            "Provider": ("service", "asc"),
+        }
+        _opt_keys = list(SORT_OPTS.keys())
+        sc = st.columns([2, 3])
+        with sc[0]:
+            sort_label = st.selectbox("Sort by", _opt_keys, key="sort_label")
+        sort_by, sort_order = SORT_OPTS[sort_label]
+
+        if sort_by == "title":
+            rows = sorted(rows, key=lambda x: x["title"].lower(), reverse=(sort_order == "desc"))
+        elif sort_by == "date":
+            def _date_key(r):
+                d = r.get("next_air_date")
+                if not d:
+                    return "9999-99-99" if sort_order == "asc" else "0000-00-00"
+                return d
+            rows = sorted(rows, key=_date_key, reverse=(sort_order == "desc"))
+        elif sort_by == "service":
+            rows = sorted(rows, key=lambda x: normalize_provider_name(x.get("provider_name", "")).lower(), reverse=(sort_order == "desc"))
+        elif sort_by == "added":
+            rows = sorted(rows, key=lambda x: x.get("created_at") or "", reverse=(sort_order == "desc"))
+
+        st.caption(f"Tracking {len(rows)} show(s) \u2022 {sort_label}")
+
+        # Watched-episode counts for badges (one query; {} if table not yet created)
+        _wcounts = watched.watched_counts(client, get_user_id())
+
+        def _status_group(rr):
+            ss = (rr.get("show_status") or "")
+            ps = (rr.get("production_status") or "")
+            if ss == "Canceled" or ps == "CANCELED":
+                return "canceled"
+            if ss == "Ended" or ps == "ENDED":
+                return "ended"
+            return "active"
+
+        _groups = {"active": [], "canceled": [], "ended": []}
+        for r in rows:
+            _groups[_status_group(r)].append(r)
+
+        def _render_group(group, empty_msg):
+            if not group:
+                st.info(empty_msg)
+                return
+            if view_mode == 'grid':
+                render_grid_gallery(group, client, _wcounts)   # poster-tile gallery
+            else:
+                for r in group:
+                    render_show_row(r, 'list', client, _wcounts)  # detailed rows w/ episode guide
+
+        _t_active, _t_canceled, _t_ended = st.tabs([
+            f"📺 Active ({len(_groups['active'])})",
+            f"🚫 Canceled ({len(_groups['canceled'])})",
+            f"✅ Ended ({len(_groups['ended'])})",
+        ])
+        with _t_active:
+            _render_group(_groups['active'], "No active shows.")
+        with _t_canceled:
+            _render_group(_groups['canceled'], "No canceled shows. 🎉")
+        with _t_ended:
+            _render_group(_groups['ended'], "No ended shows yet.")
