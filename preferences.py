@@ -170,6 +170,7 @@ def should_send_email(client: Client, user_id: str, notification_type: str) -> b
         type_mapping = {
             "new_episode": "email_new_episodes",
             "new_episodes": "email_new_episodes",
+            "reminder": "email_new_episodes",       # daily "airs today" reminder
             "weekly_preview": "email_weekly_preview",
             "series_finale": "email_series_finale",
             "series_cancelled": "email_series_cancelled",
@@ -209,6 +210,7 @@ def should_create_inapp_notification(client: Client, user_id: str, notification_
         type_mapping = {
             "new_episode": "inapp_new_episodes",
             "new_episodes": "inapp_new_episodes",
+            "reminder": "inapp_new_episodes",       # daily "airs today" reminder
             "weekly_preview": "inapp_weekly_preview",
             "series_finale": "inapp_series_finale",
             "series_cancelled": "inapp_series_cancelled",

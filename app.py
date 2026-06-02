@@ -2003,127 +2003,58 @@ if show_settings:
 
         with tab4:
             st.markdown("**🔔 Customize Your Notifications**")
-            st.caption("Choose which notifications you want to receive via email and in-app")
+            st.caption("Every alert StreamGenie can send you. Choose how you want each one — by email, "
+                       "in the 🔔 sidebar, both, or off.")
 
-            # Get user preferences
             user_id = get_user_id()
             user_prefs = preferences.get_or_create_preferences(client, user_id)
 
-            st.write("")
-            st.markdown("### 📧 Email Notifications")
-            st.caption("Control which types of email notifications you receive")
+            # (label, description, email_key, email_default, inapp_key, inapp_default)
+            _NOTIFS = [
+                (":material/tv: New episode airing",
+                 "A show you track has an episode airing today.",
+                 "email_new_episodes", True, "inapp_new_episodes", True),
+                (":material/calendar_today: Weekly preview",
+                 "A weekly digest of everything airing in the next 7 days.",
+                 "email_weekly_preview", True, "inapp_weekly_preview", True),
+                (":material/check_circle: Series finale (Ended)",
+                 "A show you track has ended.",
+                 "email_series_finale", True, "inapp_series_finale", True),
+                (":material/block: Series cancelled",
+                 "A show you track was cancelled.",
+                 "email_series_cancelled", True, "inapp_series_cancelled", True),
+                (":material/add: Show added / status change",
+                 "A show is added to your watchlist or otherwise changes status.",
+                 "email_show_added", False, "inapp_show_added", True),
+            ]
 
-            col_email1, col_email2 = st.columns(2)
+            hdr = st.columns([5, 1.3, 1.3])
+            hdr[0].markdown("**Notification**")
+            hdr[1].markdown("**:material/email: Email**")
+            hdr[2].markdown("**:material/notifications: In-app**")
+            st.divider()
 
-            with col_email1:
-                email_new_episodes = st.checkbox(
-                    "🎬 New Episodes Airing",
-                    value=user_prefs.get("email_new_episodes", True),
-                    help="Get an email when a tracked show has a new episode airing today",
-                    key="pref_email_new_episodes"
-                )
+            _new_prefs = {}
+            for label, desc, ek, ed, ik, idf in _NOTIFS:
+                row = st.columns([5, 1.3, 1.3])
+                with row[0]:
+                    st.markdown(f"**{label}**")
+                    st.caption(desc)
+                _new_prefs[ek] = row[1].checkbox(label, value=user_prefs.get(ek, ed),
+                                                 key=f"pw_{ek}", label_visibility="collapsed")
+                _new_prefs[ik] = row[2].checkbox(label, value=user_prefs.get(ik, idf),
+                                                 key=f"pw_{ik}", label_visibility="collapsed")
+                st.divider()
 
-                email_series_finale = st.checkbox(
-                    "🎭 Series Finales",
-                    value=user_prefs.get("email_series_finale", True),
-                    help="Get notified when a tracked show's final episode airs",
-                    key="pref_email_series_finale"
-                )
+            if st.button(":material/save: Save notification preferences", use_container_width=True, type="primary"):
+                if preferences.update_preferences(client, user_id, _new_prefs):
+                    st.success("Saved! Changes apply on the next daily/weekly run.")
+                else:
+                    st.error("Couldn't save — please try again.")
 
-                email_show_added = st.checkbox(
-                    "➕ Show Added to Watchlist",
-                    value=user_prefs.get("email_show_added", False),
-                    help="Get an email when you add a new show to your watchlist",
-                    key="pref_email_show_added"
-                )
-
-            with col_email2:
-                email_weekly_preview = st.checkbox(
-                    "📅 Weekly Preview",
-                    value=user_prefs.get("email_weekly_preview", True),
-                    help="Get a weekly email on Sunday with all shows airing in the next 7 days",
-                    key="pref_email_weekly_preview"
-                )
-
-                email_series_cancelled = st.checkbox(
-                    f"{ICONS['error']} Show Cancellations",
-                    value=user_prefs.get("email_series_cancelled", True),
-                    help="Get notified when a tracked show is cancelled",
-                    key="pref_email_series_cancelled"
-                )
-
-            st.write("---")
-            st.markdown("### 📱 In-App Notifications")
-            st.caption("Control which notifications appear in the sidebar")
-
-            col_inapp1, col_inapp2 = st.columns(2)
-
-            with col_inapp1:
-                inapp_new_episodes = st.checkbox(
-                    "🎬 New Episodes Airing",
-                    value=user_prefs.get("inapp_new_episodes", True),
-                    help="Show in-app notifications for new episodes",
-                    key="pref_inapp_new_episodes"
-                )
-
-                inapp_series_finale = st.checkbox(
-                    "🎭 Series Finales",
-                    value=user_prefs.get("inapp_series_finale", True),
-                    help="Show in-app notifications for series finales",
-                    key="pref_inapp_series_finale"
-                )
-
-                inapp_show_added = st.checkbox(
-                    "➕ Show Added to Watchlist",
-                    value=user_prefs.get("inapp_show_added", True),
-                    help="Show in-app notifications when adding shows",
-                    key="pref_inapp_show_added"
-                )
-
-            with col_inapp2:
-                inapp_weekly_preview = st.checkbox(
-                    "📅 Weekly Preview",
-                    value=user_prefs.get("inapp_weekly_preview", True),
-                    help="Show in-app notifications for weekly previews",
-                    key="pref_inapp_weekly_preview"
-                )
-
-                inapp_series_cancelled = st.checkbox(
-                    f"{ICONS['error']} Show Cancellations",
-                    value=user_prefs.get("inapp_series_cancelled", True),
-                    help="Show in-app notifications for cancelled shows",
-                    key="pref_inapp_series_cancelled"
-                )
-
-            st.write("---")
-
-            # Save button
-            col_save_prefs, col_spacer = st.columns([1, 3])
-            with col_save_prefs:
-                if st.button("💾 Save Preferences", use_container_width=True):
-                    # Collect all preferences
-                    updates = {
-                        "email_new_episodes": email_new_episodes,
-                        "email_weekly_preview": email_weekly_preview,
-                        "email_series_finale": email_series_finale,
-                        "email_series_cancelled": email_series_cancelled,
-                        "email_show_added": email_show_added,
-                        "inapp_new_episodes": inapp_new_episodes,
-                        "inapp_weekly_preview": inapp_weekly_preview,
-                        "inapp_series_finale": inapp_series_finale,
-                        "inapp_series_cancelled": inapp_series_cancelled,
-                        "inapp_show_added": inapp_show_added
-                    }
-
-                    # Update preferences
-                    if preferences.update_preferences(client, user_id, updates):
-                        st.success(f"{ICONS['check']} Notification preferences saved!")
-                        st.balloons()
-                    else:
-                        st.error(f"{ICONS['error']} Failed to save preferences. Please try again.")
-
-            st.write("")
-            st.info("💡 **Tip:** All notifications will appear in the sidebar notification center. You can control which types trigger emails separately.")
+            st.info("💡 In-app alerts always show in the 🔔 sidebar. Email also needs a verified address "
+                    "(Email Reminders tab). **Leaving-soon** alerts aren't toggle-able yet — tell me if you "
+                    "want them added here.")
 
         st.write("---")
 else:
