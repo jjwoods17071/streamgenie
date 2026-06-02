@@ -715,8 +715,8 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     ng = sports.next_game(games)
     w, l = sports.record(games, name)
 
-    def _logo_img(u, h=28):
-        return f'<img src="{u}" style="height:{h}px;vertical-align:middle;margin:0 4px">' if u else ""
+    def _logo_img(u, h=104):
+        return f'<img src="{u}" style="height:{h}px;vertical-align:middle;margin:0 8px">' if u else ""
 
     hc = st.columns([1, 3])
     with hc[0]:
@@ -730,9 +730,9 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             st.markdown(
                 f'<div style="background:rgba(34,197,94,.12);border-radius:8px;padding:8px 12px;'
                 f'display:flex;align-items:center;flex-wrap:wrap">'
-                f'🟢&nbsp;<b>Next:</b>{_logo_img(ng.get("away_logo"), 30)}<b>{ng["away"]}</b>'
+                f'🟢&nbsp;<b>Next:</b>{_logo_img(ng.get("away_logo"), 120)}<b>{ng["away"]}</b>'
                 f'<span style="opacity:.55;margin:0 5px">@</span>'
-                f'{_logo_img(ng.get("home_logo"), 30)}<b>{ng["home"]}</b>'
+                f'{_logo_img(ng.get("home_logo"), 120)}<b>{ng["home"]}</b>'
                 f'<span style="opacity:.8">&nbsp;— {ng["date"]}{_net}</span></div>',
                 unsafe_allow_html=True)
         if client is not None:
@@ -2560,44 +2560,56 @@ with _main_top:
 with _main_grow:
     dtab1, dtab2, dtab3 = st.tabs([
         "🔎 New & Returning on Your Services", "📥 Import Netflix History",
-        ":material/sports_football: Follow an NFL Team"])
+        ":material/sports_football: Follow Your Sports Teams"])
     with dtab1:
         discover.render_discover_section(region, _wl_ids, _add_discovered)
     with dtab2:
         discover.render_netflix_import(_wl_ids, _add_discovered)
     with dtab3:
-        st.caption("Follow a team — its games show up in **Upcoming** like episodes, with TV "
+        st.caption("Follow your sports teams — games show up in **Upcoming** like episodes, with TV "
                    "networks and a link to regional coverage maps.")
-        _lk = st.radio("League", list(sports.LEAGUES.keys()),
-                       format_func=sports.league_label, horizontal=True, key="sports_league")
+        _leagues = list(sports.LEAGUES.keys())
+        if st.session_state.get("sports_league") not in _leagues:
+            st.session_state["sports_league"] = _leagues[0]
+        # League picker — logos
+        _lc = st.columns(len(_leagues))
+        for _i, _lk0 in enumerate(_leagues):
+            with _lc[_i]:
+                _llogo = sports.league_logo(_lk0)
+                if _llogo:
+                    st.image(_llogo, use_column_width=True)
+                _is_sel = st.session_state["sports_league"] == _lk0
+                if st.button(sports.league_label(_lk0), key=f"lgsel_{_lk0}", use_container_width=True,
+                             type="primary" if _is_sel else "secondary"):
+                    st.session_state["sports_league"] = _lk0
+                    st.rerun()
+        _lk = st.session_state["sports_league"]
+        _lab = sports.league_label(_lk).split()[-1]
         _teams = sports.get_teams(_lk)
         if not _teams:
             st.info("Couldn't load teams right now — try again shortly.")
         else:
-            _pick = st.selectbox("Team", [t["name"] for t in _teams], key=f"sports_pick_{_lk}")
-            _t = next((x for x in _teams if x["name"] == _pick), None)
-            if _t:
-                _neg = sports.encode_id(_lk, _t["id"])
-                _lab = sports.league_label(_lk).split()[-1]   # e.g. "NFL"
-                cc = st.columns([1, 4])
-                with cc[0]:
-                    if _t.get("logo"):
-                        st.image(_t["logo"], width=84)
-                with cc[1]:
-                    _g = sports.get_team_schedule(_lk, _t["id"])
-                    _ng = sports.next_game(_g)
-                    if _ng:
-                        st.markdown(f"**Next game:** {_ng['away']} @ {_ng['home']} — {_ng['date']}"
-                                    + (f"  ·  📺 {_ng['network']}" if _ng.get('network') else ""))
-                    if _neg in _wl_ids:
-                        st.markdown(":blue[✓ Already following]")
-                    else:
-                        def _follow(_team=_t, _id=_neg, _next=_ng, _league=_lab):
-                            upsert_show(client, _id, _team["name"], "US", True,
-                                        (_next["date"] if _next else None),
-                                        f"{_league} team", _team.get("logo"), _league)
-                        st.button(":material/add: Follow this team", key=f"follow_{_lk}_{_t['id']}",
-                                  type="primary", on_click=_follow)
+            st.markdown(f"#### {sports.league_label(_lk)} — pick a team to follow")
+            _per = 6
+            for _i in range(0, len(_teams), _per):
+                _gc = st.columns(_per)
+                for _j, _t in enumerate(_teams[_i:_i + _per]):
+                    with _gc[_j]:
+                        if _t.get("logo"):
+                            st.image(_t["logo"], use_column_width=True)
+                        st.caption(f"**{_t.get('abbrev') or _t['name']}**")
+                        _neg = sports.encode_id(_lk, _t["id"])
+                        if _neg in _wl_ids:
+                            st.markdown(":blue[✓ Following]")
+                        else:
+                            def _follow(_team=_t, _id=_neg, _lkx=_lk, _league=_lab):
+                                _g = sports.get_team_schedule(_lkx, _team["id"])
+                                _ng = sports.next_game(_g)
+                                upsert_show(client, _id, _team["name"], "US", True,
+                                            (_ng["date"] if _ng else None),
+                                            f"{_league} team", _team.get("logo"), _league)
+                            st.button(":material/add: Follow", key=f"follow_{_lk}_{_t['id']}",
+                                      use_container_width=True, on_click=_follow)
 
     # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
     try:

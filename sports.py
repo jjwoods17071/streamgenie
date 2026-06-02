@@ -15,12 +15,18 @@ _OFFSET = 10_000_000  # league-id namespace size
 
 # key -> (espn sport, espn league, label, league-index, 506sports coverage-map url)
 LEAGUES = {
-    "nfl": ("football",   "nfl", "🏈 NFL", 1, "https://506sports.com/nfl/index.php"),
-    "mlb": ("baseball",   "mlb", "⚾ MLB", 2, "https://506sports.com/mlb.php"),
-    "nba": ("basketball", "nba", "🏀 NBA", 3, "https://506sports.com/nba.php"),
-    "nhl": ("hockey",     "nhl", "🏒 NHL", 4, "https://506sports.com/nhl.php"),
+    "nfl":  ("football",   "nfl",  "🏈 NFL",  1, "https://506sports.com/nfl/index.php"),
+    "mlb":  ("baseball",   "mlb",  "⚾ MLB",  2, "https://506sports.com/mlb.php"),
+    "nba":  ("basketball", "nba",  "🏀 NBA",  3, "https://506sports.com/nba.php"),
+    "nhl":  ("hockey",     "nhl",  "🏒 NHL",  4, "https://506sports.com/nhl.php"),
+    "wnba": ("basketball", "wnba", "🏀 WNBA", 5, None),
 }
 _IDX_TO_LEAGUE = {v[3]: k for k, v in LEAGUES.items()}
+
+
+def league_logo(league: str):
+    lg = LEAGUES.get(league, (None, None))[1]
+    return f"https://a.espncdn.com/i/teamlogos/leagues/500/{lg}.png" if lg else None
 
 
 def encode_id(league: str, team_id) -> int:
