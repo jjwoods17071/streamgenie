@@ -589,8 +589,13 @@ def _current_season(meta: Dict[str, Any]):
 
 
 def open_show_page(show: Dict[str, Any]) -> None:
-    """Navigate to the full show-detail (PDP) view for the given show row/dict."""
-    st.session_state["pdp_show"] = show
+    """Navigate to the show-detail page via a ?show=<id> query param. This creates a
+    real browser-history entry (so the browser Back button returns to the list, and
+    the page is bookmarkable) while still being an in-app rerun (no full reload → the
+    login session is preserved). The full row is cached so the PDP has title/poster."""
+    sid = show.get("tmdb_id")
+    st.session_state.setdefault("_showcache", {})[sid] = show
+    st.query_params["show"] = str(sid)
     st.rerun()
 
 
@@ -626,7 +631,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
     tmdb_id = show.get("tmdb_id")
     if st.button("← Back to list", key="pdp_back"):
-        st.session_state.pop("pdp_show", None)
+        st.query_params.clear()
         st.rerun()
 
     meta = get_show_meta(tmdb_id) or {}
@@ -661,7 +666,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             if st.button("🗑️ Remove from watchlist", key=f"pdp_del_{tmdb_id}"):
                 delete_show(client, tmdb_id, wl_row.get("region") or DEFAULT_REGION,
                             wl_row.get("provider_name", DEFAULT_PROVIDER))
-                st.session_state.pop("pdp_show", None)
+                st.query_params.clear()
                 st.rerun()
         elif client is not None:
             if st.button("➕ Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary"):
@@ -2004,10 +2009,19 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
-# ── Show-detail page (PDP) router: when a show card is clicked, take over the page ──
-if st.session_state.get("pdp_show"):
-    render_show_page(st.session_state["pdp_show"], client, get_user_id())
-    st.stop()
+# ── Show-detail page (PDP) router: ?show=<id> takes over the page. Driven by the URL
+#    so the browser Back button returns to the list (and the page is bookmarkable). ──
+if "show" in st.query_params:
+    try:
+        _sid = int(st.query_params["show"])
+    except Exception:
+        _sid = None
+    if _sid is not None:
+        _show = st.session_state.get("_showcache", {}).get(_sid) or {"tmdb_id": _sid}
+        render_show_page(_show, client, get_user_id())
+        st.stop()
+    else:
+        st.query_params.clear()
 
 # ── Main page: tabbed layout (Search / discovery / watchlist) ──
 _dismissed_ids = dismissed.get_dismissed(client, get_user_id())
