@@ -432,7 +432,8 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
     """Episode list (with optional watched tracking) for one selected season."""
     eps = get_season_episodes(tv_id, sel)
     if not eps:
-        st.caption("No episodes listed for this season yet.")
+        st.info(":material/info: No episode-level data for this season yet. "
+                "(Common for **live sports** and some unscripted titles — the databases don't catalogue individual games/episodes.)")
         return
 
     # Enrich from TVmaze (cached per show) when TMDB is missing an overview or a still image
