@@ -294,6 +294,7 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
             "number_of_episodes": d.get("number_of_episodes"),
             "first_air_date": d.get("first_air_date"),
             "next_episode_to_air": d.get("next_episode_to_air"),
+            "last_episode_to_air": d.get("last_episode_to_air"),
             "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
         }
     except Exception:
@@ -964,14 +965,73 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
                     st.rerun()
 
 
+# ---------------- Pin This + Available Now (Upcoming tab) ----------------
+def get_pinned_ids() -> set:
+    """tmdb_ids the user has pinned to the top of Upcoming. Safe before the
+    `shows.pinned` migration runs (returns empty set if the column is absent)."""
+    try:
+        r = (client.table("shows").select("tmdb_id")
+             .eq("user_id", get_user_id()).eq("pinned", True).execute())
+        return {x["tmdb_id"] for x in (r.data or [])}
+    except Exception:
+        return set()
+
+
+def set_pin(tmdb_id, value: bool) -> None:
+    """Pin/unpin a show (all provider rows for that tmdb_id). No-op if the
+    column doesn't exist yet."""
+    try:
+        (client.table("shows").update({"pinned": bool(value)})
+         .eq("user_id", get_user_id()).eq("tmdb_id", tmdb_id).execute())
+    except Exception:
+        pass
+
+
+def _toggle_pin(tmdb_id, value: bool) -> None:
+    set_pin(tmdb_id, value)
+
+
+def aired_episode_count(meta: dict) -> int:
+    """Episodes that have aired so far = all episodes in completed prior seasons
+    + the episode number of the most recent aired episode. Excludes specials
+    (season 0 already filtered out of meta['seasons'])."""
+    last = meta.get("last_episode_to_air")
+    if not isinstance(last, dict):
+        return 0
+    ls, le = last.get("season_number"), last.get("episode_number")
+    if not ls:
+        return 0
+    total = 0
+    for s in (meta.get("seasons") or []):
+        sn = s.get("season_number")
+        if sn and sn < ls:
+            total += s.get("episode_count") or 0
+    return total + (le or 0)
+
+
+def available_now_count(tmdb_id, watched_n: int) -> int:
+    """How many already-released episodes the user hasn't watched yet."""
+    try:
+        meta = get_show_meta(tmdb_id)
+    except Exception:
+        return 0
+    aired = aired_episode_count(meta)
+    return max(0, aired - int(watched_n or 0))
+
+
 def render_upcoming(rows, as_tab=False):
     """Agenda of upcoming episodes across the whole watchlist, grouped by timeframe.
+
+    Adds two resume helpers at the top: a 📌 Pinned strip (shows the user is
+    actively watching) and a 📥 Available Now strip (released-but-unwatched
+    episode counts across the whole watchlist).
 
     as_tab=True renders the list directly (for the dedicated Upcoming tab) with an
     empty-state message; otherwise it renders inside a collapsible expander.
     """
     today = dt.date.today()
-    up = []
+    up = []                       # (date, row) with a scheduled upcoming episode
+    up_by_id = {}
     for r in rows:
         ad = r.get("next_air_date")
         if not ad:
@@ -982,39 +1042,117 @@ def render_upcoming(rows, as_tab=False):
             continue
         if d >= today:
             up.append((d, r))
-    if not up:
-        if as_tab:
-            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Search tab to see what's coming up.")
-        return
+            up_by_id[r.get("tmdb_id")] = d
     up.sort(key=lambda x: x[0])
     soon = any((d - today).days <= 7 for d, _ in up)
 
+    pinned_ids = get_pinned_ids() if as_tab else set()
+
+    def _pin_button(r):
+        tid = r.get("tmdb_id")
+        is_pinned = tid in pinned_ids
+        st.button("📌" if is_pinned else "📍", key=f"pin_{tid}",
+                  help="Unpin from top" if is_pinned else "Pin to top",
+                  on_click=_toggle_pin, args=(tid, not is_pinned))
+
+    def _row(r, d=None, show_pin=True):
+        ne = get_next_episode(r["tmdb_id"])
+        ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
+        c = st.columns([1, 4, 1]) if show_pin else st.columns([1, 5])
+        with c[0]:
+            clickable_poster(r['tmdb_id'], r.get("poster_path"))
+        with c[1]:
+            clickable_title(r['title'], r)
+            if d is not None:
+                days = (d - today).days
+                when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+                st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
+            elif ep:
+                st.caption(f"⏳ next: {ep}")
+            else:
+                st.caption("⏳ no episode scheduled yet")
+        if show_pin:
+            with c[2]:
+                _pin_button(r)
+
     def _body():
+        # 📌 Pinned — actively-watched shows kept at the very top (even with no air date)
+        if pinned_ids:
+            pinned_rows = [r for r in rows if r.get("tmdb_id") in pinned_ids]
+            pinned_rows.sort(key=lambda r: up_by_id.get(r.get("tmdb_id"), dt.date.max))
+            if pinned_rows:
+                st.markdown("**📌 Pinned**")
+                for r in pinned_rows:
+                    _row(r, up_by_id.get(r.get("tmdb_id")))
+                st.divider()
+
+        # 📅 Upcoming episodes by timeframe (pinned excluded — already shown above)
+        rest = [(d, r) for d, r in up if r.get("tmdb_id") not in pinned_ids]
         groups = [
-            ("⏰ This week", [x for x in up if (x[0] - today).days <= 7]),
-            ("📅 This month", [x for x in up if 7 < (x[0] - today).days <= 30]),
-            ("🔜 Later", [x for x in up if (x[0] - today).days > 30]),
+            ("⏰ This week", [x for x in rest if (x[0] - today).days <= 7]),
+            ("📅 This month", [x for x in rest if 7 < (x[0] - today).days <= 30]),
+            ("🔜 Later", [x for x in rest if (x[0] - today).days > 30]),
         ]
+        rendered = False
         for label, items in groups:
             if not items:
                 continue
+            rendered = True
             st.markdown(f"**{label}**")
             for d, r in items:
-                days = (d - today).days
-                ne = get_next_episode(r["tmdb_id"])
-                ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
-                c = st.columns([1, 4])
-                with c[0]:
-                    clickable_poster(r['tmdb_id'], r.get("poster_path"))
-                with c[1]:
-                    when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
-                    clickable_title(r['title'], r)
-                    st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
+                _row(r, d)
+        if not rendered and not pinned_ids:
+            st.caption("No upcoming episodes scheduled for your watchlist right now.")
+
+    def _available_now():
+        """📥 Released-but-unwatched episode counts across the whole watchlist."""
+        wcounts = watched.watched_counts(client, get_user_id())
+        avail = []
+        for r in rows:
+            tid = r.get("tmdb_id")
+            if not tid or tid < 0:          # skip sports rows (negative ids)
+                continue
+            n = available_now_count(tid, wcounts.get(tid, 0))
+            if n > 0:
+                avail.append((n, r))
+        if not avail:
+            return
+        avail.sort(key=lambda x: -x[0])
+        total = sum(n for n, _ in avail)
+        st.markdown(f"### 📥 Available Now — {total} episode{'s' if total != 1 else ''} ready "
+                    f"across {len(avail)} show{'s' if len(avail) != 1 else ''}")
+        st.caption("Episodes already released that you haven't marked watched yet — pick up where you left off.")
+        top = avail[:8]
+        for n, r in top:
+            c = st.columns([1, 4, 1])
+            with c[0]:
+                clickable_poster(r['tmdb_id'], r.get("poster_path"))
+            with c[1]:
+                clickable_title(r['title'], r)
+                st.caption(f":blue[**{n} ready to watch**]")
+            with c[2]:
+                _pin_button(r)
+        if len(avail) > len(top):
+            with st.expander(f"➕ {len(avail) - len(top)} more shows with episodes ready"):
+                for n, r in avail[len(top):]:
+                    cc = st.columns([5, 1])
+                    with cc[0]:
+                        clickable_title(r['title'], r)
+                        st.caption(f":blue[{n} ready to watch]")
+                    with cc[1]:
+                        _pin_button(r)
+        st.divider()
 
     if as_tab:
+        _available_now()
         st.subheader(f"📅 Upcoming Episodes ({len(up)})")
-        _body()
+        if not up and not pinned_ids:
+            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Search tab to see what's coming up.")
+        else:
+            _body()
     else:
+        if not up:
+            return
         with st.expander(f"📅 Upcoming Episodes ({len(up)})", expanded=soon):
             _body()
 
