@@ -318,9 +318,10 @@ def get_related_shows(tv_id:int) -> List[Dict[str, Any]]:
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def get_tvmaze_overviews(tv_id:int) -> Dict[Any, str]:
-    """Fallback episode summaries from TVmaze (free, no key), keyed by (season, episode).
-    Fills in episodes where TMDB has no overview. Maps via the show's IMDb id."""
+def get_tvmaze_episode_data(tv_id:int) -> Dict[Any, Dict[str, str]]:
+    """Fallback episode summaries AND still images from TVmaze (free, no key), keyed by
+    (season, episode): {(s,n): {'overview': txt, 'image': url}}. Fills gaps where TMDB
+    lacks an overview or a still. Maps via the show's IMDb id."""
     import re as _re
     try:
         imdb = (tmdb_get(f"/tv/{tv_id}/external_ids") or {}).get("imdb_id")
@@ -334,9 +335,12 @@ def get_tvmaze_overviews(tv_id:int) -> Dict[Any, str]:
         out = {}
         for e in eps:
             s, n = e.get("season"), e.get("number")
+            if not (s and n):
+                continue
             txt = _re.sub("<[^>]+>", "", e.get("summary") or "").strip()
-            if s and n and txt:
-                out[(s, n)] = txt
+            img = (e.get("image") or {}).get("medium") or (e.get("image") or {}).get("original")
+            if txt or img:
+                out[(s, n)] = {"overview": txt, "image": img}
         return out
     except Exception:
         return {}
@@ -431,8 +435,9 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
         st.caption("No episodes listed for this season yet.")
         return
 
-    # Enrich: fill episodes lacking a TMDB overview from TVmaze (cached per show)
-    _tvmaze = get_tvmaze_overviews(tv_id) if any(not (e.get("overview") or "").strip() for e in eps) else {}
+    # Enrich from TVmaze (cached per show) when TMDB is missing an overview or a still image
+    _need_tvmaze = any((not (e.get("overview") or "").strip()) or (not e.get("still_path")) for e in eps)
+    _tvmaze = get_tvmaze_episode_data(tv_id) if _need_tvmaze else {}
 
     today = dt.date.today()
     track = bool(client is not None and user_id and watched.table_available(client))
@@ -467,14 +472,18 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
                 upcoming = dt.date.fromisoformat(ad) > today
         except Exception:
             pass
+        _tvm = _tvmaze.get((sel, en)) if _tvmaze else None
+        # still: TMDB first, else TVmaze image
+        still_url = (f"https://image.tmdb.org/t/p/w185{still}" if still
+                     else (_tvm.get("image") if _tvm else None))
         # layout: still | info | date | (watched)
         ec = st.columns([1.3, 4, 1, 0.8]) if track else st.columns([1.3, 4, 1])
         with ec[0]:
-            if still:
-                st.image(f"https://image.tmdb.org/t/p/w185{still}", use_column_width=True)
+            if still_url:
+                st.image(still_url, use_column_width=True)
         with ec[1]:
             st.markdown(f"**E{en:02d} · {name}**" + ("  🔜" if upcoming else ""))
-            ov = (ep.get("overview") or "").strip() or _tvmaze.get((sel, en), "")
+            ov = (ep.get("overview") or "").strip() or ((_tvm.get("overview") if _tvm else "") or "")
             if ov:
                 st.write(ov)   # readable body text (was a tiny grey caption)
         with ec[2]:
