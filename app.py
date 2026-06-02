@@ -571,8 +571,133 @@ def render_show_row(r, view_mode, client, wcounts):
     st.divider()
 
 
+def _current_season(meta: Dict[str, Any]):
+    """Best guess at the 'current' (now-airing or most-recently-aired) season number."""
+    seasons = meta.get("seasons") or []
+    if not seasons:
+        return None
+    nxt = meta.get("next_episode_to_air")
+    if isinstance(nxt, dict) and nxt.get("season_number"):
+        return nxt["season_number"]
+    today = dt.date.today().isoformat()
+    aired = [s for s in seasons if (s.get("air_date") or "0000") <= today and (s.get("episode_count") or 0) > 0]
+    if aired:
+        return max(s["season_number"] for s in aired)
+    return seasons[-1]["season_number"]
+
+
+def open_show_page(show: Dict[str, Any]) -> None:
+    """Navigate to the full show-detail (PDP) view for the given show row/dict."""
+    st.session_state["pdp_show"] = show
+    st.rerun()
+
+
+_OPENSEQ = [0]  # reset to 0 every Streamlit rerun (whole script re-executes)
+
+
+def clickable_title(title: str, show: Dict[str, Any]) -> None:
+    """Render a show title as a full-width button that opens its detail page (PDP).
+    The per-run sequence makes the key unique even if the same show appears in
+    several tabs (New/Trending/Top) in the same render."""
+    _OPENSEQ[0] += 1
+    if st.button(title, key=f"open_{show.get('tmdb_id')}_{_OPENSEQ[0]}",
+                 use_container_width=True, help="Open show details"):
+        open_show_page(show)
+
+
+def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
+    """Full-page show detail (PDP): poster + summary + availability + ALL seasons
+    (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
+    tmdb_id = show.get("tmdb_id")
+    title = show.get("title") or "Show"
+    if st.button("← Back to list", key="pdp_back"):
+        st.session_state.pop("pdp_show", None)
+        st.rerun()
+
+    meta = get_show_meta(tmdb_id) or {}
+    cur = _current_season(meta)
+
+    hc = st.columns([1, 2.5])
+    with hc[0]:
+        pp = show.get("poster_path")
+        if pp:
+            st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
+        else:
+            st.write(ICONS["movie"])
+    with hc[1]:
+        st.markdown(f"## {title}")
+        if meta:
+            st.markdown(_availability_line(meta))
+        if cur is not None:
+            st.success(f"🟢 Current season: **Season {cur}**")
+        # Watchlist membership → offer Remove (if present) or Add (if not)
+        wl_row = None
+        if client is not None:
+            try:
+                _rr = (client.table("shows").select("tmdb_id,region,provider_name")
+                       .eq("user_id", user_id).eq("tmdb_id", tmdb_id).limit(1).execute())
+                if _rr.data:
+                    wl_row = _rr.data[0]
+            except Exception:
+                wl_row = None
+        if wl_row is not None:
+            st.caption("✓ On your watchlist")
+            if st.button("🗑️ Remove from watchlist", key=f"pdp_del_{tmdb_id}"):
+                delete_show(client, tmdb_id, wl_row.get("region") or DEFAULT_REGION,
+                            wl_row.get("provider_name", DEFAULT_PROVIDER))
+                st.session_state.pop("pdp_show", None)
+                st.rerun()
+        elif client is not None:
+            if st.button("➕ Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary"):
+                _nxt = meta.get("next_episode_to_air")
+                _nad = _nxt.get("air_date") if isinstance(_nxt, dict) else None
+                upsert_show(client, tmdb_id, title, DEFAULT_REGION, True, _nad,
+                            (meta.get("overview") or show.get("overview") or ""),
+                            show.get("poster_path"), "Multiple Providers")
+                st.success("Added to your watchlist!")
+                st.rerun()
+
+    ov = (meta.get("overview") or show.get("overview") or "").strip()
+    if ov:
+        st.markdown(ov)
+
+    st.divider()
+    seasons = meta.get("seasons") or []
+    if not seasons:
+        st.info("No season data available from TMDB.")
+        return
+    labels = {s["season_number"]: (s.get("name") or f"Season {s['season_number']}") for s in seasons}
+    nums = [s["season_number"] for s in seasons]
+    sel_key = f"pdp_season_{tmdb_id}"
+    if st.session_state.get(sel_key) not in nums:
+        st.session_state[sel_key] = cur if cur in nums else nums[-1]
+
+    st.markdown("### Seasons  ·  🟢 = current season")
+    per_row = 6
+    for i in range(0, len(seasons), per_row):
+        bcols = st.columns(per_row)
+        for j, s in enumerate(seasons[i:i + per_row]):
+            n = s["season_number"]
+            ec = s.get("episode_count") or 0
+            is_sel = st.session_state.get(sel_key) == n
+            lab = ("🟢 " if n == cur else "") + f"S{n} · {ec}ep"
+            with bcols[j]:
+                if st.button(lab, key=f"{sel_key}_b_{n}", use_container_width=True,
+                             type="primary" if is_sel else "secondary"):
+                    st.session_state[sel_key] = n
+                    st.rerun()
+
+    sel = st.session_state.get(sel_key, nums[-1])
+    head = f"#### {labels.get(sel, f'Season {sel}')}"
+    if sel == cur:
+        head += "  🟢 *Current*"
+    st.markdown(head)
+    _render_season_episodes(tmdb_id, sel, f"pdp_{tmdb_id}", client, user_id)
+
+
 def render_grid_gallery(rows, client, wcounts, per_row=5):
-    """True poster-tile gallery for the grid view (vs. the detailed list rows)."""
+    """True poster-tile gallery for the grid view (vs. the detailed list rows).
+    Each card's title is a button that opens the full show-detail page (PDP)."""
     today = dt.date.today()
     for i in range(0, len(rows), per_row):
         cols = st.columns(per_row)
@@ -583,7 +708,9 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
                     st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
                 else:
                     st.write(ICONS["movie"])
-                st.markdown(f"**{r['title']}**")
+                if st.button(r['title'], key=f"open_{r['tmdb_id']}_{r.get('provider_name')}",
+                             use_container_width=True, help="Open show details"):
+                    open_show_page(r)
                 nad = r.get("next_air_date")
                 shown = False
                 if nad:
@@ -653,8 +780,8 @@ def render_upcoming(rows, as_tab=False):
                         st.image(f"https://image.tmdb.org/t/p/w342{pp}", use_column_width=True)
                 with c[1]:
                     when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
-                    st.markdown(f"**{r['title']}**" + (f" · {ep}" if ep else ""))
-                    st.caption(f"📅 {d.isoformat()} · {when}")
+                    clickable_title(r['title'], r)
+                    st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
 
     if as_tab:
         st.subheader(f"📅 Upcoming Episodes ({len(up)})")
@@ -1852,6 +1979,11 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
+# ── Show-detail page (PDP) router: when a show card is clicked, take over the page ──
+if st.session_state.get("pdp_show"):
+    render_show_page(st.session_state["pdp_show"], client, get_user_id())
+    st.stop()
+
 # ── Main page: tabbed layout (Search / discovery / watchlist) ──
 _dismissed_ids = dismissed.get_dismissed(client, get_user_id())
 _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
@@ -1999,7 +2131,7 @@ with _main_search:
                         """, unsafe_allow_html=True)
 
                 with cols[1]:
-                    st.markdown(f"**{title}**")
+                    clickable_title(title, {"tmdb_id": tmdb_id, "title": title, "poster_path": poster_path, "overview": overview})
                     st.caption(f"TMDB ID: {tmdb_id}")
 
                 with cols[2]:
@@ -2153,7 +2285,7 @@ with _main_new:
 
             # Title and info
             with cols[1]:
-                st.markdown(f"**{title}**")
+                clickable_title(title, {"tmdb_id": tmdb_id, "title": title, "poster_path": poster_path, "overview": overview})
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
@@ -2206,7 +2338,7 @@ with _main_trending:
 
             # Title and info
             with cols[1]:
-                st.markdown(f"**{title}**")
+                clickable_title(title, {"tmdb_id": tmdb_id, "title": title, "poster_path": poster_path, "overview": overview})
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
@@ -2260,7 +2392,7 @@ with _main_top:
 
             # Title and info
             with cols[1]:
-                st.markdown(f"**{title}**")
+                clickable_title(title, {"tmdb_id": tmdb_id, "title": title, "poster_path": poster_path, "overview": overview})
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
