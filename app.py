@@ -334,6 +334,7 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
             "number_of_episodes": d.get("number_of_episodes"),
             "first_air_date": d.get("first_air_date"),
             "in_production": d.get("in_production"),
+            "type": d.get("type"),
             "next_episode_to_air": d.get("next_episode_to_air"),
             "last_episode_to_air": d.get("last_episode_to_air"),
             "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
@@ -441,6 +442,10 @@ def _availability_line(d: Dict[str, Any]) -> str:
         "Canceled": "🚫 Canceled", "In Production": "🎬 In production",
         "Planned": "🗓️ Planned",
     }.get(status, status)
+    # A miniseries / limited series was a single self-contained run by design — say so
+    # instead of the ambiguous "Ended" (which reads the same as a multi-season cancellation).
+    if (d.get("type") or "") == "Miniseries" and status in ("Ended", "Returning Series", ""):
+        badge = "🎬 Limited series"
     is_new = False
     if first:
         try:
@@ -1068,6 +1073,10 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 st.success(f"🟢 Now airing: **Season {cur}**")
             elif meta.get("in_production"):
                 st.info(f"📺 Latest season: **Season {cur}** · next season in production (no date yet)")
+            elif (meta.get("type") or "") == "Miniseries":
+                _neps = meta.get("number_of_episodes") or 0
+                st.caption(f"🎬 **Limited series** — a complete, one-season story"
+                           + (f" ({_neps} episodes)" if _neps else ""))
             elif (meta.get("status") or "") in ("Ended", "Canceled"):
                 st.caption(f"Latest season: **Season {cur}** — series {meta.get('status','').lower()}")
             else:
