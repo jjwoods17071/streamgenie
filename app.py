@@ -2506,26 +2506,16 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
-# ── Show-detail (PDP) panel: ?show=<id> opens an inline expand/collapse panel at the
-#    top of the page. The tabs/menu below still render (no full-page takeover). Still
+# ── Show-detail (PDP): ?show=<id> opens an inline panel rendered BELOW the tab bar
+#    (see end of file). The tabs/menu stay at the top (no full-page takeover). Still
 #    URL-driven, so the browser Back button closes it and it stays bookmarkable. ──
+_pdp_open_sid = None
 if "show" in st.query_params:
     try:
-        _sid = int(st.query_params["show"])
+        _pdp_open_sid = int(st.query_params["show"])
     except Exception:
-        _sid = None
-    if _sid is not None:
-        _show = st.session_state.get("_showcache", {}).get(_sid) or {"tmdb_id": _sid}
-        # Scroll to the panel only when a NEW show opens (not on every checkbox rerun)
-        if st.session_state.get("_pdp_scrolled") != _sid:
-            st.session_state["_pdp_scrolled"] = _sid
-            components.html(
-                "<script>try{window.parent.scrollTo({top:0,behavior:'smooth'});}catch(e){}</script>",
-                height=0)
-        with st.container(border=True):
-            render_show_page(_show, client, get_user_id())
-        st.divider()
-    else:
+        _pdp_open_sid = None
+    if _pdp_open_sid is None:
         st.query_params.clear()
 
 # ── Main page: tabbed layout (Search / discovery / watchlist) ──
@@ -3116,3 +3106,22 @@ with _main_watch:
             _render_group(_groups['canceled'], "No canceled shows. 🎉")
         with _t_ended:
             _render_group(_groups['ended'], "No ended shows yet.")
+
+
+# ── Show-detail panel — rendered BELOW the tab bar so the menu stays at the top.
+#    An anchor at the panel top is scrolled into view (once, on a NEW show) so focus
+#    lands on the show — not down in the Related-shows section. ──
+if _pdp_open_sid is not None:
+    st.divider()
+    st.markdown('<div id="pdp-anchor"></div>', unsafe_allow_html=True)
+    _pdp_show = st.session_state.get("_showcache", {}).get(_pdp_open_sid) or {"tmdb_id": _pdp_open_sid}
+    with st.container(border=True):
+        render_show_page(_pdp_show, client, get_user_id())
+    if st.session_state.get("_pdp_scrolled") != _pdp_open_sid:
+        st.session_state["_pdp_scrolled"] = _pdp_open_sid
+        components.html(
+            "<script>setTimeout(function(){try{"
+            "var a=window.parent.document.getElementById('pdp-anchor');"
+            "if(a){a.scrollIntoView({behavior:'smooth',block:'start'});}"
+            "}catch(e){}},150);</script>",
+            height=0)
