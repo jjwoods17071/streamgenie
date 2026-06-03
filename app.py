@@ -1055,6 +1055,14 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     meta = get_show_meta(tmdb_id) or {}
     title = show.get("title") or meta.get("name") or "Show"
     cur = _current_season(meta)
+    # Only call the latest season "current" if the show is actually live (airing / returning /
+    # in production). For ended/canceled shows the latest season is the FINAL one, not current.
+    _nxt0 = meta.get("next_episode_to_air")
+    _cur_live = ((isinstance(_nxt0, dict) and bool(_nxt0.get("air_date")))
+                 or bool(meta.get("in_production"))
+                 or (meta.get("status") or "") in ("Returning Series", "In Production", "Planned"))
+    _cur_mark = "🟢" if _cur_live else "🏁"
+    _cur_word = "current" if _cur_live else "final"
 
     hc = st.columns([1, 2.5])
     with hc[0]:
@@ -1137,7 +1145,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     if st.session_state.get(sel_key) not in nums:
         st.session_state[sel_key] = cur if cur in nums else nums[-1]
 
-    st.markdown("### Seasons  ·  🟢 = current  ·  blue bar = your watch progress")
+    st.markdown(f"### Seasons  ·  {_cur_mark} = {_cur_word}  ·  blue bar = your watch progress")
     # Watched-episode counts per season → the per-brick progress bars (resume helper)
     track = bool(client is not None and user_id and watched.table_available(client))
     watched_by_season: Dict[int, int] = {}
@@ -1154,7 +1162,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             n = s["season_number"]
             ec = s.get("episode_count") or 0
             is_sel = st.session_state.get(sel_key) == n
-            lab = ("🟢 " if n == cur else "") + f"S{n} · {ec}ep"
+            lab = (f"{_cur_mark} " if n == cur else "") + f"S{n} · {ec}ep"
             with bcols[j]:
                 if st.button(lab, key=f"{sel_key}_b_{n}", use_container_width=True,
                              type="primary" if is_sel else "secondary"):
@@ -1174,7 +1182,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     sel = st.session_state.get(sel_key, nums[-1])
     head = f"#### {labels.get(sel, f'Season {sel}')}"
     if sel == cur:
-        head += "  🟢 *Current*"
+        head += f"  {_cur_mark} *{_cur_word.capitalize()}*"
     st.markdown(head)
     _render_season_episodes(tmdb_id, sel, f"pdp_{tmdb_id}", client, user_id)
 
