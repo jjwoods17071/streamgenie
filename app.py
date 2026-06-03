@@ -579,6 +579,9 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
     nonce_key = f"{key_prefix}_nonce_{sel}"
     nonce = st.session_state.get(nonce_key, 0)
 
+    _show_name = (get_show_meta(tv_id) or {}).get("name") or "Episode"
+    _upcoming_eps = [e for e in eps if (e.get("air_date") and e["air_date"] > today.isoformat())]
+
     if track:
         aired = [e for e in eps if (e.get("air_date") and e["air_date"] <= today.isoformat())]
         seen = sum(1 for e in aired if (sel, e.get("episode_number")) in wset)
@@ -597,6 +600,19 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
                 watched.set_season(client, user_id, tv_id, sel, aired_nums, False)
                 st.session_state[nonce_key] = nonce + 1
                 st.rerun()
+
+    # Calendar reminders for this season's upcoming episodes (bulk .ics, with VALARMs)
+    if _upcoming_eps:
+        _season_evs = [{"tmdb_id": tv_id, "title": _show_name, "date": e["air_date"],
+                        "season": sel, "episode": e.get("episode_number"),
+                        "ep_name": e.get("name")} for e in _upcoming_eps]
+        st.download_button(
+            f"📅 Add this season's {len(_season_evs)} upcoming episode"
+            f"{'s' if len(_season_evs) != 1 else ''} to calendar (.ics)",
+            calendar_ics.build_ics(_season_evs),
+            file_name=f"streamgenie_{tv_id}_s{sel}.ics", mime="text/calendar",
+            key=f"{key_prefix}_seasonics_{sel}", use_container_width=True,
+            help="Imports the upcoming episodes (with reminders) into Apple / Google / Outlook")
 
     for ep in eps:
         en = ep.get("episode_number") or 0
@@ -628,6 +644,15 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
             st.caption(f"📅 {ad}")
             if rating:
                 st.caption(f"⭐ {rating:.1f}")
+            if upcoming and ad != "TBA":
+                _ev = {"tmdb_id": tv_id, "title": _show_name, "date": ad,
+                       "season": sel, "episode": en, "ep_name": name}
+                with st.popover("📅 Remind"):
+                    st.markdown(f"[➕ Add to Google Calendar]({calendar_ics.google_link(_ev)})")
+                    st.download_button("⬇️ Download .ics", calendar_ics.build_ics([_ev]),
+                                       file_name=f"streamgenie_{tv_id}_s{sel}e{en}.ics",
+                                       mime="text/calendar", key=f"{key_prefix}_epics_{sel}_{en}")
+                    st.caption("Reminders 1 day & 1 hour before.")
         if track:
             with ec[3]:
                 if upcoming:
