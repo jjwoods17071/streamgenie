@@ -796,7 +796,7 @@ def _render_event_series(show: Dict[str, Any], league: str, client=None) -> None
 
 def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Detail page for a followed team (NFL/MLB/NBA/NHL) — schedule as 'episodes' (games)."""
-    st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
+    st.button(":material/close: Close details", key="pdp_back", on_click=close_show_page)
     league, team_id = sports.decode_id(show.get("tmdb_id"))
     if sports.is_event_league(league):
         _render_event_series(show, league, client)
@@ -923,7 +923,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     if sports.is_sports_id(tmdb_id):
         render_sports_page(show, client, user_id)
         return
-    st.button(":material/arrow_back: Back to list", key="pdp_back", on_click=close_show_page)
+    st.button(":material/close: Close details", key="pdp_back", on_click=close_show_page)
 
     meta = get_show_meta(tmdb_id) or {}
     title = show.get("title") or meta.get("name") or "Show"
@@ -2506,8 +2506,9 @@ else:
 
 # Note: Background scheduler initialized at top of file via scheduled_tasks.init_scheduler()
 
-# ── Show-detail page (PDP) router: ?show=<id> takes over the page. Driven by the URL
-#    so the browser Back button returns to the list (and the page is bookmarkable). ──
+# ── Show-detail (PDP) panel: ?show=<id> opens an inline expand/collapse panel at the
+#    top of the page. The tabs/menu below still render (no full-page takeover). Still
+#    URL-driven, so the browser Back button closes it and it stays bookmarkable. ──
 if "show" in st.query_params:
     try:
         _sid = int(st.query_params["show"])
@@ -2515,8 +2516,15 @@ if "show" in st.query_params:
         _sid = None
     if _sid is not None:
         _show = st.session_state.get("_showcache", {}).get(_sid) or {"tmdb_id": _sid}
-        render_show_page(_show, client, get_user_id())
-        st.stop()
+        # Scroll to the panel only when a NEW show opens (not on every checkbox rerun)
+        if st.session_state.get("_pdp_scrolled") != _sid:
+            st.session_state["_pdp_scrolled"] = _sid
+            components.html(
+                "<script>try{window.parent.scrollTo({top:0,behavior:'smooth'});}catch(e){}</script>",
+                height=0)
+        with st.container(border=True):
+            render_show_page(_show, client, get_user_id())
+        st.divider()
     else:
         st.query_params.clear()
 
