@@ -2222,10 +2222,14 @@ def _render_sports_hero(r) -> bool:
     bar = (f'<div style="display:flex;height:6px;border-radius:6px 6px 0 0;overflow:hidden">'
            f'<div style="flex:1;background:{ac}"></div><div style="flex:1;background:{hc}"></div></div>')
 
-    # Matchup/series title (the 'S5E1' analog)
-    mt = (ins or {}).get("matchup_title")
+    # Matchup/series title (the 'S5E1' analog). Never blank — fall back to a generic label
+    # so the card always carries a title line like the show tiles.
+    mt = ((ins or {}).get("matchup_title") or (ins or {}).get("series_title")
+          or (f"{away.get('abbrev')} vs {home.get('abbrev')}" if home else "Game day"))
+    if (mt or "").strip().lower() == "series":
+        mt = f"{away.get('abbrev')} vs {home.get('abbrev')}" if home else "Game day"
     title_html = (f'<div style="text-align:center;font-size:.66rem;font-weight:700;letter-spacing:.03em;'
-                  f'color:#475569;text-transform:uppercase;margin:6px 0 2px">{mt}</div>' if mt else "")
+                  f'color:#475569;text-transform:uppercase;margin:6px 0 2px">🏆 {mt}</div>' if mt else "")
 
     # Win-probability bar (two-color split in team colors)
     aw, hw = away.get("win_pct"), (home.get("win_pct") if home else None)
@@ -2267,8 +2271,10 @@ def _render_sports_hero(r) -> bool:
                         f'padding:1px 7px">📡 {net}</span></div>')
 
     st.markdown(
-        f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">'
-        f'{bar}<div style="padding:8px 8px 10px">{title_html}'
+        f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;'
+        f'min-height:340px;display:flex;flex-direction:column">'
+        f'{bar}<div style="padding:12px 10px 14px;display:flex;flex-direction:column;flex:1;'
+        f'justify-content:center;gap:6px">{title_html}'
         f'<div style="display:flex;align-items:flex-start;justify-content:space-around">{inner}</div>'
         f'{wp_html}{foot}{net_html}</div></div>', unsafe_allow_html=True)
     return True
