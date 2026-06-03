@@ -340,6 +340,7 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
         return {
             "name": d.get("name"),
             "poster_path": d.get("poster_path"),
+            "backdrop_path": d.get("backdrop_path"),
             "overview": d.get("overview"),
             "status": d.get("status"),
             "number_of_seasons": d.get("number_of_seasons"),
@@ -590,7 +591,15 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
     nonce_key = f"{key_prefix}_nonce_{sel}"
     nonce = st.session_state.get(nonce_key, 0)
 
-    _show_name = (get_show_meta(tv_id) or {}).get("name") or "Episode"
+    _meta = get_show_meta(tv_id) or {}
+    _show_name = _meta.get("name") or "Episode"
+    # Fallback image for episodes with no still (e.g. not-yet-aired ones) — use the series
+    # poster/backdrop so the row isn't blank.
+    _series_img = None
+    for _p in (_meta.get("backdrop_path"), _meta.get("poster_path")):
+        if _p:
+            _series_img = f"https://image.tmdb.org/t/p/w185{_p}"
+            break
     _upcoming_eps = [e for e in eps if (e.get("air_date") and e["air_date"] > today.isoformat())]
 
     if track:
@@ -640,7 +649,8 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
         _tvm = _tvmaze.get((sel, en)) if _tvmaze else None
         # still: TMDB path first, else the row's own TVmaze image, else the TVmaze enrich map
         still_url = (f"https://image.tmdb.org/t/p/w185{still}" if still
-                     else (ep.get("still_url") or (_tvm.get("image") if _tvm else None)))
+                     else (ep.get("still_url") or (_tvm.get("image") if _tvm else None)
+                           or _series_img))
         # layout: still | info | date | (watched)
         ec = st.columns([1.3, 4, 1, 0.8]) if track else st.columns([1.3, 4, 1])
         with ec[0]:
