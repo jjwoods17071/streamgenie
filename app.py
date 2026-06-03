@@ -585,8 +585,8 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
     if track:
         aired = [e for e in eps if (e.get("air_date") and e["air_date"] <= today.isoformat())]
         seen = sum(1 for e in aired if (sel, e.get("episode_number")) in wset)
-        st.caption(f"✓ Watched {seen}/{len(aired)} aired this season")
-        if aired:
+        if aired:   # nothing aired yet → skip the '0/0 aired' line entirely
+            st.caption(f"✓ Watched {seen}/{len(aired)} aired this season")
             st.progress(seen / len(aired))
             bc = st.columns(2)
             aired_nums = [e.get("episode_number") for e in aired]
