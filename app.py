@@ -1337,10 +1337,14 @@ def render_upcoming(rows, as_tab=False):
                         for r in by_date.get(day, []):
                             tid = r.get("tmdb_id")
                             ne = get_next_episode(tid) if (tid or 0) > 0 else None
-                            se = f" {ne['season']}×{ne['episode']}" if ne and ne.get("season") else ""
-                            st.button(f"📺 {r['title'][:12]}", key=f"mo_{day.isoformat()}_{tid}",
-                                      help=f"{r['title']}{se} — open", on_click=open_show_page,
-                                      args=(r,), use_container_width=True)
+                            se = f"{ne['season']}×{ne['episode']}" if ne and ne.get("season") else ""
+                            src = _poster_src(r.get("poster_path"))
+                            if src:
+                                st.image(src, width=46)   # small show logo/poster
+                            label = se or (r['title'][:9] if not src else "▸ open")
+                            st.button(label, key=f"mo_{day.isoformat()}_{tid}",
+                                      help=f"{r['title']}{(' ' + se) if se else ''} — open",
+                                      on_click=open_show_page, args=(r,), use_container_width=True)
 
     if as_tab:
         st.subheader(f"📅 Upcoming Episodes ({len(up)})")
