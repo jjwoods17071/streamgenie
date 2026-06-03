@@ -50,6 +50,22 @@ def create_notification(
 
         # Create in-app notification if user hasn't disabled it
         if should_create_inapp:
+            # Idempotency: don't insert a duplicate. The daily-reminder routine can run more
+            # than once (cron + manual triggers + reruns), so guard on the natural key
+            # (user, type, show, message) — e.g. "new episode airing on 2026-06-03" for one
+            # show should exist at most once.
+            try:
+                dup = client.table("notifications").select("id")\
+                    .eq("user_id", user_id)\
+                    .eq("notification_type", notification_type)\
+                    .eq("message", message)
+                if related_show_id is not None:
+                    dup = dup.eq("related_show_id", related_show_id)
+                if dup.limit(1).execute().data:
+                    return True  # already exists → skip insert (still allow email below)
+            except Exception:
+                pass  # if the dedup check fails, fall through and insert
+
             notification_data = {
                 "user_id": user_id,
                 "notification_type": notification_type,
