@@ -294,6 +294,7 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
             "number_of_seasons": d.get("number_of_seasons"),
             "number_of_episodes": d.get("number_of_episodes"),
             "first_air_date": d.get("first_air_date"),
+            "in_production": d.get("in_production"),
             "next_episode_to_air": d.get("next_episode_to_air"),
             "last_episode_to_air": d.get("last_episode_to_air"),
             "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
@@ -389,8 +390,24 @@ def _availability_line(d: Dict[str, Any]) -> str:
             line += f"\n\n⏭️ **Next:** S{nxt.get('season_number')}E{nxt.get('episode_number')} — {ad} ({when})"
         except Exception:
             line += f"\n\n⏭️ **Next:** {ad}"
-    elif status in ("Returning Series", "In Production"):
-        line += "\n\n⏭️ Next episode date TBA"
+    elif status in ("Returning Series", "In Production", "Planned"):
+        last = d.get("last_episode_to_air")
+        last_ad = last.get("air_date") if isinstance(last, dict) else None
+        gap_days = None
+        if last_ad:
+            try:
+                gap_days = (today - dt.date.fromisoformat(last_ad)).days
+            except Exception:
+                pass
+        if d.get("in_production"):
+            # TMDB says it's actively being made → renewed, just not scheduled yet
+            line += "\n\n🛠️ **Renewed** — next season in production, air date not announced yet"
+        elif gap_days is not None and gap_days > 400:
+            # "Returning" on paper but nothing in production and a long silence → likely limbo
+            line += (f"\n\n⏳ **No return date announced** — last episode aired "
+                     f"{gap_days // 30} months ago; a new season hasn't been confirmed")
+        else:
+            line += "\n\n⏭️ Next episode: date TBA (between seasons)"
     return line
 
 
@@ -924,7 +941,15 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
         if meta:
             st.markdown(_availability_line(meta))
         if cur is not None:
-            st.success(f"🟢 Current season: **Season {cur}**")
+            _nxt = meta.get("next_episode_to_air")
+            if isinstance(_nxt, dict) and _nxt.get("air_date"):
+                st.success(f"🟢 Now airing: **Season {cur}**")
+            elif meta.get("in_production"):
+                st.info(f"📺 Latest season: **Season {cur}** · next season in production (no date yet)")
+            elif (meta.get("status") or "") in ("Ended", "Canceled"):
+                st.caption(f"Latest season: **Season {cur}** — series {meta.get('status','').lower()}")
+            else:
+                st.caption(f"Latest season: **Season {cur}** · no new season confirmed")
         # Watchlist membership → offer Remove (if present) or Add (if not)
         wl_row = None
         if client is not None:
