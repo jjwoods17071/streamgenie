@@ -1037,6 +1037,9 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 st.query_params.clear()
             st.button(":material/delete: Remove from watchlist", key=f"sp_del_{team_id}", on_click=_rm)
 
+    _bc = _broadcast_info(show)
+    if _bc:
+        st.caption(_bc)
     cov = sports.coverage_map_url(league)
     if cov:
         st.caption(f"📍 Regional TV coverage varies by market — check the "
@@ -1415,18 +1418,9 @@ def _overview_text(r, limit=220) -> str:
 
 
 def _service_label(r) -> str:
-    """Where to watch — streaming service for shows, broadcast network for sports games."""
+    """Where to watch — streaming service for shows (sports use _broadcast_info instead)."""
     tid = r.get("tmdb_id") or 0
     if tid < 0:
-        league, team_id = sports.decode_id(tid)
-        if league and not sports.is_event_league(league):
-            try:
-                ng = sports.next_game(sports.get_team_schedule(league, team_id))
-                net = (ng or {}).get("network")
-                if net:
-                    return f"📺 {net}"
-            except Exception:
-                pass
         return ""
     prov = normalize_provider_name(r.get("provider_name") or "")
     if not prov or prov in ("Multiple Providers", "Multiple"):
@@ -1510,6 +1504,9 @@ def render_upcoming(rows, as_tab=False):
             _sc = _sports_context(r)
             if _sc:
                 st.caption(_sc)
+            _bc = _broadcast_info(r)
+            if _bc:
+                st.caption(_bc)
             _ov = _overview_text(r)
             if _ov:
                 st.caption(_ov)
@@ -2012,6 +2009,89 @@ def _sports_context(r: Dict[str, Any]) -> str:
         if fav:
             parts.append(f"🔮 {fav.get('abbrev')} {fav['win_pct']}%")
         return "  ·  ".join(parts)
+    except Exception:
+        return ""
+
+
+# Followed-team city/region → US state (for best-effort in-market detection).
+_TEAM_STATE = {
+    "Arizona": "AZ", "Atlanta": "GA", "Baltimore": "MD", "Boston": "MA", "Brooklyn": "NY",
+    "Buffalo": "NY", "Carolina": "NC", "Charlotte": "NC", "Chicago": "IL", "Cincinnati": "OH",
+    "Cleveland": "OH", "Colorado": "CO", "Columbus": "OH", "Dallas": "TX", "Denver": "CO",
+    "Detroit": "MI", "Golden State": "CA", "Green Bay": "WI", "Houston": "TX", "Indiana": "IN",
+    "Indianapolis": "IN", "Jacksonville": "FL", "Kansas City": "MO", "Las Vegas": "NV",
+    "Los Angeles": "CA", "Memphis": "TN", "Miami": "FL", "Milwaukee": "WI", "Minnesota": "MN",
+    "Nashville": "TN", "New England": "MA", "New Orleans": "LA", "New York": "NY", "Oakland": "CA",
+    "Oklahoma City": "OK", "Orlando": "FL", "Philadelphia": "PA", "Phoenix": "AZ",
+    "Pittsburgh": "PA", "Portland": "OR", "Sacramento": "CA", "San Antonio": "TX",
+    "San Diego": "CA", "San Francisco": "CA", "San Jose": "CA", "Seattle": "WA",
+    "St. Louis": "MO", "Tampa Bay": "FL", "Tennessee": "TN", "Texas": "TX", "Utah": "UT",
+    "Vegas": "NV", "Washington": "DC",
+}
+
+def _team_state(title) -> Optional[str]:
+    t = title or ""
+    for k in sorted(_TEAM_STATE, key=len, reverse=True):
+        if t.startswith(k):
+            return _TEAM_STATE[k]
+    return None
+
+
+def _user_zip() -> str:
+    z = st.session_state.get("_user_zip")
+    if z is not None:
+        return z
+    z = ""
+    try:
+        p = preferences.get_user_preferences(client, get_user_id())
+        if p and p.get("zip_code"):
+            z = str(p["zip_code"]).strip()
+    except Exception:
+        pass
+    st.session_state["_user_zip"] = z
+    return z
+
+
+@st.cache_data(ttl=2592000, show_spinner=False)
+def _zip_location(zip5: str) -> Dict[str, Any]:
+    try:
+        d = requests.get(f"https://api.zippopotam.us/us/{zip5}", timeout=10).json()
+        pl = (d.get("places") or [{}])[0]
+        return {"state": pl.get("state abbreviation"), "city": pl.get("place name")}
+    except Exception:
+        return {}
+
+
+def _broadcast_info(r) -> str:
+    """National vs regional broadcast for a followed team's next game, plus a best-effort
+    in-market guess from the user's ZIP (national = available everywhere)."""
+    tid = r.get("tmdb_id")
+    if not tid or tid >= 0:
+        return ""
+    league, team_id = sports.decode_id(tid)
+    if not league or sports.is_event_league(league):
+        return ""
+    try:
+        ng = sports.next_game(sports.get_team_schedule(league, team_id))
+        casts = (ng or {}).get("broadcasts") or []
+        if not casts:
+            return ""
+        nat = list(dict.fromkeys(b["name"] for b in casts if b.get("market") == "national"))
+        reg = list(dict.fromkeys(b["name"] for b in casts if b.get("market") in ("home", "away")))
+        lines = []
+        if nat:
+            lines.append("📡 National: " + ", ".join(nat))
+        if reg:
+            tag = ""
+            zp = _user_zip()
+            if zp:
+                ust = (_zip_location(zp) or {}).get("state")
+                tst = _team_state(r.get("title"))
+                if ust and tst:
+                    tag = (" · ✅ likely in your market" if ust == tst
+                           else " · ⚠️ out-of-market (may be blacked out)")
+            lines.append(f"📡 Regional: {', '.join(reg)}{tag}")
+        return "  ·  ".join(lines)
     except Exception:
         return ""
 
@@ -2716,6 +2796,27 @@ if show_settings:
                     value=st.session_state.user_settings.get('reminders_enabled', False),
                     help="Enable/disable email reminders"
                 )
+
+            st.divider()
+            st.markdown("**📍 Your ZIP code**")
+            st.caption("Used to flag whether a followed team's regional broadcast is likely "
+                       "available in your market (vs national games shown everywhere).")
+            _zc = st.columns([3, 1])
+            with _zc[0]:
+                _zip_in = st.text_input("ZIP code", value=_user_zip(), max_chars=5,
+                                        placeholder="e.g. 33928", key="zip_input",
+                                        label_visibility="collapsed")
+            with _zc[1]:
+                if st.button("💾 Save ZIP", use_container_width=True, key="save_zip"):
+                    _z = "".join(ch for ch in (_zip_in or "") if ch.isdigit())[:5]
+                    try:
+                        preferences.update_preferences(client, get_user_id(), {"zip_code": _z})
+                        st.session_state["_user_zip"] = _z
+                        _loc = _zip_location(_z) if len(_z) == 5 else {}
+                        st.success(f"Saved — {_loc['city']}, {_loc['state']}"
+                                   if _loc.get("state") else "ZIP saved.")
+                    except Exception:
+                        st.warning("Couldn't save ZIP — the zip_code column may need the migration.")
 
             # Save button
             col_save, col_test, col_spacer = st.columns([1, 1, 2])

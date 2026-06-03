@@ -142,6 +142,14 @@ def get_team_schedule(league: str, team_id: str):
                      or (e.get("status") or {}).get("type") or {})
             bc = comp.get("broadcasts") or []
             net = ", ".join(bc[0].get("names", [])) if bc else ""
+            # Each broadcast tagged National / Home / Away (regional RSN) by ESPN
+            casts = []
+            for b in bc:
+                nm = (", ".join(b.get("names", [])) if b.get("names")
+                      else (b.get("media") or {}).get("shortName") or b.get("station"))
+                mkt = ((b.get("market") or {}).get("type") or "").lower()  # national/home/away
+                if nm:
+                    casts.append({"name": nm, "market": mkt})
             wk = e.get("week") or {}
             games.append({
                 "id": e.get("id"),
@@ -156,6 +164,7 @@ def get_team_schedule(league: str, team_id: str):
                 "status": stype.get("description") or stype.get("name"),
                 "completed": bool(stype.get("completed")),
                 "network": net,
+                "broadcasts": casts,
                 "week": wk.get("number") or wk.get("text"),
             })
         games.sort(key=lambda g: g["datetime"] or "")
