@@ -2565,7 +2565,7 @@ if auth.handle_password_recovery(client):
 
 # ── TEMP test-mode: bypass login and run as jjwoods@gmail.com to speed up testing.
 #    Set DEV_LOGIN_BYPASS = False (or remove this block) to re-enable real login. ──
-DEV_LOGIN_BYPASS = True
+DEV_LOGIN_BYPASS = False
 _TEST_USER = {"id": "d10fc919-ec74-42c0-846e-16d763eac844", "email": "jjwoods@gmail.com"}
 if DEV_LOGIN_BYPASS and not auth.is_authenticated():
     st.session_state.user = dict(_TEST_USER)
