@@ -1404,6 +1404,16 @@ def _episode_event(r, d):
     }
 
 
+def _overview_text(r, limit=220) -> str:
+    """Truncated series description for list/grid rows ('' for sports / sparse rows)."""
+    if (r.get("tmdb_id") or 0) < 0:
+        return ""
+    ov = (r.get("overview") or "").strip()
+    if len(ov) < 20:
+        return ""
+    return ov if len(ov) <= limit else ov[:limit].rstrip() + "…"
+
+
 def render_upcoming(rows, as_tab=False):
     """Date-driven view of FUTURE episodes across the watchlist: a week-by-week agenda
     (default) or a month grid, with per-episode calendar export (Google link + .ics +
@@ -1474,12 +1484,58 @@ def render_upcoming(rows, as_tab=False):
                 st.caption(f"⏳ next: {ep}")
             else:
                 st.caption("⏳ no episode scheduled yet")
+            _ov = _overview_text(r)
+            if _ov:
+                st.caption(_ov)
         if show_pin:
             with c[2]:
                 if d is not None:
                     _cal_popover(r, d, ctx)
                 _pin_button(r, ctx)
                 _remove_button(r, ctx)
+
+    def _grid():
+        # Poster-tile grid (pinned first, then upcoming by date) with descriptions
+        seen, ordered = set(), []
+        for r in [x for x in rows if x.get("tmdb_id") in pinned_ids]:
+            ordered.append((up_by_id.get(r.get("tmdb_id")), r))
+            seen.add(r.get("tmdb_id"))
+        for d, r in up:
+            if r.get("tmdb_id") not in seen:
+                ordered.append((d, r))
+                seen.add(r.get("tmdb_id"))
+        if not ordered:
+            st.caption("No upcoming episodes scheduled for your watchlist right now.")
+            return
+        per = 3
+        for i in range(0, len(ordered), per):
+            cols = st.columns(per)
+            for j, (d, r) in enumerate(ordered[i:i + per]):
+                with cols[j]:
+                    with st.container(border=True):
+                        tid = r.get("tmdb_id")
+                        clickable_poster(tid, r.get("poster_path"))
+                        clickable_title(r['title'], r)
+                        ne = get_next_episode(tid) if (tid or 0) > 0 else None
+                        ep = (f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season")
+                              else (_sports_matchup(r) if (tid or 0) < 0 else ""))
+                        if d is not None:
+                            days = (d - today).days
+                            when = "🔴 TODAY" if days == 0 else f"in {days}d"
+                            st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
+                        elif ep:
+                            st.caption(f"⏳ {ep}")
+                        _ov = _overview_text(r, 170)
+                        if _ov:
+                            st.caption(_ov)
+                        ac = st.columns(3)
+                        with ac[0]:
+                            if d is not None:
+                                _cal_popover(r, d, "g")
+                        with ac[1]:
+                            _pin_button(r, "g")
+                        with ac[2]:
+                            _remove_button(r, "g")
 
     def _agenda():
         # 📌 Pinned — actively-watched shows kept at the very top (even with no air date)
@@ -1620,11 +1676,13 @@ def render_upcoming(rows, as_tab=False):
                     key="ics_bulk", use_container_width=True,
                     help="Import all upcoming episodes (with reminders) into Apple / Google / Outlook")
         with ctrl[1]:
-            view = st.radio("View", ["📋 Agenda", "🗓️ Month"], horizontal=True,
+            view = st.radio("View", ["📋 List", "▦ Grid", "🗓️ Month"], horizontal=True,
                             key="up_view", label_visibility="collapsed")
         st.divider()
         if view == "🗓️ Month":
             _month_grid()
+        elif view == "▦ Grid":
+            _grid()
         else:
             _agenda()
     else:
@@ -1661,20 +1719,47 @@ def render_catch_up(rows):
         return
     avail.sort(key=lambda x: -x[0])
     total = sum(n for n, _ in avail)
-    st.markdown(f"**{total} episode{'s' if total != 1 else ''} to catch up on "
-                f"across {len(avail)} show{'s' if len(avail) != 1 else ''}**")
-    for n, r in avail:
-        c = st.columns([1, 4, 1])
-        with c[0]:
-            clickable_poster(r['tmdb_id'], r.get("poster_path"))
-        with c[1]:
-            clickable_title(r['title'], r)
-            st.caption(f":blue[**{n} to watch**]")
-        with c[2]:
-            st.button("🗑", key=f"cu_rm_{r['tmdb_id']}", help="Remove from your list",
-                      on_click=delete_show,
-                      args=(client, r['tmdb_id'], r.get('region') or DEFAULT_REGION,
-                            r.get('provider_name') or DEFAULT_PROVIDER))
+    hc = st.columns([4, 2])
+    with hc[0]:
+        st.markdown(f"**{total} episode{'s' if total != 1 else ''} to catch up on "
+                    f"across {len(avail)} show{'s' if len(avail) != 1 else ''}**")
+    with hc[1]:
+        cu_view = st.radio("View", ["📋 List", "▦ Grid"], horizontal=True,
+                           key="cu_view", label_visibility="collapsed")
+
+    def _cu_remove(r):
+        st.button("🗑", key=f"cu_rm_{r['tmdb_id']}", help="Remove from your list",
+                  on_click=delete_show,
+                  args=(client, r['tmdb_id'], r.get('region') or DEFAULT_REGION,
+                        r.get('provider_name') or DEFAULT_PROVIDER))
+
+    if cu_view == "▦ Grid":
+        per = 3
+        for i in range(0, len(avail), per):
+            cols = st.columns(per)
+            for j, (n, r) in enumerate(avail[i:i + per]):
+                with cols[j]:
+                    with st.container(border=True):
+                        clickable_poster(r['tmdb_id'], r.get("poster_path"))
+                        clickable_title(r['title'], r)
+                        st.caption(f":blue[**{n} to watch**]")
+                        _ov = _overview_text(r, 170)
+                        if _ov:
+                            st.caption(_ov)
+                        _cu_remove(r)
+    else:
+        for n, r in avail:
+            c = st.columns([1, 4, 1])
+            with c[0]:
+                clickable_poster(r['tmdb_id'], r.get("poster_path"))
+            with c[1]:
+                clickable_title(r['title'], r)
+                st.caption(f":blue[**{n} to watch**]")
+                _ov = _overview_text(r)
+                if _ov:
+                    st.caption(_ov)
+            with c[2]:
+                _cu_remove(r)
 
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
