@@ -670,8 +670,12 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
                     st.caption(" ")
                 else:
                     is_watched = (sel, en) in wset
+                    # Encode the stored state in the key so the box is recreated whenever the DB
+                    # value changes. Without this, a keyed checkbox keeps its clicked state across
+                    # reruns even if the write never persisted — showing a ✓ the DB doesn't have
+                    # (the "all checked but 5/6" illusion).
                     new_val = st.checkbox("✓", value=is_watched,
-                                          key=f"{key_prefix}_w_{sel}_{en}_{nonce}",
+                                          key=f"{key_prefix}_w_{sel}_{en}_{nonce}_{int(is_watched)}",
                                           help="Mark watched")
                     if new_val != is_watched:
                         watched.set_watched(client, user_id, tv_id, sel, en, new_val)
