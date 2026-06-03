@@ -3,6 +3,7 @@ import sqlite3
 import datetime as dt
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 import json
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
@@ -1818,6 +1819,18 @@ def format_status(on_provider:bool, next_air_date:Optional[str], provider_name:s
 
 # --------------- STREAMLIT UI ---------------
 st.set_page_config(page_title="StreamGenie - Streaming Tracker", page_icon="🍿", layout="wide")
+
+# Strip any leftover #anchor fragment from the URL on every run. Streamlit heading
+# anchors leave a #slug (e.g. ?show=66732#the-great-war) that our query-param nav never
+# clears, so it rides along to every page. This runs in the same-origin component iframe
+# and rewrites the PARENT url, keeping ?show=... but dropping the #fragment.
+components.html(
+    "<script>try{var w=window.parent;"
+    "if(w&&w.location&&w.location.hash){"
+    "w.history.replaceState(null,'',w.location.pathname+w.location.search);}}"
+    "catch(e){}</script>",
+    height=0,
+)
 
 # Initialize Supabase client (needed throughout the app)
 client = get_supabase_client()
