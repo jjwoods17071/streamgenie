@@ -85,6 +85,33 @@ def discover_returning(provider_ids: tuple, region: str = "US", pages: int = 2) 
     return out
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def stream_providers(tmdb_id: int, region: str = "US"):
+    """[(provider_name, logo_path)] of subscription services a show is on (US)."""
+    try:
+        d = _get(f"/tv/{tmdb_id}/watch/providers")
+        block = (d.get("results") or {}).get(region.upper()) or {}
+        out, seen = [], set()
+        for key in ("flatrate", "ads", "free"):
+            for it in (block.get(key) or []):
+                nm = it.get("provider_name")
+                if nm and nm not in seen:
+                    seen.add(nm)
+                    out.append((nm, it.get("logo_path")))
+        return out[:4]
+    except Exception:
+        return []
+
+
+def _provider_chips(provs) -> None:
+    imgs = "".join(
+        f'<img src="{IMG}/w45{lp}" title="{nm}" alt="{nm}" '
+        f'style="height:22px;border-radius:4px;margin-right:5px;vertical-align:middle">'
+        for nm, lp in provs if lp)
+    if imgs:
+        st.markdown("📺&nbsp;" + imgs, unsafe_allow_html=True)
+
+
 def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callable) -> None:
     st.caption("Pick your services and we'll surface **returning** shows on them — the ones with new episodes coming.")
     default = [p for p in ["Max", "Netflix", "Apple TV+", "Paramount+", "Amazon Prime Video", "Hulu"]
@@ -120,12 +147,14 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
                 st.markdown(f"**{s['title']}** ({s['year']})  ⭐ {s['vote']:.1f}")
                 if s["overview"]:
                     st.caption(s["overview"][:160])
+                _provider_chips(stream_providers(s["tmdb_id"], region))
             with c[2]:
                 if int(s["tmdb_id"]) in owned:
                     st.markdown(":blue[✓ In your list]")
                 else:
                     # on_click keeps the results in place; the show flips to blue after adding
                     st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
+                              type="primary",
                               on_click=add_fn,
                               args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"]))
 

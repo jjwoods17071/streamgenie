@@ -1797,6 +1797,43 @@ def render_catch_up(rows):
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
 
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_stream_providers(tv_id:int, region:str = "US") -> List[str]:
+    """Streaming services a show is available on (subscription/flatrate first), US region."""
+    try:
+        block = (tv_watch_providers(tv_id).get("results") or {}).get(region.upper()) or {}
+        names = []
+        for key in ("flatrate", "ads", "free"):
+            for it in (block.get(key) or []):
+                n = it.get("provider_name")
+                if n and n not in names:
+                    names.append(normalize_provider_name(n))
+        # de-dup after normalization, keep order
+        seen, out = set(), []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out[:4]
+    except Exception:
+        return []
+
+
+def render_provider_chips(names) -> None:
+    """Inline '📺 <logos>' strip of streaming-service logos (falls back to text names)."""
+    if not names:
+        return
+    parts = []
+    for n in names:
+        url = provider_logo_url(n)
+        if url:
+            parts.append(f'<img src="{url}" title="{n}" alt="{n}" '
+                         f'style="height:22px;border-radius:4px;margin-right:5px;vertical-align:middle">')
+        else:
+            parts.append(f'<span style="font-size:.8rem;opacity:.85;margin-right:6px">{n}</span>')
+    st.markdown("📺&nbsp;" + "".join(parts), unsafe_allow_html=True)
+
 def is_on_provider_in_region(providers_payload:Dict[str, Any], provider_name:str, region:str) -> bool:
     region_block = providers_payload.get("results", {}).get(region.upper())
     if not region_block:
@@ -3282,6 +3319,7 @@ with _main_new:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+                render_provider_chips(get_stream_providers(tmdb_id, region))
 
             # Date
             with cols[2]:
@@ -3332,6 +3370,7 @@ with _main_trending:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+                render_provider_chips(get_stream_providers(tmdb_id, region))
 
             # Date/status
             with cols[2]:
@@ -3383,6 +3422,7 @@ with _main_top:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+                render_provider_chips(get_stream_providers(tmdb_id, region))
 
             # Date/year
             with cols[2]:
