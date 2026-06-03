@@ -1151,6 +1151,36 @@ def provider_logo_url(name: str) -> Optional[str]:
     return None
 
 
+# National-network / RSN logos (linear TV ESPN reports has no logo for) from the maintained
+# tv-logo/tv-logos repo via the jsDelivr CDN — the same approach a cable guide uses.
+_TVL = "https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/united-states/"
+_BROADCAST_LOGOS = {
+    "nbc": "nbc-us.png", "abc": "abc-us.png", "cbs": "cbs-sports-us.png", "fox": "fox-us.png",
+    "espn": "espn-us.png", "espn2": "espn-2-us.png", "espn+": "espn-us.png",
+    "tnt": "tnt-us.png", "tbs": "tbs-us.png",
+    "fs1": "fox-sports-1-us.png", "fox sports 1": "fox-sports-1-us.png",
+    "nba tv": "nba-tv-us.png", "nfl network": "nfl-network-us.png",
+    "mlb network": "mlb-network-us.png", "nbc sports": "nbc-sports-us.png",
+    "the cw": "the-cw-us.png", "cw": "the-cw-us.png",
+    "paramount+": "paramount-plus-us.png", "cbs sports network": "cbs-sports-network-us.png",
+    "marquee sports network": "marquee-sports-network-us.png",
+    "marquee": "marquee-sports-network-us.png",
+}
+
+
+def broadcast_logo_url(name: str) -> Optional[str]:
+    """Logo for a broadcaster — TMDB first (covers streamers like Prime/Apple TV+/Peacock),
+    then the national-network/RSN CDN map; None if neither has it (caller shows a badge)."""
+    if not name:
+        return None
+    via_tmdb = provider_logo_url(name)
+    if via_tmdb:
+        return via_tmdb
+    key = name.strip().lower().rstrip(".")
+    fn = _BROADCAST_LOGOS.get(key)
+    return f"{_TVL}{fn}" if fn else None
+
+
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
     """Full-page show detail (PDP): poster + summary + availability + ALL seasons
     (current season highlighted 🟢) + episode guide. Reached by clicking a show card."""
@@ -2260,10 +2290,10 @@ def _render_sports_hero(r) -> bool:
     net = (ins or {}).get("broadcast")
     net_html = ""
     if net:
-        _nl = provider_logo_url(net)
+        _nl = broadcast_logo_url(net)
         if _nl:
             net_html = (f'<div style="text-align:center;margin-top:5px">'
-                        f'<img src="{_nl}" title="{net}" style="height:20px;border-radius:4px;'
+                        f'<img src="{_nl}" title="{net}" style="height:22px;border-radius:4px;'
                         f'vertical-align:middle"> <span style="font-size:.6rem;color:#64748b">Watch on {net}</span></div>')
         else:
             net_html = (f'<div style="text-align:center;margin-top:5px"><span style="font-size:.62rem;'

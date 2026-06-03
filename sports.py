@@ -14,6 +14,37 @@ _UA = {"User-Agent": "Mozilla/5.0"}
 _BASE = "https://site.api.espn.com/apis/site/v2/sports"
 _OFFSET = 10_000_000  # league-id namespace size
 
+# Local O&O / major-market affiliate call signs → their national network, so a game on
+# (e.g.) WMAQ shows as "NBC" the way a cable guide would — we don't reinvent station data,
+# we normalize the common big-market affiliates that actually carry games.
+_AFFILIATE_NETWORK = {
+    # NBC
+    "WNBC": "NBC", "KNBC": "NBC", "WMAQ": "NBC", "WCAU": "NBC", "KNTV": "NBC", "WRC": "NBC",
+    "KXAS": "NBC", "WTVJ": "NBC", "KNSD": "NBC", "WBTS": "NBC", "WVIT": "NBC", "KPNX": "NBC",
+    "WHDH": "NBC", "KING": "NBC",
+    # ABC
+    "WABC": "ABC", "KABC": "ABC", "WLS": "ABC", "WPVI": "ABC", "KGO": "ABC", "KTRK": "ABC",
+    "WTVD": "ABC", "KFSN": "ABC", "WSB": "ABC", "KMGH": "ABC", "WFAA": "ABC", "KOMO": "ABC",
+    "WXYZ": "ABC", "KSTP": "ABC",
+    # CBS
+    "WCBS": "CBS", "KCBS": "CBS", "WBBM": "CBS", "KYW": "CBS", "KPIX": "CBS", "KTVT": "CBS",
+    "KDKA": "CBS", "WBZ": "CBS", "WFOR": "CBS", "KCNC": "CBS", "WCCO": "CBS", "WJZ": "CBS",
+    "KCAL": "CBS", "WWJ": "CBS", "KIRO": "CBS",
+    # FOX
+    "WNYW": "FOX", "KTTV": "FOX", "WFLD": "FOX", "WTXF": "FOX", "KTVU": "FOX", "KRIV": "FOX",
+    "KDFW": "FOX", "WTTG": "FOX", "WJBK": "FOX", "KSAZ": "FOX", "WTVT": "FOX", "KMSP": "FOX",
+    "WAGA": "FOX", "KCPQ": "FOX",
+}
+
+
+def normalize_broadcast(name):
+    """Map a local affiliate call sign (e.g. 'WMAQ', 'WMAQ-TV', 'WMAQ 5') to its national
+    network ('NBC'); pass everything else (national nets, RSNs, streamers) through unchanged."""
+    if not name:
+        return name
+    token = re.split(r"[\s\-]", name.strip())[0].upper()
+    return _AFFILIATE_NETWORK.get(token, name.strip())
+
 # key -> (espn sport, espn league, label, league-index, 506sports coverage-map url)
 LEAGUES = {
     "nfl":  ("football",   "nfl",  "🏈 NFL",  1, "https://506sports.com/nfl/index.php"),
@@ -332,7 +363,7 @@ def game_insight(league: str, event_id):
                 network = b
             if network:
                 break
-        out["broadcast"] = network
+        out["broadcast"] = normalize_broadcast(network)
 
         # Venue + weather (weather is generally only present for outdoor games)
         gi = d.get("gameInfo") or {}
