@@ -2320,9 +2320,16 @@ button[title="View fullscreen"]{display:none !important;}
 [data-testid="stHeaderActionElements"]{display:none !important;}
 .stMarkdown h1 > a, .stMarkdown h2 > a, .stMarkdown h3 > a,
 .stMarkdown h4 > a, .stMarkdown h5 > a, .stMarkdown h6 > a{display:none !important;}
-/* Tighten the big default top whitespace so we use the space better */
-.block-container{padding-top:2.2rem !important;}
-header[data-testid="stHeader"]{height:0;}
+/* TEST: zero out the top/header buffer whitespace */
+.block-container{padding-top:0 !important;}
+[data-testid="stAppViewBlockContainer"]{padding-top:0 !important;}
+header[data-testid="stHeader"]{height:0 !important;display:none !important;}
+[data-testid="stToolbar"]{display:none !important;}
+[data-testid="stDecoration"]{display:none !important;}
+[data-testid="stMainBlockContainer"]{padding-top:0 !important;}
+/* drop the top margin on the very first element in the page body */
+[data-testid="stAppViewBlockContainer"] > div:first-child,
+.block-container > div:first-child{margin-top:0 !important;padding-top:0 !important;}
 /* Punch up the main nav tabs: bigger, bolder, clearer active state */
 div[data-testid="stTabs"] > div > div[role="tablist"]{
     gap:0.25rem; border-bottom:2px solid rgba(128,128,128,0.25); margin-bottom:0.4rem;}
