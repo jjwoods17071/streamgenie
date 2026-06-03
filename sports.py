@@ -6,6 +6,7 @@ the existing card/nav/watchlist plumbing with no schema change. The app detects 
 rows by tmdb_id < 0. Games are the "episodes". 506sports has regional coverage maps.
 """
 import datetime as dt
+import re
 import requests
 import streamlit as st
 
@@ -204,9 +205,33 @@ def game_insight(league: str, event_id):
                          params={"event": event_id}, headers=_UA, timeout=20).json()
         out = {}
         comp = ((d.get("header") or {}).get("competitions") or [{}])[0]
+
+        # Win probability (ESPN matchup predictor): {team_id: pct}
+        proj = {}
+        pr = d.get("predictor") or {}
+        for side in ("homeTeam", "awayTeam"):
+            o = pr.get(side) or {}
+            if o.get("id") and o.get("gameProjection"):
+                try:
+                    proj[str(o["id"])] = round(float(o["gameProjection"]))
+                except Exception:
+                    pass
+
+        # Standings: {team_id: {rank, division, gb, streak}}
+        standings = {}
+        for g in (d.get("standings") or {}).get("groups", []):
+            div = re.sub(r"^\d{4}\s+", "", (g.get("header") or "")).replace("Standings", "").strip()
+            entries = (g.get("standings") or {}).get("entries", [])
+            for idx, e in enumerate(entries):
+                stt = {x.get("name"): x.get("displayValue") for x in e.get("stats", [])}
+                standings[str(e.get("id"))] = {
+                    "rank": idx + 1, "division": div,
+                    "gb": stt.get("gamesBehind"), "streak": stt.get("streak")}
+
         teams = []
         for cz in comp.get("competitors", []):
             t = cz.get("team") or {}
+            tid = str(t.get("id"))
             recs = cz.get("record") or []
             overall = None
             for r in recs:
@@ -215,9 +240,13 @@ def game_insight(league: str, event_id):
                     break
             if not overall and recs:
                 overall = recs[0].get("summary")
-            teams.append({"name": t.get("displayName"), "abbrev": t.get("abbreviation"),
+            sd = standings.get(tid, {})
+            teams.append({"id": tid, "name": t.get("displayName"), "abbrev": t.get("abbreviation"),
                           "home": cz.get("homeAway") == "home", "record": overall,
-                          "logo": (t.get("logos") or [{}])[0].get("href") or t.get("logo")})
+                          "logo": (t.get("logos") or [{}])[0].get("href") or t.get("logo"),
+                          "win_pct": proj.get(tid), "rank": sd.get("rank"),
+                          "division": sd.get("division"), "gb": sd.get("gb"),
+                          "streak": sd.get("streak")})
         out["teams"] = teams
         # Head-to-head series — prefer a season-long entry, else the current set
         ss = d.get("seasonseries") or []

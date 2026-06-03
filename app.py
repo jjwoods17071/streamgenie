@@ -74,6 +74,16 @@ def local_today() -> dt.date:
     except Exception:
         return dt.datetime.now(ZoneInfo(_DEFAULT_TZ)).date()
 
+
+def _ord(n) -> str:
+    """1 -> '1st', 2 -> '2nd', etc."""
+    try:
+        n = int(n)
+    except Exception:
+        return str(n)
+    suf = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suf}"
+
 # --------------- MATERIAL ICONS MAPPING ---------------
 # Streamlit Material Icons for a modern, professional look
 # Usage: st.button(f"{ICONS['settings']} Settings")
@@ -863,8 +873,8 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             _ins = sports.game_insight(league, ng.get("id"))
             if _ins:
                 _ts = sorted(_ins.get("teams", []), key=lambda t: t.get("home", False))  # away first
-                _recs = " @ ".join(f'{(t.get("abbrev") or t.get("name") or "")} ({t["record"]})'
-                                   for t in _ts if t.get("record"))
+                _ab = lambda t: t.get("abbrev") or t.get("name") or ""
+                _recs = " @ ".join(f'{_ab(t)} ({t["record"]})' for t in _ts if t.get("record"))
                 _meta = []
                 if _recs:
                     _meta.append(f"📊 {_recs}")
@@ -872,6 +882,25 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                     _meta.append(f'📍 {_ins["venue"]}')
                 if _meta:
                     st.caption(" · ".join(_meta))
+                # Win probability (ESPN matchup predictor)
+                _fav = max((t for t in _ts if t.get("win_pct") is not None),
+                           key=lambda t: t["win_pct"], default=None)
+                if _fav:
+                    st.caption(f'🔮 {_ab(_fav)} **{_fav["win_pct"]}%** to win · ESPN predictor')
+                # Division standing + current streak per team
+                _stand = []
+                for t in _ts:
+                    if t.get("rank") and t.get("division"):
+                        extra = []
+                        gb = t.get("gb")
+                        if gb and str(gb) not in ("-", "0", "0.0"):
+                            extra.append(f"{gb} GB")
+                        if t.get("streak"):
+                            extra.append(t["streak"])
+                        tail = f' ({", ".join(extra)})' if extra else ""
+                        _stand.append(f'{_ab(t)} {_ord(t["rank"])} in {t["division"]}{tail}')
+                if _stand:
+                    st.caption("📈 " + "  ·  ".join(_stand))
                 if _ins.get("series"):
                     st.caption(f'🔁 {_ins["series"]}')
         if client is not None:
