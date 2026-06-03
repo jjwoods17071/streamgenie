@@ -226,6 +226,19 @@ def game_insight(league: str, event_id):
                 except Exception:
                     pass
 
+        # Key player per team (headshot): MLB → probable pitcher; else top stat leader
+        kplayers = {}
+        for grp in (d.get("leaders") or []):
+            tid2 = str((grp.get("team") or {}).get("id"))
+            cats = grp.get("leaders") or []
+            if cats:
+                ld = (cats[0].get("leaders") or [{}])[0]
+                a = ld.get("athlete") or {}
+                cat = cats[0].get("shortDisplayName") or cats[0].get("displayName") or ""
+                kplayers[tid2] = {"name": a.get("displayName") or a.get("fullName"),
+                                  "headshot": (a.get("headshot") or {}).get("href"),
+                                  "note": (f"{ld.get('displayValue','')} {cat}").strip()}
+
         # Last-5 form: {team_id: ['W','L',...]}
         last5 = {}
         for blk in (d.get("lastFiveGames") or []):
@@ -260,10 +273,16 @@ def game_insight(league: str, event_id):
             sd = standings.get(tid, {})
             # Probable starting pitcher (MLB) / featured player
             pitcher = None
+            player = None   # key player + headshot for the player-hero tile
             pr = cz.get("probables") or []
             if pr and isinstance(pr[0], dict):
                 ath = pr[0].get("athlete") or {}
                 pitcher = ath.get("fullName") or ath.get("displayName")
+                if pitcher:
+                    player = {"name": pitcher, "headshot": (ath.get("headshot") or {}).get("href"),
+                              "note": "Starting pitcher"}
+            if not player:
+                player = kplayers.get(tid)
             res5 = last5.get(tid) or []
             form = None
             if res5:
@@ -274,7 +293,8 @@ def game_insight(league: str, event_id):
                           "logo": (t.get("logos") or [{}])[0].get("href") or t.get("logo"),
                           "win_pct": proj.get(tid), "rank": sd.get("rank"),
                           "division": sd.get("division"), "gb": sd.get("gb"),
-                          "streak": sd.get("streak"), "pitcher": pitcher, "form": form})
+                          "streak": sd.get("streak"), "pitcher": pitcher, "form": form,
+                          "player": player})
         out["teams"] = teams
         # Head-to-head series — prefer a season-long entry, else the current set
         ss = d.get("seasonseries") or []

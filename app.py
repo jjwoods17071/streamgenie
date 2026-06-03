@@ -1555,7 +1555,11 @@ def render_upcoming(rows, as_tab=False):
                 with cols[j]:
                     with st.container(border=True):
                         tid = r.get("tmdb_id")
-                        clickable_poster(tid, r.get("poster_path"))
+                        if (tid or 0) < 0:
+                            if not _render_sports_hero(r):
+                                clickable_poster(tid, r.get("poster_path"))
+                        else:
+                            clickable_poster(tid, r.get("poster_path"))
                         clickable_title(r['title'], r)
                         ne = get_next_episode(tid) if (tid or 0) > 0 else None
                         ep = (f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season")
@@ -2106,6 +2110,48 @@ def _broadcast_info(r) -> str:
         return "  ·  ".join(lines)
     except Exception:
         return ""
+
+
+def _render_sports_hero(r) -> bool:
+    """Player-hero card for a sports row in the grid: the two teams' key players (probable
+    pitchers / stat leaders) facing off, over a dark gradient. Returns False (→ fall back to
+    the logo) if no headshots are available."""
+    tid = r.get("tmdb_id")
+    league, team_id = sports.decode_id(tid)
+    if not league or sports.is_event_league(league):
+        return False
+    try:
+        ng = sports.next_game(sports.get_team_schedule(league, team_id))
+        ins = sports.game_insight(league, (ng or {}).get("id"))
+    except Exception:
+        ins = None
+    ts = sorted((ins or {}).get("teams", []), key=lambda t: t.get("home", False)) if ins else []
+    if not any((t.get("player") or {}).get("headshot") for t in ts):
+        return False
+
+    def _card(t):
+        p = t.get("player") or {}
+        hs = p.get("headshot")
+        img = (f'<img src="{hs}" style="height:78px;width:78px;border-radius:50%;object-fit:cover;'
+               f'background:#0b1220;border:2px solid rgba(255,255,255,.25)">' if hs
+               else f'<img src="{t.get("logo")}" style="height:62px;object-fit:contain">')
+        parts = (p.get("name") or "").split()
+        short = f"{parts[0][0]}. {parts[-1]}" if len(parts) > 1 else (parts[0] if parts else "")
+        return (f'<div style="text-align:center;flex:1">{img}'
+                f'<div style="font-size:.72rem;font-weight:800;margin-top:3px">{t.get("abbrev") or ""}</div>'
+                f'<div style="font-size:.66rem;opacity:.9">{short}</div>'
+                f'<div style="font-size:.6rem;opacity:.6">{p.get("note") or ""}</div></div>')
+
+    away = ts[0]
+    home = ts[1] if len(ts) > 1 else None
+    inner = _card(away) + (
+        '<div style="align-self:center;font-weight:800;opacity:.55;padding:0 4px">vs</div>' + _card(home)
+        if home else "")
+    st.markdown(
+        f'<div style="display:flex;align-items:center;justify-content:space-around;'
+        f'background:linear-gradient(135deg,#0b1220,#1e293b);border-radius:10px;'
+        f'padding:12px 6px;min-height:150px">{inner}</div>', unsafe_allow_html=True)
+    return True
 
 
 # --------------- PROMOTIONAL CONTENT ---------------

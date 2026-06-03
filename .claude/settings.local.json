@@ -10,7 +10,18 @@
       "Bash(set -a)",
       "Bash(source .env)",
       "Bash(set +a)",
-      "Bash(streamlit run:*)"
+      "Bash(streamlit run:*)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(python3:*)",
+      "Bash(git config:*)",
+      "Bash(ssh:*)",
+      "Bash(ssh-keyscan:*)",
+      "Bash(~/.ssh/known_hosts)",
+      "Bash(pbcopy)",
+      "Bash(git remote set-url:*)",
+      "WebFetch(domain:streamgenie-estero.streamlit.app)"
     ],
     "deny": [],
     "ask": []
