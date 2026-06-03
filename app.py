@@ -1190,7 +1190,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 _tmdb_provs = get_stream_providers(tmdb_id, wl_row.get("region") or DEFAULT_REGION)
                 if _tmdb_provs:
                     st.markdown("✓ On your watchlist  ·  Watch on:")
-                    render_provider_chips(_tmdb_provs)
+                    render_provider_chips(_tmdb_provs, height=110)
                 else:
                     st.caption("✓ On your watchlist")
             else:
@@ -1198,10 +1198,10 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 _pname = normalize_provider_name(_prov)
                 if _plogo:
                     st.markdown(
-                        f'✓ On your watchlist &nbsp;·&nbsp; Watch on '
+                        f'✓ On your watchlist &nbsp;·&nbsp; Watch on<br>'
                         f'<img src="{_plogo}" title="{_pname}" '
-                        f'style="height:26px;border-radius:5px;vertical-align:middle;margin-left:4px"> '
-                        f'<b>{_pname}</b>', unsafe_allow_html=True)
+                        f'style="height:110px;border-radius:14px;vertical-align:middle;margin:6px 8px 0 0"> '
+                        f'<b style="font-size:1.1rem">{_pname}</b>', unsafe_allow_html=True)
                 else:
                     st.markdown(f"✓ On your watchlist  ·  Watch on **{_pname}**")
             def _pdp_remove():
@@ -1846,16 +1846,20 @@ def get_stream_providers(tv_id:int, region:str = "US") -> List[str]:
         return []
 
 
-def render_provider_chips(names) -> None:
-    """Inline '📺 <logos>' strip of streaming-service logos (falls back to text names)."""
+def render_provider_chips(names, height:int = 22) -> None:
+    """Inline '📺 <logos>' strip of streaming-service logos (falls back to text names).
+    `height` sets the logo size in px — pass a larger value on detail pages."""
     if not names:
         return
+    radius = max(4, round(height / 5))
+    gap = max(5, round(height / 3))
     parts = []
     for n in names:
         url = provider_logo_url(n)
         if url:
             parts.append(f'<img src="{url}" title="{n}" alt="{n}" '
-                         f'style="height:22px;border-radius:4px;margin-right:5px;vertical-align:middle">')
+                         f'style="height:{height}px;border-radius:{radius}px;'
+                         f'margin-right:{gap}px;vertical-align:middle">')
         else:
             parts.append(f'<span style="font-size:.8rem;opacity:.85;margin-right:6px">{n}</span>')
     st.markdown("📺&nbsp;" + "".join(parts), unsafe_allow_html=True)
