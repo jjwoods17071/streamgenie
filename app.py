@@ -76,6 +76,17 @@ def local_today() -> dt.date:
         return dt.datetime.now(ZoneInfo(_DEFAULT_TZ)).date()
 
 
+def _game_local_date(g: Dict[str, Any]) -> str:
+    """A sports game's date in the USER's timezone. ESPN gives kickoff/first-pitch as a
+    UTC timestamp, so an 8pm-Eastern game reads as the next day in UTC — convert it."""
+    dtm = (g.get("datetime") or "")
+    try:
+        d = dt.datetime.fromisoformat(dtm.replace("Z", "+00:00"))
+        return d.astimezone(ZoneInfo(_user_tz_name())).date().isoformat()
+    except Exception:
+        return g.get("date") or ""
+
+
 def _ord(n) -> str:
     """1 -> '1st', 2 -> '2nd', etc."""
     try:
@@ -974,7 +985,7 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 f'🟢&nbsp;<b>Next:</b>{_logo_img(ng.get("away_logo"), 120)}<b>{ng["away"]}</b>'
                 f'<span style="opacity:.55;margin:0 5px">@</span>'
                 f'{_logo_img(ng.get("home_logo"), 120)}<b>{ng["home"]}</b>'
-                f'<span style="opacity:.8">&nbsp;— {ng["date"]}{_net}</span></div>',
+                f'<span style="opacity:.8">&nbsp;— {_game_local_date(ng)}{_net}</span></div>',
                 unsafe_allow_html=True)
             # Pre-game context: both records, venue, head-to-head series
             _ins = sports.game_insight(league, ng.get("id"))
@@ -1039,9 +1050,10 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
         c = st.columns([2, 5, 2])
         with c[0]:
             wk = g.get("week")
-            st.markdown(f"**Wk {wk}**" if wk else f"**{g.get('date') or 'TBA'}**")
+            _gld = _game_local_date(g) or "TBA"
+            st.markdown(f"**Wk {wk}**" if wk else f"**{_gld}**")
             if wk:
-                st.caption(g.get("date") or "TBA")
+                st.caption(_gld)
         with c[1]:
             score = ""
             if g.get("completed") and g.get("home_score") not in (None, ""):
@@ -1516,8 +1528,10 @@ def render_upcoming(rows, as_tab=False):
                     except Exception:
                         games = []
                     for g in games:
-                        gd = g.get("date")
-                        if not gd or g.get("completed"):
+                        if g.get("completed"):
+                            continue
+                        gd = _game_local_date(g)
+                        if not gd:
                             continue
                         try:
                             d = dt.date.fromisoformat(gd)
@@ -1782,7 +1796,7 @@ def refresh_sports_air_dates(client: Client, shows: List[Dict[str, Any]]) -> Lis
             continue
         try:
             ng = sports.next_game(sports.get_team_schedule(league, team_id))
-            nd = ng.get("date") if ng else None
+            nd = _game_local_date(ng) if ng else None
             if nd and nd != show.get("next_air_date"):
                 client.table("shows").update({"next_air_date": nd})\
                     .eq("user_id", get_user_id()).eq("tmdb_id", tid).execute()
@@ -3346,7 +3360,7 @@ with _main_grow:
                                     _g = sports.get_team_schedule(_lkx, _team["id"])
                                     _ng = sports.next_game(_g)
                                     upsert_show(client, _id, _team["name"], "US", True,
-                                                (_ng["date"] if _ng else None),
+                                                (_game_local_date(_ng) if _ng else None),
                                                 f"{_league} team", _team.get("logo"), _league)
                                 st.button(":material/add: Follow", key=f"follow_{_lk}_{_t['id']}",
                                           use_container_width=True, on_click=_follow)
