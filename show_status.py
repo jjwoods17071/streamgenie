@@ -90,7 +90,7 @@ def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: s
 
         # Get current status from database
         result = client.table("shows")\
-            .select("show_status, production_status, last_status_check")\
+            .select("show_status, production_status, last_status_check, in_production")\
             .eq("user_id", user_id)\
             .eq("tmdb_id", tmdb_id)\
             .execute()
@@ -101,6 +101,8 @@ def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: s
 
         old_status = result.data[0].get("show_status", "Unknown")
         old_production_status = result.data[0].get("production_status", "Unknown")
+        old_in_production = result.data[0].get("in_production")
+        old_last_check = result.data[0].get("last_status_check")
         status_changed = old_status != new_status or old_production_status != enhanced["category"]
 
         # Update status in database with enhanced fields
@@ -130,10 +132,88 @@ def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: s
         if status_changed and new_status in ["Ended", "Canceled"]:
             notify_status_change(client, user_id, tmdb_id, show_title, old_status, new_status, status_info)
 
+        # Renewal / no-return-date production signals
+        notify_production_changes(
+            client, user_id, tmdb_id, show_title,
+            old_in_production, old_last_check, new_status, status_info)
+
         return new_status
     except Exception as e:
         logger.error(f"Error updating show status: {e}")
         return None
+
+
+def _has_existing_notification(client: Client, user_id: str, tmdb_id: int, ntype: str) -> bool:
+    """True if a notification of this type already exists for this user+show (de-dup)."""
+    try:
+        r = client.table("notifications").select("id")\
+            .eq("user_id", user_id).eq("related_show_id", tmdb_id)\
+            .eq("notification_type", ntype).limit(1).execute()
+        return bool(r.data)
+    except Exception:
+        return False
+
+
+def notify_production_changes(
+    client: Client,
+    user_id: str,
+    tmdb_id: int,
+    show_title: str,
+    old_in_production,
+    old_last_check,
+    new_status: str,
+    status_info: Dict
+):
+    """Two production-state notifications for shows already on the watchlist:
+
+    1. 🛠️ Renewed — in_production flips False→True (a new season got greenlit/started).
+    2. ⏳ No return date — a 'Returning' show that's NOT in production, has no scheduled
+       next episode, and last aired >12 months ago (likely limbo / possible one-and-done).
+       Fired at most once per show.
+    """
+    try:
+        new_ip = bool(status_info.get("in_production"))
+        nxt = status_info.get("next_episode_to_air")
+        has_next = isinstance(nxt, dict) and bool(nxt.get("air_date"))
+
+        # 1) Renewed — only on a genuine False→True flip we've actually observed before
+        #    (old_last_check guards against a false positive on a show's first-ever check).
+        if (old_last_check and old_in_production is False and new_ip
+                and new_status in ("Returning Series", "In Production", "Planned")):
+            notifications.create_notification(
+                client=client, user_id=user_id, notification_type="renewed",
+                title=f"🛠️ Renewed: {show_title}",
+                message=(f"{show_title} is back in production — a new season is being made. "
+                         f"No air date has been announced yet, but it's officially returning."),
+                related_show_id=tmdb_id, related_show_title=show_title,
+                send_email=True)  # respects prefs
+            logger.info(f"Sent renewal notification for {show_title}")
+            return
+
+        # 2) No return date — limbo nudge, once per show
+        if new_status == "Returning Series" and not new_ip and not has_next:
+            last = status_info.get("last_episode_to_air") or {}
+            last_ad = last.get("air_date")
+            gap_days = None
+            if last_ad:
+                try:
+                    gap_days = (dt.date.today() - dt.date.fromisoformat(last_ad)).days
+                except Exception:
+                    gap_days = None
+            if (gap_days is not None and gap_days > 365
+                    and not _has_existing_notification(client, user_id, tmdb_id, "no_return")):
+                months = gap_days // 30
+                notifications.create_notification(
+                    client=client, user_id=user_id, notification_type="no_return",
+                    title=f"⏳ No return date: {show_title}",
+                    message=(f"{show_title} is still listed as returning, but its last episode aired about "
+                             f"{months} months ago and nothing is in production. A new season hasn't been "
+                             f"confirmed — you may want to decide whether to keep tracking it."),
+                    related_show_id=tmdb_id, related_show_title=show_title,
+                    send_email=False)  # in-app only by default
+                logger.info(f"Sent no-return nudge for {show_title}")
+    except Exception as e:
+        logger.error(f"Error in notify_production_changes for {show_title}: {e}")
 
 
 def notify_status_change(
