@@ -1507,6 +1507,9 @@ def render_upcoming(rows, as_tab=False):
             _sl = _service_label(r)
             if _sl:
                 st.caption(_sl)
+            _sc = _sports_context(r)
+            if _sc:
+                st.caption(_sc)
             _ov = _overview_text(r)
             if _ov:
                 st.caption(_ov)
@@ -1551,6 +1554,9 @@ def render_upcoming(rows, as_tab=False):
                         _sl = _service_label(r)
                         if _sl:
                             st.caption(_sl)
+                        _sc = _sports_context(r)
+                        if _sc:
+                            st.caption(_sc)
                         _ov = _overview_text(r, 170)
                         if _ov:
                             st.caption(_ov)
@@ -1980,6 +1986,34 @@ def _sports_matchup(r: Dict[str, Any]) -> str:
     except Exception:
         pass
     return ""
+
+
+def _sports_context(r: Dict[str, Any]) -> str:
+    """Compact pre-game context (records + win %) for a followed team's next game, for
+    list rows. Full detail (standings/pitchers/last-5/series) lives on the team page."""
+    tid = r.get("tmdb_id")
+    if not tid or tid >= 0:
+        return ""
+    league, team_id = sports.decode_id(tid)
+    if not league or sports.is_event_league(league):
+        return ""
+    try:
+        ng = sports.next_game(sports.get_team_schedule(league, team_id))
+        ins = sports.game_insight(league, (ng or {}).get("id"))
+        if not ins:
+            return ""
+        ts = sorted(ins.get("teams", []), key=lambda t: t.get("home", False))  # away first
+        recs = " @ ".join(f"{(t.get('abbrev') or '')} {t['record']}" for t in ts if t.get("record"))
+        fav = max((t for t in ts if t.get("win_pct") is not None),
+                  key=lambda t: t["win_pct"], default=None)
+        parts = []
+        if recs:
+            parts.append(f"📊 {recs}")
+        if fav:
+            parts.append(f"🔮 {fav.get('abbrev')} {fav['win_pct']}%")
+        return "  ·  ".join(parts)
+    except Exception:
+        return ""
 
 
 # --------------- PROMOTIONAL CONTENT ---------------
