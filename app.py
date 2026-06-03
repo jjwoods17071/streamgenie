@@ -389,6 +389,45 @@ def get_tvmaze_episode_data(tv_id:int) -> Dict[Any, Dict[str, str]]:
         return {}
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_tvmaze_season_episodes(tv_id:int, season_number:int) -> List[Dict[str, Any]]:
+    """Episode list for one season from TVmaze (TMDB-shaped), used when TMDB has no
+    episodes catalogued for that season. Maps via the show's IMDb id."""
+    import re as _re
+    try:
+        imdb = (tmdb_get(f"/tv/{tv_id}/external_ids") or {}).get("imdb_id")
+        if not imdb:
+            return []
+        rr = requests.get("https://api.tvmaze.com/lookup/shows", params={"imdb": imdb}, timeout=15)
+        if rr.status_code != 200:
+            return []
+        show = rr.json()
+        eps = requests.get(f"https://api.tvmaze.com/shows/{show['id']}/episodes", timeout=15).json()
+        out = []
+        for e in eps:
+            if e.get("season") != season_number:
+                continue
+            n = e.get("number")
+            if not n:
+                continue
+            img = (e.get("image") or {}).get("original") or (e.get("image") or {}).get("medium")
+            rt = e.get("rating") or {}
+            out.append({
+                "episode_number": n,
+                "name": e.get("name") or f"Episode {n}",
+                "air_date": e.get("airdate") or "",
+                "overview": _re.sub("<[^>]+>", "", e.get("summary") or "").strip(),
+                "still_path": None,
+                "still_url": img,                       # full TVmaze URL
+                "vote_average": rt.get("average") if isinstance(rt, dict) else None,
+                "_source": "tvmaze",
+            })
+        out.sort(key=lambda x: x["episode_number"])
+        return out
+    except Exception:
+        return []
+
+
 def _availability_line(d: Dict[str, Any]) -> str:
     """One-line availability/status summary from show metadata (markdown)."""
     today = local_today()
@@ -490,13 +529,21 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None, o
 def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, user_id=None) -> None:
     """Episode list (with optional watched tracking) for one selected season."""
     eps = get_season_episodes(tv_id, sel)
+    _from_tvmaze = False
     if not eps:
-        st.info(":material/info: No episode-level data for this season yet. "
-                "(Common for **live sports** and some unscripted titles — the databases don't catalogue individual games/episodes.)")
+        # TMDB hasn't catalogued this season — try TVmaze for the episode list
+        eps = get_tvmaze_season_episodes(tv_id, sel)
+        _from_tvmaze = bool(eps)
+    if not eps:
+        st.info(":material/info: No episode list available for this season yet — neither TMDB "
+                "nor TVmaze has it catalogued. (Common for **live sports**, daily/news shows, and "
+                "some unscripted titles, where individual episodes aren't tracked.)")
         return
 
-    # Enrich from TVmaze (cached per show) when TMDB is missing an overview or a still image
-    _need_tvmaze = any((not (e.get("overview") or "").strip()) or (not e.get("still_path")) for e in eps)
+    # Enrich from TVmaze (cached per show) when TMDB is missing an overview or a still image.
+    # (Skip if the list already CAME from TVmaze — those rows carry their own image/overview.)
+    _need_tvmaze = (not _from_tvmaze) and any(
+        (not (e.get("overview") or "").strip()) or (not e.get("still_path")) for e in eps)
     _tvmaze = get_tvmaze_episode_data(tv_id) if _need_tvmaze else {}
 
     today = local_today()
@@ -540,9 +587,9 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
         except Exception:
             pass
         _tvm = _tvmaze.get((sel, en)) if _tvmaze else None
-        # still: TMDB first, else TVmaze image
+        # still: TMDB path first, else the row's own TVmaze image, else the TVmaze enrich map
         still_url = (f"https://image.tmdb.org/t/p/w185{still}" if still
-                     else (_tvm.get("image") if _tvm else None))
+                     else (ep.get("still_url") or (_tvm.get("image") if _tvm else None)))
         # layout: still | info | date | (watched)
         ec = st.columns([1.3, 4, 1, 0.8]) if track else st.columns([1.3, 4, 1])
         with ec[0]:
