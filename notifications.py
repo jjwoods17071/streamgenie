@@ -232,73 +232,73 @@ def get_unread_count(client: Client, user_id: str) -> int:
         return 0
 
 
-def render_notifications_ui(client: Client, user_id: str):
-    """Render the notifications UI in the sidebar"""
-
-    # Get unread count
+def render_notifications_panel(client: Client, user_id: str, key_prefix: str = ""):
+    """Render the notifications list (header, mark-all, items) into the current container.
+    Container-agnostic so it works in the sidebar OR a header popover. key_prefix keeps
+    widget keys unique when the panel is rendered in more than one place."""
     unread_count = get_unread_count(client, user_id)
 
-    with st.sidebar:
-        st.markdown("---")
+    # Notifications header with badge
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### 🔔 Notifications")
+    with col2:
+        if unread_count > 0:
+            st.markdown(f"<span style='background-color: #ff4b4b; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;'>{unread_count}</span>", unsafe_allow_html=True)
 
-        # Notifications header with badge
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown("### 🔔 Notifications")
-        with col2:
-            if unread_count > 0:
-                st.markdown(f"<span style='background-color: #ff4b4b; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;'>{unread_count}</span>", unsafe_allow_html=True)
+    notifications = get_user_notifications(client, user_id, unread_only=False, limit=10)
 
-        # Get notifications
-        notifications = get_user_notifications(client, user_id, unread_only=False, limit=10)
+    if not notifications:
+        st.info("No notifications yet")
+        return
 
-        if not notifications:
-            st.info("No notifications yet")
-        else:
-            # Mark all as read button
-            if unread_count > 0:
-                if st.button("✓ Mark all as read", use_container_width=True):
-                    mark_all_notifications_read(client, user_id)
+    # Mark all as read button
+    if unread_count > 0:
+        if st.button("✓ Mark all as read", use_container_width=True, key=f"{key_prefix}mark_all"):
+            mark_all_notifications_read(client, user_id)
+            st.rerun()
+
+    # Display notifications
+    for notification in notifications:
+        with st.container():
+            bg_color = "#f0f2f6" if notification["is_read"] else "#e3f2fd"
+            type_emoji = {
+                "new_episode": "🎬",
+                "reminder": "⏰",
+                "status_change": "🔄",
+                "system": "ℹ️"
+            }.get(notification["notification_type"], "📢")
+
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #667eea;">
+                <div style="display: flex; align-items: start; justify-content: space-between;">
+                    <div style="flex: 1;">
+                        <strong>{type_emoji} {notification['title']}</strong>
+                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">{notification['message']}</p>
+                        {f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #667eea;">📺 {notification["related_show_title"]}</p>' if notification.get("related_show_title") else ''}
+                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #999;">{format_notification_time(notification['created_at'])}</p>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if not notification["is_read"]:
+                    if st.button("✓ Read", key=f"{key_prefix}read_{notification['id']}", use_container_width=True):
+                        mark_notification_read(client, notification["id"])
+                        st.rerun()
+            with col2:
+                if st.button("🗑️ Delete", key=f"{key_prefix}delete_{notification['id']}", use_container_width=True):
+                    delete_notification(client, notification["id"])
                     st.rerun()
 
-            # Display notifications
-            for notification in notifications:
-                with st.container():
-                    # Notification styling based on read status
-                    bg_color = "#f0f2f6" if notification["is_read"] else "#e3f2fd"
 
-                    # Notification type emoji
-                    type_emoji = {
-                        "new_episode": "🎬",
-                        "reminder": "⏰",
-                        "status_change": "🔄",
-                        "system": "ℹ️"
-                    }.get(notification["notification_type"], "📢")
-
-                    st.markdown(f"""
-                    <div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #667eea;">
-                        <div style="display: flex; align-items: start; justify-content: space-between;">
-                            <div style="flex: 1;">
-                                <strong>{type_emoji} {notification['title']}</strong>
-                                <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">{notification['message']}</p>
-                                {f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #667eea;">📺 {notification["related_show_title"]}</p>' if notification.get("related_show_title") else ''}
-                                <p style="margin: 4px 0 0 0; font-size: 12px; color: #999;">{format_notification_time(notification['created_at'])}</p>
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # Action buttons
-                    col1, col2 = st.columns([1, 1])
-                    with col1:
-                        if not notification["is_read"]:
-                            if st.button("✓ Read", key=f"read_{notification['id']}", use_container_width=True):
-                                mark_notification_read(client, notification["id"])
-                                st.rerun()
-                    with col2:
-                        if st.button("🗑️ Delete", key=f"delete_{notification['id']}", use_container_width=True):
-                            delete_notification(client, notification["id"])
-                            st.rerun()
+def render_notifications_ui(client: Client, user_id: str):
+    """Render the notifications UI in the sidebar"""
+    with st.sidebar:
+        st.markdown("---")
+        render_notifications_panel(client, user_id, key_prefix="sb_")
 
 
 def format_notification_time(timestamp_str: str) -> str:

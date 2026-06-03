@@ -1185,7 +1185,14 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             _prov = (wl_row.get("provider_name") or "").strip()
             _generic = _prov in ("", "Multiple Providers", "Multiple")
             if _generic:
-                st.caption("✓ On your watchlist")
+                # No specific service was stored — fall back to TMDB's "where to watch" so the
+                # detail panel still tells the user where it streams.
+                _tmdb_provs = get_stream_providers(tmdb_id, wl_row.get("region") or DEFAULT_REGION)
+                if _tmdb_provs:
+                    st.markdown("✓ On your watchlist  ·  Watch on:")
+                    render_provider_chips(_tmdb_provs)
+                else:
+                    st.caption("✓ On your watchlist")
             else:
                 _plogo = provider_logo_url(_prov)
                 _pname = normalize_provider_name(_prov)
@@ -2133,23 +2140,23 @@ def _render_sports_hero(r) -> bool:
         p = t.get("player") or {}
         hs = p.get("headshot")
         img = (f'<img src="{hs}" style="height:78px;width:78px;border-radius:50%;object-fit:cover;'
-               f'background:#0b1220;border:2px solid rgba(255,255,255,.25)">' if hs
+               f'background:#f1f5f9;border:2px solid #cbd5e1">' if hs
                else f'<img src="{t.get("logo")}" style="height:62px;object-fit:contain">')
         parts = (p.get("name") or "").split()
         short = f"{parts[0][0]}. {parts[-1]}" if len(parts) > 1 else (parts[0] if parts else "")
         return (f'<div style="text-align:center;flex:1">{img}'
-                f'<div style="font-size:.72rem;font-weight:800;margin-top:3px">{t.get("abbrev") or ""}</div>'
-                f'<div style="font-size:.66rem;opacity:.9">{short}</div>'
-                f'<div style="font-size:.6rem;opacity:.6">{p.get("note") or ""}</div></div>')
+                f'<div style="font-size:.72rem;font-weight:800;margin-top:3px;color:#0f172a">{t.get("abbrev") or ""}</div>'
+                f'<div style="font-size:.66rem;color:#1e293b">{short}</div>'
+                f'<div style="font-size:.6rem;color:#64748b">{p.get("note") or ""}</div></div>')
 
     away = ts[0]
     home = ts[1] if len(ts) > 1 else None
     inner = _card(away) + (
-        '<div style="align-self:center;font-weight:800;opacity:.55;padding:0 4px">vs</div>' + _card(home)
+        '<div style="align-self:center;font-weight:800;color:#94a3b8;padding:0 4px">vs</div>' + _card(home)
         if home else "")
     st.markdown(
         f'<div style="display:flex;align-items:center;justify-content:space-around;'
-        f'background:linear-gradient(135deg,#0b1220,#1e293b);border-radius:10px;'
+        f'background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;'
         f'padding:12px 6px;min-height:150px">{inner}</div>', unsafe_allow_html=True)
     return True
 
@@ -2781,10 +2788,17 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Settings toggle (top right corner)
-col_spacer, col_gear = st.columns([9, 1])
+# Notification bell + settings toggle (top right corner)
+col_spacer, col_bell, col_gear = st.columns([8, 1, 1])
 with col_spacer:
     st.write("")  # Spacing
+with col_bell:
+    _bell_uid = get_user_id()
+    _unread = notifications.get_unread_count(client, _bell_uid)
+    _bell_label = f"🔔 {_unread}" if _unread else "🔔"
+    with st.popover(_bell_label, use_container_width=True,
+                    help=f"{_unread} unread notification(s)" if _unread else "Notifications"):
+        notifications.render_notifications_panel(client, _bell_uid, key_prefix="hdr_")
 with col_gear:
     st.write("")  # Spacing
     show_settings = st.toggle(ICONS['settings'], value=False, help="Show/hide settings")
