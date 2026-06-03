@@ -17,6 +17,7 @@ import leaving_soon  # Admin-curated "leaving soon" list
 import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
 import dismissed  # "Not interested" dismissals for discovery carousels
+import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
 # Load environment variables
@@ -1166,16 +1167,23 @@ def available_now_count(tmdb_id, watched_n: int) -> int:
     return max(0, aired - int(watched_n or 0))
 
 
+def _episode_event(r, d):
+    """Build a calendar_ics event dict for a show row's upcoming episode on date d."""
+    tid = r.get("tmdb_id")
+    ne = get_next_episode(tid) if (tid or 0) > 0 else None
+    return {
+        "tmdb_id": tid, "title": r.get("title") or "Show", "date": d.isoformat(),
+        "season": ne.get("season") if ne else None,
+        "episode": ne.get("episode") if ne else None,
+        "ep_name": ne.get("name") if ne else None,
+    }
+
+
 def render_upcoming(rows, as_tab=False):
-    """Agenda of upcoming episodes across the whole watchlist, grouped by timeframe.
-
-    Adds two resume helpers at the top: a 📌 Pinned strip (shows the user is
-    actively watching) and a 📥 Available Now strip (released-but-unwatched
-    episode counts across the whole watchlist).
-
-    as_tab=True renders the list directly (for the dedicated Upcoming tab) with an
-    empty-state message; otherwise it renders inside a collapsible expander.
-    """
+    """Date-driven view of FUTURE episodes across the watchlist: a week-by-week agenda
+    (default) or a month grid, with per-episode calendar export (Google link + .ics +
+    reminders) and a bulk schedule download. (Catch-up / released-but-unwatched lives in
+    its own tab now.) When as_tab=False it stays a compact agenda expander."""
     today = dt.date.today()
     up = []                       # (date, row) with a scheduled upcoming episode
     up_by_id = {}
@@ -1209,12 +1217,26 @@ def render_upcoming(rows, as_tab=False):
                   args=(client, tid, r.get("region") or DEFAULT_REGION,
                         r.get("provider_name") or DEFAULT_PROVIDER))
 
+    def _cal_popover(r, d, ctx="up"):
+        ev = _episode_event(r, d)
+        tid = r.get("tmdb_id")
+        with st.popover("📅", help="Add to calendar / set reminder"):
+            se = f"S{ev['season']}E{ev['episode']}" if ev.get("season") else ""
+            st.markdown(f"**{ev['title']}** {se}  ·  {d.isoformat()}")
+            st.markdown(f"[➕ Add to Google Calendar]({calendar_ics.google_link(ev)})")
+            st.download_button("⬇️ Download .ics (Apple / Outlook)",
+                               calendar_ics.build_ics([ev]),
+                               file_name=f"streamgenie_{tid}_{d.isoformat()}.ics",
+                               mime="text/calendar", key=f"ics_{ctx}_{tid}_{d.isoformat()}")
+            st.caption("Event includes reminders 1 day & 1 hour before.")
+
     def _row(r, d=None, show_pin=True, ctx="up"):
-        ne = get_next_episode(r["tmdb_id"])
+        tid = r.get("tmdb_id")
+        ne = get_next_episode(tid) if (tid or 0) > 0 else None
         ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
-        c = st.columns([1, 4, 1]) if show_pin else st.columns([1, 5])
+        c = st.columns([1, 4, 1.1]) if show_pin else st.columns([1, 5])
         with c[0]:
-            clickable_poster(r['tmdb_id'], r.get("poster_path"))
+            clickable_poster(tid, r.get("poster_path"))
         with c[1]:
             clickable_title(r['title'], r)
             if d is not None:
@@ -1227,10 +1249,12 @@ def render_upcoming(rows, as_tab=False):
                 st.caption("⏳ no episode scheduled yet")
         if show_pin:
             with c[2]:
+                if d is not None:
+                    _cal_popover(r, d, ctx)
                 _pin_button(r, ctx)
                 _remove_button(r, ctx)
 
-    def _body():
+    def _agenda():
         # 📌 Pinned — actively-watched shows kept at the very top (even with no air date)
         if pinned_ids:
             pinned_rows = [r for r in rows if r.get("tmdb_id") in pinned_ids]
@@ -1241,11 +1265,11 @@ def render_upcoming(rows, as_tab=False):
                     _row(r, up_by_id.get(r.get("tmdb_id")), ctx="pin")
                 st.divider()
 
-        # 📅 Upcoming episodes by timeframe (pinned excluded — already shown above)
         rest = [(d, r) for d, r in up if r.get("tmdb_id") not in pinned_ids]
         groups = [
             ("⏰ This week", [x for x in rest if (x[0] - today).days <= 7]),
-            ("📅 This month", [x for x in rest if 7 < (x[0] - today).days <= 30]),
+            ("📆 Next week", [x for x in rest if 7 < (x[0] - today).days <= 14]),
+            ("📅 This month", [x for x in rest if 14 < (x[0] - today).days <= 30]),
             ("🔜 Later", [x for x in rest if (x[0] - today).days > 30]),
         ]
         rendered = False
@@ -1259,59 +1283,125 @@ def render_upcoming(rows, as_tab=False):
         if not rendered and not pinned_ids:
             st.caption("No upcoming episodes scheduled for your watchlist right now.")
 
-    def _available_now():
-        """📥 Released-but-unwatched episode counts across the whole watchlist."""
-        wcounts = watched.watched_counts(client, get_user_id())
-        avail = []
-        for r in rows:
-            tid = r.get("tmdb_id")
-            if not tid or tid < 0:          # skip sports rows (negative ids)
-                continue
-            n = available_now_count(tid, wcounts.get(tid, 0))
-            if n > 0:
-                avail.append((n, r))
-        if not avail:
-            return
-        avail.sort(key=lambda x: -x[0])
-        total = sum(n for n, _ in avail)
-        st.markdown(f"### 📥 Available Now — {total} episode{'s' if total != 1 else ''} ready "
-                    f"across {len(avail)} show{'s' if len(avail) != 1 else ''}")
-        st.caption("Episodes already released that you haven't marked watched yet — pick up where you left off.")
-        top = avail[:8]
-        for n, r in top:
-            c = st.columns([1, 4, 1])
-            with c[0]:
-                clickable_poster(r['tmdb_id'], r.get("poster_path"))
-            with c[1]:
-                clickable_title(r['title'], r)
-                st.caption(f":blue[**{n} ready to watch**]")
-            with c[2]:
-                _pin_button(r, "av")
-                _remove_button(r, "av")
-        if len(avail) > len(top):
-            with st.expander(f"➕ {len(avail) - len(top)} more shows with episodes ready"):
-                for n, r in avail[len(top):]:
-                    cc = st.columns([5, 1])
-                    with cc[0]:
-                        clickable_title(r['title'], r)
-                        st.caption(f":blue[{n} ready to watch]")
-                    with cc[1]:
-                        _pin_button(r, "avx")
-                        _remove_button(r, "avx")
-        st.divider()
+    def _month_grid():
+        import calendar as _cal
+        by_date = {}
+        for d, r in up:
+            by_date.setdefault(d, []).append(r)
+        months = []
+        y, m = today.year, today.month
+        last_d = up[-1][0]
+        while (y, m) <= (last_d.year, last_d.month):
+            months.append((y, m))
+            m, y = (1, y + 1) if m == 12 else (m + 1, y)
+        idx = max(0, min(st.session_state.get("up_month_idx", 0), len(months) - 1))
+        y, m = months[idx]
+        nav = st.columns([1, 3, 1])
+        with nav[0]:
+            if st.button("◀ Prev", key="up_mprev", disabled=idx <= 0, use_container_width=True):
+                st.session_state["up_month_idx"] = idx - 1
+                st.rerun()
+        with nav[1]:
+            st.markdown(f"<h4 style='text-align:center;margin:0'>{_cal.month_name[m]} {y}</h4>",
+                        unsafe_allow_html=True)
+        with nav[2]:
+            if st.button("Next ▶", key="up_mnext", disabled=idx >= len(months) - 1, use_container_width=True):
+                st.session_state["up_month_idx"] = idx + 1
+                st.rerun()
+        hdr = st.columns(7)
+        for i, wd in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+            hdr[i].markdown(f"<div style='text-align:center;font-weight:700;opacity:.7'>{wd}</div>",
+                            unsafe_allow_html=True)
+        for week in _cal.Calendar(firstweekday=0).monthdatescalendar(y, m):
+            wc = st.columns(7)
+            for i, day in enumerate(week):
+                with wc[i]:
+                    in_month = (day.month == m)
+                    is_today = (day == today)
+                    daylabel = f"**{day.day}**" if is_today else (f"{day.day}" if in_month else f":gray[{day.day}]")
+                    st.markdown(("🔵 " if is_today else "") + daylabel)
+                    if in_month:
+                        for r in by_date.get(day, []):
+                            tid = r.get("tmdb_id")
+                            ne = get_next_episode(tid) if (tid or 0) > 0 else None
+                            se = f" {ne['season']}×{ne['episode']}" if ne and ne.get("season") else ""
+                            st.button(f"📺 {r['title'][:12]}", key=f"mo_{day.isoformat()}_{tid}",
+                                      help=f"{r['title']}{se} — open", on_click=open_show_page,
+                                      args=(r,), use_container_width=True)
 
     if as_tab:
-        _available_now()
         st.subheader(f"📅 Upcoming Episodes ({len(up)})")
         if not up and not pinned_ids:
-            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Search tab to see what's coming up.")
+            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Search tab "
+                    "to see what's coming up.")
+            return
+        # Top controls: bulk calendar export + agenda/month toggle
+        all_events = [_episode_event(r, d) for d, r in up]
+        ctrl = st.columns([3, 2])
+        with ctrl[0]:
+            if all_events:
+                st.download_button(
+                    f"📥 Download my schedule ({len(all_events)} episodes, .ics)",
+                    calendar_ics.build_ics(all_events),
+                    file_name="streamgenie_schedule.ics", mime="text/calendar",
+                    key="ics_bulk", use_container_width=True,
+                    help="Import all upcoming episodes (with reminders) into Apple / Google / Outlook")
+        with ctrl[1]:
+            view = st.radio("View", ["📋 Agenda", "🗓️ Month"], horizontal=True,
+                            key="up_view", label_visibility="collapsed")
+        st.divider()
+        if view == "🗓️ Month":
+            _month_grid()
         else:
-            _body()
+            _agenda()
     else:
         if not up:
             return
         with st.expander(f"📅 Upcoming Episodes ({len(up)})", expanded=soon):
-            _body()
+            _agenda()
+
+
+def render_catch_up(rows):
+    """📥 Catch Up — released-but-unwatched episodes, ONLY for shows you've started
+    (≥1 watched episode), so the count means 'you're N behind' rather than 'everything'."""
+    st.subheader("📥 Catch Up")
+    st.caption("Shows you've started watching and have fallen behind on — released episodes "
+               "you haven't marked watched yet.")
+    wcounts = watched.watched_counts(client, get_user_id())
+    avail = []
+    for r in rows:
+        tid = r.get("tmdb_id")
+        if not tid or tid < 0:          # skip sports rows
+            continue
+        w = wcounts.get(tid, 0)
+        if w <= 0:                       # only shows you've STARTED
+            continue
+        n = available_now_count(tid, w)
+        if n > 0:
+            avail.append((n, r))
+    if not avail:
+        if not wcounts:
+            st.info("Mark some episodes watched (on a show's page) and this tab will track what "
+                    "you've fallen behind on.")
+        else:
+            st.success("You're all caught up on the shows you've started. 🎉")
+        return
+    avail.sort(key=lambda x: -x[0])
+    total = sum(n for n, _ in avail)
+    st.markdown(f"**{total} episode{'s' if total != 1 else ''} to catch up on "
+                f"across {len(avail)} show{'s' if len(avail) != 1 else ''}**")
+    for n, r in avail:
+        c = st.columns([1, 4, 1])
+        with c[0]:
+            clickable_poster(r['tmdb_id'], r.get("poster_path"))
+        with c[1]:
+            clickable_title(r['title'], r)
+            st.caption(f":blue[**{n} to watch**]")
+        with c[2]:
+            st.button("🗑", key=f"cu_rm_{r['tmdb_id']}", help="Remove from your list",
+                      on_click=delete_show,
+                      args=(client, r['tmdb_id'], r.get('region') or DEFAULT_REGION,
+                            r.get('provider_name') or DEFAULT_PROVIDER))
 
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
@@ -2525,8 +2615,10 @@ _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
 def _add_discovered(tmdb_id, title, overview, poster_path):
     upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
 
-_main_upcoming, _main_watch, _main_new, _main_trending, _main_top, _main_grow, _main_search = st.tabs([
-    ":material/upcoming: Upcoming", ":material/tv: Your Watchlist",
+(_main_upcoming, _main_catchup, _main_watch, _main_new, _main_trending,
+ _main_top, _main_grow, _main_search) = st.tabs([
+    ":material/upcoming: Upcoming", ":material/download: Catch Up",
+    ":material/tv: Your Watchlist",
     ":material/fiber_new: New This Month", ":material/trending_up: Trending",
     ":material/star: Top Rated", ":material/playlist_add: Grow Watchlist",
     ":material/search: Search",
@@ -2535,6 +2627,9 @@ _main_upcoming, _main_watch, _main_new, _main_trending, _main_top, _main_grow, _
 with _main_upcoming:
     _up_rows = refresh_stale_air_dates(client, list_shows(client))
     render_upcoming(_up_rows, as_tab=True)
+
+with _main_catchup:
+    render_catch_up(list_shows(client))
 
 with _main_search:
     # Vertical layout: Search on top, watchlist below
@@ -3084,28 +3179,33 @@ with _main_watch:
         _groups = {"active": [], "canceled": [], "ended": []}
         for r in rows:
             _groups[_status_group(r)].append(r)
+        _n_active = len(_groups["active"])
+        _n_done = len(_groups["ended"]) + len(_groups["canceled"])
 
-        def _render_group(group, empty_msg):
-            if not group:
-                st.info(empty_msg)
-                return
-            if view_mode == 'grid':
-                render_grid_gallery(group, client, _wcounts)   # poster-tile gallery
-            else:
-                for r in group:
-                    render_show_row(r, 'list', client, _wcounts)  # detailed rows w/ episode guide
+        # Single list with a status filter (no more 3 separate sub-tabs).
+        _filter_opts = {
+            f"All ({len(rows)})": "all",
+            f"📺 Active ({_n_active})": "active",
+            f"🏁 Ended & Canceled ({_n_done})": "done",
+        }
+        with sc[1]:
+            _fl = st.radio("Status", list(_filter_opts.keys()), horizontal=True,
+                           key="wl_status_filter", label_visibility="collapsed")
+        _fmode = _filter_opts.get(_fl, "all")
+        if _fmode == "active":
+            _shown = _groups["active"]
+        elif _fmode == "done":
+            _shown = _groups["ended"] + _groups["canceled"]
+        else:
+            _shown = rows   # already sorted
 
-        _t_active, _t_canceled, _t_ended = st.tabs([
-            f"📺 Active ({len(_groups['active'])})",
-            f"🚫 Canceled ({len(_groups['canceled'])})",
-            f"✅ Ended ({len(_groups['ended'])})",
-        ])
-        with _t_active:
-            _render_group(_groups['active'], "No active shows.")
-        with _t_canceled:
-            _render_group(_groups['canceled'], "No canceled shows. 🎉")
-        with _t_ended:
-            _render_group(_groups['ended'], "No ended shows yet.")
+        if not _shown:
+            st.info("No shows match this filter.")
+        elif view_mode == 'grid':
+            render_grid_gallery(_shown, client, _wcounts)
+        else:
+            for r in _shown:
+                render_show_row(r, 'list', client, _wcounts)
 
 
 # ── Show-detail panel — rendered BELOW the tab bar so the menu stays at the top.
