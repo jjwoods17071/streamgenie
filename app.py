@@ -689,7 +689,7 @@ def render_show_row(r, view_mode, client, wcounts):
         cols = st.columns([2, 4, 3, 2])
         with cols[0]:
             if poster_path:
-                st.image(f"https://image.tmdb.org/t/p/w342{poster_path}", use_column_width=True)
+                st.image(_poster_src(poster_path), use_column_width=True)
             else:
                 st.write(ICONS["movie"])
         with cols[1]:
@@ -747,7 +747,7 @@ def render_show_row(r, view_mode, client, wcounts):
         cols = st.columns([1, 4, 2, 2, 1])
         with cols[0]:
             if poster_path:
-                st.image(f"https://image.tmdb.org/t/p/w185{poster_path}", width=92)
+                st.image(_poster_src(poster_path), width=92)
             else:
                 st.write(ICONS["movie"])
         with cols[1]:
@@ -1303,7 +1303,7 @@ def show_status_chip(r) -> str:
     return ":green-background[📺 Active]"
 
 
-def render_grid_gallery(rows, client, wcounts, per_row=5):
+def render_grid_gallery(rows, client, wcounts, per_row=3):
     """True poster-tile gallery for the grid view (vs. the detailed list rows).
     Each card's title is a button that opens the full show-detail page (PDP)."""
     today = local_today()
@@ -1414,6 +1414,26 @@ def _overview_text(r, limit=220) -> str:
     return ov if len(ov) <= limit else ov[:limit].rstrip() + "…"
 
 
+def _service_label(r) -> str:
+    """Where to watch — streaming service for shows, broadcast network for sports games."""
+    tid = r.get("tmdb_id") or 0
+    if tid < 0:
+        league, team_id = sports.decode_id(tid)
+        if league and not sports.is_event_league(league):
+            try:
+                ng = sports.next_game(sports.get_team_schedule(league, team_id))
+                net = (ng or {}).get("network")
+                if net:
+                    return f"📺 {net}"
+            except Exception:
+                pass
+        return ""
+    prov = normalize_provider_name(r.get("provider_name") or "")
+    if not prov or prov in ("Multiple Providers", "Multiple"):
+        return ""
+    return f"📺 {prov}"
+
+
 def render_upcoming(rows, as_tab=False):
     """Date-driven view of FUTURE episodes across the watchlist: a week-by-week agenda
     (default) or a month grid, with per-episode calendar export (Google link + .ics +
@@ -1484,6 +1504,9 @@ def render_upcoming(rows, as_tab=False):
                 st.caption(f"⏳ next: {ep}")
             else:
                 st.caption("⏳ no episode scheduled yet")
+            _sl = _service_label(r)
+            if _sl:
+                st.caption(_sl)
             _ov = _overview_text(r)
             if _ov:
                 st.caption(_ov)
@@ -1525,6 +1548,9 @@ def render_upcoming(rows, as_tab=False):
                             st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
                         elif ep:
                             st.caption(f"⏳ {ep}")
+                        _sl = _service_label(r)
+                        if _sl:
+                            st.caption(_sl)
                         _ov = _overview_text(r, 170)
                         if _ov:
                             st.caption(_ov)
@@ -1676,7 +1702,7 @@ def render_upcoming(rows, as_tab=False):
                     key="ics_bulk", use_container_width=True,
                     help="Import all upcoming episodes (with reminders) into Apple / Google / Outlook")
         with ctrl[1]:
-            view = st.radio("View", ["📋 List", "▦ Grid", "🗓️ Month"], horizontal=True,
+            view = st.radio("View", ["▦ Grid", "📋 List", "🗓️ Month"], horizontal=True,
                             key="up_view", label_visibility="collapsed")
         st.divider()
         if view == "🗓️ Month":
@@ -1724,7 +1750,7 @@ def render_catch_up(rows):
         st.markdown(f"**{total} episode{'s' if total != 1 else ''} to catch up on "
                     f"across {len(avail)} show{'s' if len(avail) != 1 else ''}**")
     with hc[1]:
-        cu_view = st.radio("View", ["📋 List", "▦ Grid"], horizontal=True,
+        cu_view = st.radio("View", ["▦ Grid", "📋 List"], horizontal=True,
                            key="cu_view", label_visibility="collapsed")
 
     def _cu_remove(r):
@@ -1743,6 +1769,9 @@ def render_catch_up(rows):
                         clickable_poster(r['tmdb_id'], r.get("poster_path"))
                         clickable_title(r['title'], r)
                         st.caption(f":blue[**{n} to watch**]")
+                        _sl = _service_label(r)
+                        if _sl:
+                            st.caption(_sl)
                         _ov = _overview_text(r, 170)
                         if _ov:
                             st.caption(_ov)
@@ -1755,6 +1784,9 @@ def render_catch_up(rows):
             with c[1]:
                 clickable_title(r['title'], r)
                 st.caption(f":blue[**{n} to watch**]")
+                _sl = _service_label(r)
+                if _sl:
+                    st.caption(_sl)
                 _ov = _overview_text(r)
                 if _ov:
                     st.caption(_ov)
