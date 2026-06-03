@@ -146,7 +146,7 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
             with c[1]:
                 st.markdown(f"**{s['title']}** ({s['year']})  ⭐ {s['vote']:.1f}")
                 if s["overview"]:
-                    st.caption(s["overview"][:160])
+                    st.caption(s["overview"])
                 _provider_chips(stream_providers(s["tmdb_id"], region))
             with c[2]:
                 if int(s["tmdb_id"]) in owned:

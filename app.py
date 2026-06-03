@@ -1408,13 +1408,11 @@ def _episode_event(r, d):
 
 
 def _overview_text(r, limit=220) -> str:
-    """Truncated series description for list/grid rows ('' for sports / sparse rows)."""
+    """Full series description for list/grid rows ('' for sports / sparse rows)."""
     if (r.get("tmdb_id") or 0) < 0:
         return ""
     ov = (r.get("overview") or "").strip()
-    if len(ov) < 20:
-        return ""
-    return ov if len(ov) <= limit else ov[:limit].rstrip() + "…"
+    return ov if len(ov) >= 20 else ""
 
 
 def _service_label(r) -> str:
@@ -1425,7 +1423,26 @@ def _service_label(r) -> str:
     prov = normalize_provider_name(r.get("provider_name") or "")
     if not prov or prov in ("Multiple Providers", "Multiple"):
         return ""
-    return f"📺 {prov}"
+    return prov
+
+
+def _render_service_logo(r) -> None:
+    """Where to watch — the streaming service's actual logo (name fallback). No generic
+    TV icon. Sports rows are handled separately by _broadcast_info."""
+    if (r.get("tmdb_id") or 0) < 0:
+        return
+    prov = _service_label(r)
+    if not prov:
+        return
+    url = provider_logo_url(prov)
+    if url:
+        st.markdown(
+            f'<img src="{url}" title="{prov}" alt="{prov}" '
+            f'style="height:24px;border-radius:5px;vertical-align:middle">'
+            f'&nbsp;<span style="font-size:.82rem;opacity:.85">{prov}</span>',
+            unsafe_allow_html=True)
+    else:
+        st.caption(prov)
 
 
 def render_upcoming(rows, as_tab=False):
@@ -1498,9 +1515,7 @@ def render_upcoming(rows, as_tab=False):
                 st.caption(f"⏳ next: {ep}")
             else:
                 st.caption("⏳ no episode scheduled yet")
-            _sl = _service_label(r)
-            if _sl:
-                st.caption(_sl)
+            _render_service_logo(r)
             _sc = _sports_context(r)
             if _sc:
                 st.caption(_sc)
@@ -1548,9 +1563,7 @@ def render_upcoming(rows, as_tab=False):
                             st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
                         elif ep:
                             st.caption(f"⏳ {ep}")
-                        _sl = _service_label(r)
-                        if _sl:
-                            st.caption(_sl)
+                        _render_service_logo(r)
                         _sc = _sports_context(r)
                         if _sc:
                             st.caption(_sc)
@@ -1772,9 +1785,7 @@ def render_catch_up(rows):
                         clickable_poster(r['tmdb_id'], r.get("poster_path"))
                         clickable_title(r['title'], r)
                         st.caption(f":blue[**{n} to watch**]")
-                        _sl = _service_label(r)
-                        if _sl:
-                            st.caption(_sl)
+                        _render_service_logo(r)
                         _ov = _overview_text(r, 170)
                         if _ov:
                             st.caption(_ov)
@@ -1787,9 +1798,7 @@ def render_catch_up(rows):
             with c[1]:
                 clickable_title(r['title'], r)
                 st.caption(f":blue[**{n} to watch**]")
-                _sl = _service_label(r)
-                if _sl:
-                    st.caption(_sl)
+                _render_service_logo(r)
                 _ov = _overview_text(r)
                 if _ov:
                     st.caption(_ov)
@@ -3453,7 +3462,7 @@ with _main_new:
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
-                    st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+                    st.caption(overview)
                 render_provider_chips(get_stream_providers(tmdb_id, region))
 
             # Date
@@ -3504,7 +3513,7 @@ with _main_trending:
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
-                    st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+                    st.caption(overview)
                 render_provider_chips(get_stream_providers(tmdb_id, region))
 
             # Date/status
@@ -3556,7 +3565,7 @@ with _main_top:
                 if vote_average:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
-                    st.caption(overview[:80] + "..." if len(overview) > 80 else overview)
+                    st.caption(overview)
                 render_provider_chips(get_stream_providers(tmdb_id, region))
 
             # Date/year
