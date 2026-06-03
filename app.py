@@ -859,6 +859,21 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 f'{_logo_img(ng.get("home_logo"), 120)}<b>{ng["home"]}</b>'
                 f'<span style="opacity:.8">&nbsp;— {ng["date"]}{_net}</span></div>',
                 unsafe_allow_html=True)
+            # Pre-game context: both records, venue, head-to-head series
+            _ins = sports.game_insight(league, ng.get("id"))
+            if _ins:
+                _ts = sorted(_ins.get("teams", []), key=lambda t: t.get("home", False))  # away first
+                _recs = " @ ".join(f'{(t.get("abbrev") or t.get("name") or "")} ({t["record"]})'
+                                   for t in _ts if t.get("record"))
+                _meta = []
+                if _recs:
+                    _meta.append(f"📊 {_recs}")
+                if _ins.get("venue"):
+                    _meta.append(f'📍 {_ins["venue"]}')
+                if _meta:
+                    st.caption(" · ".join(_meta))
+                if _ins.get("series"):
+                    st.caption(f'🔁 {_ins["series"]}')
         if client is not None:
             def _rm():
                 delete_show(client, show.get("tmdb_id"), show.get("region") or DEFAULT_REGION,

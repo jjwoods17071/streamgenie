@@ -143,6 +143,7 @@ def get_team_schedule(league: str, team_id: str):
             net = ", ".join(bc[0].get("names", [])) if bc else ""
             wk = e.get("week") or {}
             games.append({
+                "id": e.get("id"),
                 "date": (e.get("date") or "")[:10],
                 "datetime": e.get("date") or "",
                 "home": (home.get("team") or {}).get("displayName"),
@@ -189,6 +190,50 @@ def record(games, team_name):
 
 def record_str(league: str, w: int, l: int, d: int) -> str:
     return f"{w}-{d}-{l}" if league in SOCCER else f"{w}-{l}"
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def game_insight(league: str, event_id):
+    """Pre-game context for a matchup from ESPN's event summary: both teams' records,
+    the head-to-head season series, and the venue. Returns a small dict or None."""
+    if not event_id:
+        return None
+    try:
+        sp, lg = LEAGUES[league][0], LEAGUES[league][1]
+        d = requests.get(f"{_BASE}/{sp}/{lg}/summary",
+                         params={"event": event_id}, headers=_UA, timeout=20).json()
+        out = {}
+        comp = ((d.get("header") or {}).get("competitions") or [{}])[0]
+        teams = []
+        for cz in comp.get("competitors", []):
+            t = cz.get("team") or {}
+            recs = cz.get("record") or []
+            overall = None
+            for r in recs:
+                if (r.get("type") or r.get("name") or "").lower() in ("total", "overall"):
+                    overall = r.get("summary")
+                    break
+            if not overall and recs:
+                overall = recs[0].get("summary")
+            teams.append({"name": t.get("displayName"), "abbrev": t.get("abbreviation"),
+                          "home": cz.get("homeAway") == "home", "record": overall,
+                          "logo": (t.get("logos") or [{}])[0].get("href") or t.get("logo")})
+        out["teams"] = teams
+        # Head-to-head series — prefer a season-long entry, else the current set
+        ss = d.get("seasonseries") or []
+        chosen = None
+        for s in ss:
+            if "season" in (s.get("type") or "").lower():
+                chosen = s
+                break
+        chosen = chosen or (ss[0] if ss else None)
+        if chosen:
+            out["series"] = chosen.get("summary")
+            out["series_title"] = chosen.get("title") or "Series"
+        out["venue"] = ((d.get("gameInfo") or {}).get("venue") or {}).get("fullName")
+        return out if (teams or out.get("series")) else None
+    except Exception:
+        return None
 
 
 # ---------------- Event-model series (F1 / golf / UFC / tennis) ----------------
