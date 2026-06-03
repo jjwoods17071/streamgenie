@@ -827,6 +827,9 @@ def open_show_page(show: Dict[str, Any]) -> None:
     sid = show.get("tmdb_id")
     st.session_state.setdefault("_showcache", {})[sid] = show
     st.query_params["show"] = str(sid)
+    # Force the detail panel to scroll into focus on every open (cleared so the
+    # EOF panel's 'scroll only on new show' guard always fires for a fresh click).
+    st.session_state["_pdp_scrolled"] = None
 
 
 def close_show_page() -> None:
@@ -3236,8 +3239,8 @@ if "show" in st.query_params:
 _dismissed_ids = dismissed.get_dismissed(client, get_user_id())
 _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
 
-def _add_discovered(tmdb_id, title, overview, poster_path):
-    upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, "Multiple Providers")
+def _add_discovered(tmdb_id, title, overview, poster_path, provider="Multiple Providers"):
+    upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, provider or "Multiple Providers")
 
 (_main_upcoming, _main_catchup, _main_watch, _main_new, _main_trending,
  _main_top, _main_grow, _main_search) = st.tabs([
@@ -3463,7 +3466,8 @@ with _main_new:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview)
-                render_provider_chips(get_stream_providers(tmdb_id, region))
+                _provs = get_stream_providers(tmdb_id, region)
+                render_provider_chips(_provs)
 
             # Date
             with cols[2]:
@@ -3475,7 +3479,7 @@ with _main_new:
             with cols[3]:
                 if st.button(f"{ICONS['add']}", key=f"new_show_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
-                        upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
+                        upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, (_provs[0] if _provs else "Multiple Providers"))
                         st.success(f"Added!")
                         st.rerun()
                     except Exception as e:
@@ -3514,7 +3518,8 @@ with _main_trending:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview)
-                render_provider_chips(get_stream_providers(tmdb_id, region))
+                _provs = get_stream_providers(tmdb_id, region)
+                render_provider_chips(_provs)
 
             # Date/status
             with cols[2]:
@@ -3527,7 +3532,7 @@ with _main_trending:
             with cols[3]:
                 if st.button(f"{ICONS['add']}", key=f"trending_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
-                        upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
+                        upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, (_provs[0] if _provs else "Multiple Providers"))
                         st.success(f"Added!")
                         st.rerun()
                     except Exception as e:
@@ -3566,7 +3571,8 @@ with _main_top:
                     st.caption(f"{ICONS['star']} {vote_average:.1f}/10")
                 if overview:
                     st.caption(overview)
-                render_provider_chips(get_stream_providers(tmdb_id, region))
+                _provs = get_stream_providers(tmdb_id, region)
+                render_provider_chips(_provs)
 
             # Date/year
             with cols[2]:
@@ -3579,7 +3585,7 @@ with _main_top:
             with cols[3]:
                 if st.button(f"{ICONS['add']}", key=f"toprated_{tmdb_id}", use_container_width=True, type="primary", help="Add to watchlist"):
                     try:
-                        upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, "Multiple Providers")
+                        upsert_show(client, tmdb_id, title, region, False, first_air, overview, poster_path, (_provs[0] if _provs else "Multiple Providers"))
                         st.success(f"Added!")
                         st.rerun()
                     except Exception as e:
@@ -3848,8 +3854,9 @@ if _pdp_open_sid is not None:
     if st.session_state.get("_pdp_scrolled") != _pdp_open_sid:
         st.session_state["_pdp_scrolled"] = _pdp_open_sid
         components.html(
-            "<script>setTimeout(function(){try{"
+            "<script>(function(){function go(n){try{"
             "var a=window.parent.document.getElementById('pdp-anchor');"
             "if(a){a.scrollIntoView({behavior:'smooth',block:'start'});}"
-            "}catch(e){}},150);</script>",
+            "else if(n>0){setTimeout(function(){go(n-1);},120);}"
+            "}catch(e){}}setTimeout(function(){go(8);},120);})();</script>",
             height=0)

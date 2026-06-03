@@ -153,10 +153,12 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
                     st.markdown(":blue[✓ In your list]")
                 else:
                     # on_click keeps the results in place; the show flips to blue after adding
+                    _pv = stream_providers(s["tmdb_id"], region)
+                    _pname = _pv[0][0] if _pv else "Multiple Providers"
                     st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
                               type="primary",
                               on_click=add_fn,
-                              args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"]))
+                              args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"], _pname))
 
 
 # ---------------- Netflix history import ----------------
@@ -280,7 +282,7 @@ def render_netflix_import(watchlist_ids: Set[int], add_fn: Callable) -> None:
         n = 0
         for m in returning:
             try:
-                add_fn(m["tmdb_id"], m["title"], m["overview"], m["poster_path"])
+                add_fn(m["tmdb_id"], m["title"], m["overview"], m["poster_path"], "Netflix")
                 n += 1
             except Exception:
                 pass
