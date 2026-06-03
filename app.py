@@ -2320,13 +2320,13 @@ button[title="View fullscreen"]{display:none !important;}
 [data-testid="stHeaderActionElements"]{display:none !important;}
 .stMarkdown h1 > a, .stMarkdown h2 > a, .stMarkdown h3 > a,
 .stMarkdown h4 > a, .stMarkdown h5 > a, .stMarkdown h6 > a{display:none !important;}
-/* TEST: zero out the top/header buffer whitespace */
+/* TEST: collapse the top/header buffer but KEEP the hamburger menu */
 .block-container{padding-top:0 !important;}
 [data-testid="stAppViewBlockContainer"]{padding-top:0 !important;}
-header[data-testid="stHeader"]{height:0 !important;display:none !important;}
-[data-testid="stToolbar"]{display:none !important;}
-[data-testid="stDecoration"]{display:none !important;}
 [data-testid="stMainBlockContainer"]{padding-top:0 !important;}
+/* header keeps the hamburger (top-right) but no longer reserves vertical space */
+header[data-testid="stHeader"]{height:0 !important;background:transparent !important;overflow:visible !important;}
+[data-testid="stDecoration"]{display:none !important;}
 /* drop the top margin on the very first element in the page body */
 [data-testid="stAppViewBlockContainer"] > div:first-child,
 .block-container > div:first-child{margin-top:0 !important;padding-top:0 !important;}
