@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import datetime as dt
+import re
 from zoneinfo import ZoneInfo
 import requests
 import streamlit as st
@@ -531,6 +532,16 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None, o
     _render_season_episodes(tv_id, sel, key_prefix, client, user_id)
 
 
+_SPORTS_TITLE_RE = re.compile(
+    r"\b(nfl|nba|mlb|nhl|wnba|ncaa|college football|football|baseball|basketball|hockey|soccer|"
+    r"sportscenter|monday night|sunday night|thursday night|ufc|mma|boxing|nascar|"
+    r"formula\s?1|grand prix|golf|pga|tennis|atp|wta|wwe|wrestling|premier league|"
+    r"champions league|world cup|olympic|game ?day|game of the week)\b", re.I)
+
+def _looks_like_sports(name: str) -> bool:
+    return bool(_SPORTS_TITLE_RE.search(name or ""))
+
+
 def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, user_id=None) -> None:
     """Episode list (with optional watched tracking) for one selected season."""
     eps = get_season_episodes(tv_id, sel)
@@ -540,9 +551,17 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
         eps = get_tvmaze_season_episodes(tv_id, sel)
         _from_tvmaze = bool(eps)
     if not eps:
-        st.info(":material/info: No episode list available for this season yet — neither TMDB "
-                "nor TVmaze has it catalogued. (Common for **live sports**, daily/news shows, and "
-                "some unscripted titles, where individual episodes aren't tracked.)")
+        _nm = (get_show_meta(tv_id) or {}).get("name") or ""
+        if _looks_like_sports(_nm):
+            st.info("📡 **This looks like live sports.** Individual games aren't catalogued as "
+                    "episodes — so there's no episode guide here. To follow it properly, open "
+                    "**🌱 Grow Watchlist → 🏈 Follow Your Sports Teams** and add the team(s). "
+                    "You'll get their full schedule, records, win‑probability & series context, "
+                    "and game reminders right in your **Upcoming** list and calendar.")
+        else:
+            st.info(":material/info: No episode list available for this season yet — neither TMDB "
+                    "nor TVmaze has it catalogued. (Common for daily/news shows and some unscripted "
+                    "titles, where individual episodes aren't tracked.)")
         return
 
     # Enrich from TVmaze (cached per show) when TMDB is missing an overview or a still image.
