@@ -990,9 +990,10 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                             show.get("poster_path"), "Multiple Providers")
             st.button(":material/add: Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary", on_click=_pdp_add)
 
-    ov = (meta.get("overview") or show.get("overview") or "").strip()
-    if ov:
-        st.markdown(ov)
+        # Description sits beside the poster, under the add/remove button
+        ov = (meta.get("overview") or show.get("overview") or "").strip()
+        if ov:
+            st.markdown(ov)
 
     st.divider()
     seasons = meta.get("seasons") or []
