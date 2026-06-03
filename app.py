@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import datetime as dt
+from zoneinfo import ZoneInfo
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -45,6 +46,33 @@ def get_user_id() -> str:
     """Get the current user ID (authenticated user or default)"""
     user_id = auth.get_user_id()
     return user_id if user_id else DEFAULT_USER_ID
+
+
+_DEFAULT_TZ = "America/New_York"
+
+def _user_tz_name() -> str:
+    """The user's timezone (from notification prefs), cached per session. Defaults to
+    US Eastern. Used so 'today' reflects the USER's date, not the server's UTC date
+    (Streamlit Cloud runs in UTC, which flips to tomorrow in the evening US-time)."""
+    tz = st.session_state.get("_user_tz")
+    if tz:
+        return tz
+    tz = _DEFAULT_TZ
+    try:
+        prefs = preferences.get_user_preferences(client, get_user_id())
+        if prefs and prefs.get("timezone"):
+            tz = prefs["timezone"]
+    except Exception:
+        pass
+    st.session_state["_user_tz"] = tz
+    return tz
+
+def local_today() -> dt.date:
+    """Today's date in the user's timezone (not the server's UTC)."""
+    try:
+        return dt.datetime.now(ZoneInfo(_user_tz_name())).date()
+    except Exception:
+        return dt.datetime.now(ZoneInfo(_DEFAULT_TZ)).date()
 
 # --------------- MATERIAL ICONS MAPPING ---------------
 # Streamlit Material Icons for a modern, professional look
@@ -353,7 +381,7 @@ def get_tvmaze_episode_data(tv_id:int) -> Dict[Any, Dict[str, str]]:
 
 def _availability_line(d: Dict[str, Any]) -> str:
     """One-line availability/status summary from show metadata (markdown)."""
-    today = dt.date.today()
+    today = local_today()
     status = d.get("status") or ""
     nseasons = d.get("number_of_seasons") or 0
     neps = d.get("number_of_episodes") or 0
@@ -461,7 +489,7 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
     _need_tvmaze = any((not (e.get("overview") or "").strip()) or (not e.get("still_path")) for e in eps)
     _tvmaze = get_tvmaze_episode_data(tv_id) if _need_tvmaze else {}
 
-    today = dt.date.today()
+    today = local_today()
     track = bool(client is not None and user_id and watched.table_available(client))
     wset = watched.get_watched(client, user_id, tv_id) if track else set()
     # Checkbox widgets keep their own state by key, ignoring value= on rerun. Bump this
@@ -566,7 +594,7 @@ def render_show_row(r, view_mode, client, wcounts):
             if next_air_date:
                 try:
                     air_date = dt.date.fromisoformat(next_air_date)
-                    days = (air_date - dt.date.today()).days
+                    days = (air_date - local_today()).days
                     ep_label = ""
                     if days >= 0:
                         ne = get_next_episode(r["tmdb_id"])
@@ -620,7 +648,7 @@ def render_show_row(r, view_mode, client, wcounts):
             if next_air_date:
                 try:
                     air_date = dt.date.fromisoformat(next_air_date)
-                    days = (air_date - dt.date.today()).days
+                    days = (air_date - local_today()).days
                     ep_label = ""
                     if days >= 0:
                         ne = get_next_episode(r["tmdb_id"])
@@ -667,7 +695,7 @@ def _current_season(meta: Dict[str, Any]):
     nxt = meta.get("next_episode_to_air")
     if isinstance(nxt, dict) and nxt.get("season_number"):
         return nxt["season_number"]
-    today = dt.date.today().isoformat()
+    today = local_today().isoformat()
     aired = [s for s in seasons if (s.get("air_date") or "0000") <= today and (s.get("episode_count") or 0) > 0]
     if aired:
         return max(s["season_number"] for s in aired)
@@ -742,7 +770,7 @@ def _render_event_series(show: Dict[str, Any], league: str, client=None) -> None
     sched = sports.get_event_schedule(league)
     cur = sched.get("current")
     events = sched.get("events") or []
-    today = dt.date.today().isoformat()
+    today = local_today().isoformat()
 
     hc = st.columns([1, 3])
     with hc[0]:
@@ -871,7 +899,7 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             st.caption(g.get("status") or ("Final" if g.get("completed") else "Scheduled"))
         st.markdown("<hr style='margin:2px 0;opacity:0.15'>", unsafe_allow_html=True)
 
-    today = dt.date.today().isoformat()
+    today = local_today().isoformat()
     upcoming = [g for g in games if (g.get("date") or "") >= today and not g.get("completed")]
     recent = [g for g in games if g.get("completed")]
 
@@ -1094,7 +1122,7 @@ def show_status_chip(r) -> str:
 def render_grid_gallery(rows, client, wcounts, per_row=5):
     """True poster-tile gallery for the grid view (vs. the detailed list rows).
     Each card's title is a button that opens the full show-detail page (PDP)."""
-    today = dt.date.today()
+    today = local_today()
     for i in range(0, len(rows), per_row):
         cols = st.columns(per_row)
         for j, r in enumerate(rows[i:i + per_row]):
@@ -1197,7 +1225,7 @@ def render_upcoming(rows, as_tab=False):
     (default) or a month grid, with per-episode calendar export (Google link + .ics +
     reminders) and a bulk schedule download. (Catch-up / released-but-unwatched lives in
     its own tab now.) When as_tab=False it stays a compact agenda expander."""
-    today = dt.date.today()
+    today = local_today()
     up = []                       # (date, row) with a scheduled upcoming episode
     up_by_id = {}
     for r in rows:
@@ -1456,7 +1484,7 @@ def discover_next_air_date(details:Dict[str, Any]) -> Optional[str]:
         return nxt["air_date"]
     # Fallback: check upcoming season episodes (rough heuristic)
     # Inspect last and next seasons for any episodes with air_date >= today
-    today = dt.date.today()
+    today = local_today()
     for season in details.get("seasons", []) or []:
         season_number = season.get("season_number")
         if season_number is None:
@@ -1481,7 +1509,7 @@ def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List
     Check for stale next_air_date values (in the past) and refresh them from TMDB.
     Updates database and returns updated show list.
     """
-    today = dt.date.today()
+    today = local_today()
     updated_shows = []
 
     for show in shows:
@@ -1533,7 +1561,7 @@ def get_new_shows(region: str = "US", limit: int = 10) -> List[Dict[str, Any]]:
     Returns shows with air dates and available on streaming in the region.
     """
     try:
-        today = dt.date.today()
+        today = local_today()
         thirty_days_ago = today - dt.timedelta(days=30)
 
         # Use TMDB discover to find recently premiered shows
@@ -1562,7 +1590,7 @@ def get_coming_soon_shows(region: str = "US", limit: int = 10) -> List[Dict[str,
     Returns shows that are coming soon with specific air dates.
     """
     try:
-        today = dt.date.today()
+        today = local_today()
         six_months_from_now = today + dt.timedelta(days=180)
 
         # Use TMDB discover to find upcoming shows
@@ -1898,7 +1926,7 @@ def check_and_send_daily_reminders(user_email: str, client: Client):
     if not user_email:
         return 0
 
-    today = dt.date.today().isoformat()
+    today = local_today().isoformat()
     user_id = get_user_id()
 
     # Get all shows airing today
@@ -1943,7 +1971,7 @@ def format_status(on_provider:bool, next_air_date:Optional[str], provider_name:s
     if next_air_date:
         try:
             d = dt.date.fromisoformat(next_air_date)
-            days = (d - dt.date.today()).days
+            days = (d - local_today()).days
             when = "today" if days == 0 else (f"in {days} days" if days > 0 else f"{abs(days)} days ago")
             return f"{badge} · Next episode: {next_air_date} ({when})"
         except Exception:
@@ -2240,7 +2268,7 @@ if show_settings:
                             user_email=user_email,
                             show_title="Test Show",
                             provider_name="Netflix",
-                            next_air_date=dt.date.today().isoformat(),
+                            next_air_date=local_today().isoformat(),
                             poster_path=None
                         )
                         if success:
@@ -2793,7 +2821,7 @@ with _main_search:
                     if next_air:
                         try:
                             _d = dt.date.fromisoformat(next_air)
-                            _days = (_d - dt.date.today()).days
+                            _days = (_d - local_today()).days
                             _when = "today" if _days == 0 else (f"in {_days} days" if _days > 0 else f"{abs(_days)} days ago")
                             st.caption(f"📅 Next episode: {next_air} ({_when})")
                         except Exception:
