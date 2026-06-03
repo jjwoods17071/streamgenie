@@ -1190,11 +1190,19 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
             _generic = _prov in ("", "Multiple Providers", "Multiple")
             if _generic:
                 # No specific service was stored — fall back to TMDB's "where to watch" so the
-                # detail panel still tells the user where it streams.
+                # detail panel still tells the user where it streams, and let them pin the one
+                # app they'll actually use (they may subscribe to several).
                 _tmdb_provs = get_stream_providers(tmdb_id, wl_row.get("region") or DEFAULT_REGION)
                 if _tmdb_provs:
                     st.markdown("✓ On your watchlist  ·  Watch on:")
                     render_provider_chips(_tmdb_provs, height=110)
+                    with st.popover("📌 Set the app you'll use"):
+                        _pick = st.selectbox("Which app will you watch on?", _tmdb_provs,
+                                             key=f"pdp_setprov_{tmdb_id}")
+                        if st.button("Save", key=f"pdp_setprov_btn_{tmdb_id}", type="primary"):
+                            client.table("shows").update({"provider_name": _pick})\
+                                .eq("user_id", user_id).eq("tmdb_id", tmdb_id).execute()
+                            st.rerun()
                 else:
                     st.caption("✓ On your watchlist")
             else:
@@ -1214,13 +1222,23 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 st.query_params.clear()   # back to the list after removing
             st.button(":material/delete: Remove from watchlist", key=f"pdp_del_{tmdb_id}", on_click=_pdp_remove)
         elif client is not None:
-            def _pdp_add():
+            # Ask which streaming service to record so the watchlist notes the app to open
+            # (the user may subscribe to several). Defaults to the first TMDB provider.
+            _add_provs = get_stream_providers(tmdb_id, DEFAULT_REGION)
+            if _add_provs:
+                _opts = _add_provs + ["Multiple Providers"]
+                _pick_add = st.selectbox("Which app will you watch on?", _opts,
+                                         key=f"pdp_addprov_{tmdb_id}",
+                                         help="Recorded on your watchlist so you know where to watch")
+            else:
+                _pick_add = "Multiple Providers"
+            if st.button(":material/add: Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary"):
                 _nxt = meta.get("next_episode_to_air")
                 _nad = _nxt.get("air_date") if isinstance(_nxt, dict) else None
                 upsert_show(client, tmdb_id, title, DEFAULT_REGION, True, _nad,
                             (meta.get("overview") or show.get("overview") or ""),
-                            show.get("poster_path"), "Multiple Providers")
-            st.button(":material/add: Add to watchlist", key=f"pdp_add_{tmdb_id}", type="primary", on_click=_pdp_add)
+                            show.get("poster_path"), _pick_add)
+                st.rerun()
 
         # Description sits beside the poster, under the add/remove button
         ov = (meta.get("overview") or show.get("overview") or "").strip()
