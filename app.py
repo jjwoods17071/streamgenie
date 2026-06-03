@@ -1475,12 +1475,49 @@ def render_upcoming(rows, as_tab=False):
 
     def _month_grid():
         import calendar as _cal
+        # Build day → [items]. Followed sports TEAMS are expanded into their FULL upcoming
+        # schedule (every game), so the calendar shows all their games — not just the next one.
         by_date = {}
+        _sports_team_ids = set()
+        for r in rows:
+            tid = r.get("tmdb_id")
+            if tid and tid < 0:
+                league, team_id = sports.decode_id(tid)
+                if league and not sports.is_event_league(league):
+                    _sports_team_ids.add(tid)
+                    nm = r.get("title")
+                    try:
+                        games = sports.get_team_schedule(league, team_id)
+                    except Exception:
+                        games = []
+                    for g in games:
+                        gd = g.get("date")
+                        if not gd or g.get("completed"):
+                            continue
+                        try:
+                            d = dt.date.fromisoformat(gd)
+                        except Exception:
+                            continue
+                        if d < today:
+                            continue
+                        if g.get("home") == nm:
+                            lbl = f"vs {g.get('away', '')}"
+                        elif g.get("away") == nm:
+                            lbl = f"@ {g.get('home', '')}"
+                        else:
+                            lbl = "game"
+                        by_date.setdefault(d, []).append({"r": r, "label": lbl})
+        # Everything else (TV next-episodes + event-series) — one entry on its date from `up`
         for d, r in up:
-            by_date.setdefault(d, []).append(r)
+            if r.get("tmdb_id") not in _sports_team_ids:
+                by_date.setdefault(d, []).append({"r": r, "label": None})
+
+        if not by_date:
+            st.caption("Nothing scheduled.")
+            return
+        last_d = max(by_date.keys())
         months = []
         y, m = today.year, today.month
-        last_d = up[-1][0]
         while (y, m) <= (last_d.year, last_d.month):
             months.append((y, m))
             m, y = (1, y + 1) if m == 12 else (m + 1, y)
@@ -1511,16 +1548,19 @@ def render_upcoming(rows, as_tab=False):
                     daylabel = f"**{day.day}**" if is_today else (f"{day.day}" if in_month else f":gray[{day.day}]")
                     st.markdown(("🔵 " if is_today else "") + daylabel)
                     if in_month:
-                        for r in by_date.get(day, []):
+                        for _ix, item in enumerate(by_date.get(day, [])):
+                            r = item["r"]
                             tid = r.get("tmdb_id")
-                            ne = get_next_episode(tid) if (tid or 0) > 0 else None
-                            se = f"{ne['season']}×{ne['episode']}" if ne and ne.get("season") else ""
+                            lbl = item.get("label")
+                            if lbl is None:   # TV: show S×E if known, else the title
+                                ne = get_next_episode(tid) if (tid or 0) > 0 else None
+                                lbl = (f"{ne['season']}×{ne['episode']}"
+                                       if ne and ne.get("season") else r['title'][:10])
                             src = _poster_src(r.get("poster_path"))
                             if src:
-                                st.image(src, width=46)   # small show logo/poster
-                            label = se or (r['title'][:9] if not src else "▸ open")
-                            st.button(label, key=f"mo_{day.isoformat()}_{tid}",
-                                      help=f"{r['title']}{(' ' + se) if se else ''} — open",
+                                st.image(src, width=42)   # small show logo / team logo
+                            st.button(lbl[:14], key=f"mo_{day.isoformat()}_{tid}_{_ix}",
+                                      help=f"{r['title']} — {lbl}",
                                       on_click=open_show_page, args=(r,), use_container_width=True)
 
     if as_tab:
