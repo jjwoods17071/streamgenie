@@ -288,9 +288,13 @@ def game_insight(league: str, event_id):
             if res5:
                 w5, l5 = res5.count("W"), res5.count("L")
                 form = {"record": f"{w5}-{l5}", "seq": "".join(r[:1] for r in res5)}
+            _col = (t.get("color") or "").lstrip("#")
+            _alt = (t.get("alternateColor") or "").lstrip("#")
             teams.append({"id": tid, "name": t.get("displayName"), "abbrev": t.get("abbreviation"),
                           "home": cz.get("homeAway") == "home", "record": overall,
                           "logo": (t.get("logos") or [{}])[0].get("href") or t.get("logo"),
+                          "color": f"#{_col}" if _col else None,
+                          "alt_color": f"#{_alt}" if _alt else None,
                           "win_pct": proj.get(tid), "rank": sd.get("rank"),
                           "division": sd.get("division"), "gb": sd.get("gb"),
                           "streak": sd.get("streak"), "pitcher": pitcher, "form": form,
@@ -307,7 +311,39 @@ def game_insight(league: str, event_id):
         if chosen:
             out["series"] = chosen.get("summary")
             out["series_title"] = chosen.get("title") or "Series"
-        out["venue"] = ((d.get("gameInfo") or {}).get("venue") or {}).get("fullName")
+
+        # Matchup/series title (the 'S5E1' analog): a playoff series state if present,
+        # else the season-series record summary. comp["series"] may be a dict or a list.
+        _pser = comp.get("series")
+        if isinstance(_pser, list):
+            _pser = _pser[0] if _pser else {}
+        _pser = _pser or {}
+        out["matchup_title"] = (_pser.get("summary") or _pser.get("title")
+                                or out.get("series"))
+
+        # Broadcast network (ESPN / TNT / ABC / Apple TV+ …) — mirror the streaming logo slot
+        network = None
+        for b in (comp.get("broadcasts") or d.get("broadcasts") or []):
+            if isinstance(b, dict):
+                network = ((b.get("media") or {}).get("shortName")
+                           or (b.get("names") or [None])[0]
+                           or b.get("shortName") or b.get("name"))
+            elif isinstance(b, str):
+                network = b
+            if network:
+                break
+        out["broadcast"] = network
+
+        # Venue + weather (weather is generally only present for outdoor games)
+        gi = d.get("gameInfo") or {}
+        ven = gi.get("venue") or {}
+        out["venue"] = ven.get("fullName")
+        _addr = ven.get("address") or {}
+        out["venue_city"] = ", ".join(x for x in (_addr.get("city"), _addr.get("state")) if x) or None
+        wx = gi.get("weather") or {}
+        if wx:
+            out["weather"] = {"temp": wx.get("temperature") or wx.get("highTemperature"),
+                              "summary": (wx.get("displayValue") or "").strip()}
         return out if (teams or out.get("series")) else None
     except Exception:
         return None

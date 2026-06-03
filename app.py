@@ -1606,8 +1606,10 @@ def render_upcoming(rows, as_tab=False):
                 with cols[j]:
                     with st.container(border=True):
                         tid = r.get("tmdb_id")
+                        _hero = False
                         if (tid or 0) < 0:
-                            if not _render_sports_hero(r):
+                            _hero = _render_sports_hero(r)
+                            if not _hero:
                                 clickable_poster(tid, r.get("poster_path"))
                         else:
                             clickable_poster(tid, r.get("poster_path"))
@@ -1621,10 +1623,11 @@ def render_upcoming(rows, as_tab=False):
                             st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
                         elif ep:
                             st.caption(f"⏳ {ep}")
-                        _render_service_logo(r)
-                        _sc = _sports_context(r)
-                        if _sc:
-                            st.caption(_sc)
+                        if not _hero:   # the hero card already carries service/records/win-prob
+                            _render_service_logo(r)
+                            _sc = _sports_context(r)
+                            if _sc:
+                                st.caption(_sc)
                         _ov = _overview_text(r, 170)
                         if _ov:
                             st.caption(_ov)
@@ -2184,28 +2187,90 @@ def _render_sports_hero(r) -> bool:
     if not any((t.get("player") or {}).get("headshot") for t in ts):
         return False
 
+    def _team_col(t, fallback):
+        c = (t.get("color") or "").strip()
+        return c if (c and c.lower() not in ("#ffffff", "#fff")) else fallback
+
     def _card(t):
         p = t.get("player") or {}
         hs = p.get("headshot")
-        img = (f'<img src="{hs}" style="height:78px;width:78px;border-radius:50%;object-fit:cover;'
+        logo = t.get("logo")
+        logo_html = (f'<img src="{logo}" style="height:24px;object-fit:contain;margin-bottom:2px">'
+                     if logo else "")
+        img = (f'<img src="{hs}" style="height:74px;width:74px;border-radius:50%;object-fit:cover;'
                f'background:#f1f5f9;border:2px solid #cbd5e1">' if hs
-               else f'<img src="{t.get("logo")}" style="height:62px;object-fit:contain">')
+               else f'<img src="{logo}" style="height:60px;object-fit:contain">')
         parts = (p.get("name") or "").split()
         short = f"{parts[0][0]}. {parts[-1]}" if len(parts) > 1 else (parts[0] if parts else "")
-        return (f'<div style="text-align:center;flex:1">{img}'
-                f'<div style="font-size:.72rem;font-weight:800;margin-top:3px;color:#0f172a">{t.get("abbrev") or ""}</div>'
+        rec = f' · {t.get("record")}' if t.get("record") else ""
+        return (f'<div style="text-align:center;flex:1">{logo_html}<div>{img}</div>'
+                f'<div style="font-size:.72rem;font-weight:800;margin-top:3px;color:#0f172a">'
+                f'{t.get("abbrev") or ""}<span style="font-weight:500;color:#64748b">{rec}</span></div>'
                 f'<div style="font-size:.66rem;color:#1e293b">{short}</div>'
                 f'<div style="font-size:.6rem;color:#64748b">{p.get("note") or ""}</div></div>')
 
     away = ts[0]
     home = ts[1] if len(ts) > 1 else None
+    ac = _team_col(away, "#475569")
+    hc = _team_col(home, "#94a3b8") if home else "#94a3b8"
+
     inner = _card(away) + (
         '<div style="align-self:center;font-weight:800;color:#94a3b8;padding:0 4px">vs</div>' + _card(home)
         if home else "")
+
+    # Top color bar (away | home team colors)
+    bar = (f'<div style="display:flex;height:6px;border-radius:6px 6px 0 0;overflow:hidden">'
+           f'<div style="flex:1;background:{ac}"></div><div style="flex:1;background:{hc}"></div></div>')
+
+    # Matchup/series title (the 'S5E1' analog)
+    mt = (ins or {}).get("matchup_title")
+    title_html = (f'<div style="text-align:center;font-size:.66rem;font-weight:700;letter-spacing:.03em;'
+                  f'color:#475569;text-transform:uppercase;margin:6px 0 2px">{mt}</div>' if mt else "")
+
+    # Win-probability bar (two-color split in team colors)
+    aw, hw = away.get("win_pct"), (home.get("win_pct") if home else None)
+    if aw is None and hw is not None:
+        aw = 100 - hw
+    if hw is None and aw is not None:
+        hw = 100 - aw
+    wp_html = ""
+    if aw is not None and hw is not None and home:
+        wp_html = (
+            f'<div style="margin-top:8px"><div style="display:flex;justify-content:space-between;'
+            f'font-size:.6rem;color:#475569;margin-bottom:1px"><span>{away.get("abbrev")} {aw}%</span>'
+            f'<span>🔮 win prob</span><span>{hw}% {home.get("abbrev")}</span></div>'
+            f'<div style="display:flex;height:8px;border-radius:5px;overflow:hidden">'
+            f'<div style="width:{aw}%;background:{ac}"></div>'
+            f'<div style="width:{hw}%;background:{hc}"></div></div></div>')
+
+    # Footer: venue · weather · broadcast network (logo if we have one, else a badge)
+    foot_bits = []
+    if (ins or {}).get("venue"):
+        foot_bits.append(f'📍 {ins["venue"]}')
+    wx = (ins or {}).get("weather") or {}
+    if wx.get("temp") is not None:
+        foot_bits.append(f'🌤️ {wx["temp"]}°F' + (f' {wx["summary"]}' if wx.get("summary") else ""))
+    foot = ("<div style='font-size:.6rem;color:#64748b;text-align:center;margin-top:6px'>"
+            + "  ·  ".join(foot_bits) + "</div>") if foot_bits else ""
+
+    net = (ins or {}).get("broadcast")
+    net_html = ""
+    if net:
+        _nl = provider_logo_url(net)
+        if _nl:
+            net_html = (f'<div style="text-align:center;margin-top:5px">'
+                        f'<img src="{_nl}" title="{net}" style="height:20px;border-radius:4px;'
+                        f'vertical-align:middle"> <span style="font-size:.6rem;color:#64748b">Watch on {net}</span></div>')
+        else:
+            net_html = (f'<div style="text-align:center;margin-top:5px"><span style="font-size:.62rem;'
+                        f'font-weight:700;color:#1e293b;background:#e2e8f0;border-radius:4px;'
+                        f'padding:1px 7px">📡 {net}</span></div>')
+
     st.markdown(
-        f'<div style="display:flex;align-items:center;justify-content:space-around;'
-        f'background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;'
-        f'padding:12px 6px;min-height:150px">{inner}</div>', unsafe_allow_html=True)
+        f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">'
+        f'{bar}<div style="padding:8px 8px 10px">{title_html}'
+        f'<div style="display:flex;align-items:flex-start;justify-content:space-around">{inner}</div>'
+        f'{wp_html}{foot}{net_html}</div></div>', unsafe_allow_html=True)
     return True
 
 
