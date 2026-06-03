@@ -1402,6 +1402,8 @@ def render_upcoming(rows, as_tab=False):
         tid = r.get("tmdb_id")
         ne = get_next_episode(tid) if (tid or 0) > 0 else None
         ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
+        if not ep and (tid or 0) < 0:
+            ep = _sports_matchup(r)   # e.g. "vs Athletics" / "@ Giants"
         c = st.columns([1, 4, 1.1]) if show_pin else st.columns([1, 5])
         with c[0]:
             clickable_poster(tid, r.get("poster_path"))
@@ -1680,6 +1682,52 @@ def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List
         updated_shows.append(show)
 
     return updated_shows
+
+
+def refresh_sports_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Followed sports teams (negative ids) are skipped by the TMDB refresh, so their stored
+    game date goes stale (points at a game that already happened). Refresh each to its next
+    NON-completed game from the live ESPN schedule (cached 1h)."""
+    for show in shows:
+        tid = show.get("tmdb_id")
+        if not tid or tid >= 0:
+            continue
+        league, team_id = sports.decode_id(tid)
+        if not league or sports.is_event_league(league):
+            continue
+        try:
+            ng = sports.next_game(sports.get_team_schedule(league, team_id))
+            nd = ng.get("date") if ng else None
+            if nd and nd != show.get("next_air_date"):
+                client.table("shows").update({"next_air_date": nd})\
+                    .eq("user_id", get_user_id()).eq("tmdb_id", tid).execute()
+                show["next_air_date"] = nd
+        except Exception:
+            pass
+    return shows
+
+
+def _sports_matchup(r: Dict[str, Any]) -> str:
+    """'vs Opponent' / '@ Opponent' for a followed team's next game (or '')."""
+    tid = r.get("tmdb_id")
+    if not tid or tid >= 0:
+        return ""
+    league, team_id = sports.decode_id(tid)
+    if not league or sports.is_event_league(league):
+        return ""
+    try:
+        ng = sports.next_game(sports.get_team_schedule(league, team_id))
+        if not ng:
+            return ""
+        nm = r.get("title")
+        if ng.get("home") == nm and ng.get("away"):
+            return f"vs {ng['away']}"
+        if ng.get("away") == nm and ng.get("home"):
+            return f"@ {ng['home']}"
+    except Exception:
+        pass
+    return ""
+
 
 # --------------- PROMOTIONAL CONTENT ---------------
 def get_new_shows(region: str = "US", limit: int = 10) -> List[Dict[str, Any]]:
@@ -2798,6 +2846,7 @@ def _add_discovered(tmdb_id, title, overview, poster_path):
 
 with _main_upcoming:
     _up_rows = refresh_stale_air_dates(client, list_shows(client))
+    _up_rows = refresh_sports_air_dates(client, _up_rows)
     render_upcoming(_up_rows, as_tab=True)
 
 with _main_catchup:
