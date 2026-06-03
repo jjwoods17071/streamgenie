@@ -1131,12 +1131,24 @@ def provider_logo_url(name: str) -> Optional[str]:
         return None
     data = _tmdb_provider_logos()
     nl = name.lower()
+    norm = normalize_provider_name(name).lower()
+    # Match by our known provider IDs — compare on the normalized name too, so stored
+    # aliases like "Prime Video" line up with TMDB's "Amazon Prime Video" entry.
     for our_name, ids in discover.PROVIDERS.items():
-        if our_name.lower() == nl:
+        if our_name.lower() in (nl, norm) or normalize_provider_name(our_name).lower() == norm:
             for i in ids:
                 if i in data["by_id"]:
                     return data["by_id"][i]
-    return data["by_name"].get(nl) or data["by_name"].get(normalize_provider_name(name).lower())
+    # Name fallback: try the raw name, the normalized name, then any TMDB provider whose
+    # name normalizes to the same thing (e.g. "amazon prime video" → "prime video").
+    if data["by_name"].get(nl):
+        return data["by_name"][nl]
+    if data["by_name"].get(norm):
+        return data["by_name"][norm]
+    for tmdb_name, url in data["by_name"].items():
+        if normalize_provider_name(tmdb_name).lower() == norm:
+            return url
+    return None
 
 
 def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
