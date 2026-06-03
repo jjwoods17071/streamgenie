@@ -217,6 +217,14 @@ def game_insight(league: str, event_id):
                 except Exception:
                     pass
 
+        # Last-5 form: {team_id: ['W','L',...]}
+        last5 = {}
+        for blk in (d.get("lastFiveGames") or []):
+            tid2 = str((blk.get("team") or {}).get("id"))
+            res = [e.get("gameResult") for e in (blk.get("events") or []) if e.get("gameResult")]
+            if res:
+                last5[tid2] = res
+
         # Standings: {team_id: {rank, division, gb, streak}}
         standings = {}
         for g in (d.get("standings") or {}).get("groups", []):
@@ -241,12 +249,23 @@ def game_insight(league: str, event_id):
             if not overall and recs:
                 overall = recs[0].get("summary")
             sd = standings.get(tid, {})
+            # Probable starting pitcher (MLB) / featured player
+            pitcher = None
+            pr = cz.get("probables") or []
+            if pr and isinstance(pr[0], dict):
+                ath = pr[0].get("athlete") or {}
+                pitcher = ath.get("fullName") or ath.get("displayName")
+            res5 = last5.get(tid) or []
+            form = None
+            if res5:
+                w5, l5 = res5.count("W"), res5.count("L")
+                form = {"record": f"{w5}-{l5}", "seq": "".join(r[:1] for r in res5)}
             teams.append({"id": tid, "name": t.get("displayName"), "abbrev": t.get("abbreviation"),
                           "home": cz.get("homeAway") == "home", "record": overall,
                           "logo": (t.get("logos") or [{}])[0].get("href") or t.get("logo"),
                           "win_pct": proj.get(tid), "rank": sd.get("rank"),
                           "division": sd.get("division"), "gb": sd.get("gb"),
-                          "streak": sd.get("streak")})
+                          "streak": sd.get("streak"), "pitcher": pitcher, "form": form})
         out["teams"] = teams
         # Head-to-head series — prefer a season-long entry, else the current set
         ss = d.get("seasonseries") or []

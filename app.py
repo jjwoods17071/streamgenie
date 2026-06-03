@@ -833,6 +833,17 @@ def clickable_poster(tmdb_id, poster_path) -> None:
     NOT a full-page reload, which would drop the login session."""
     _OPENSEQ[0] += 1
     src = _poster_src(poster_path)
+    # Sports team logos are square/transparent — show at natural size in a short frame
+    # (not stretched into a tall 2:3 poster box). Opened via the adjacent clickable title.
+    if sports.is_sports_id(tmdb_id):
+        if src:
+            st.markdown(
+                f'<div style="display:flex;align-items:center;justify-content:center;height:92px">'
+                f'<img src="{src}" style="max-height:88px;max-width:100%;object-fit:contain"></div>',
+                unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="sgposter sgph">🏟️</div>', unsafe_allow_html=True)
+        return
     if src:
         _fit = "contain" if str(poster_path).startswith("http") else "cover"
         st.markdown(f'<img class="sgposter" style="object-fit:{_fit}" src="{src}">',
@@ -972,6 +983,15 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                         _stand.append(f'{_ab(t)} {_ord(t["rank"])} in {t["division"]}{tail}')
                 if _stand:
                     st.caption("📈 " + "  ·  ".join(_stand))
+                # Recent form (last 5)
+                _forms = [f'{_ab(t)} {t["form"]["record"]} ({t["form"]["seq"]})'
+                          for t in _ts if t.get("form")]
+                if _forms:
+                    st.caption("🔥 Last 5: " + "  ·  ".join(_forms))
+                # Probable starting pitchers (MLB)
+                _pitch = [f'{_ab(t)} {t["pitcher"]}' for t in _ts if t.get("pitcher")]
+                if _pitch:
+                    st.caption("⚾ Probables: " + "  vs  ".join(_pitch))
                 if _ins.get("series"):
                     st.caption(f'🔁 {_ins["series"]}')
         if client is not None:
