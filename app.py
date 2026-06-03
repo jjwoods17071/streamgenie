@@ -557,6 +557,8 @@ def render_show_row(r, view_mode, client, wcounts):
                 st.markdown(f"**{r['title']}**")
             status_icon = f"{ICONS['check']}" if r['on_provider'] else ICONS["pending"]
             st.caption(f"{status_icon} {display_provider_name} • {r['region']}")
+            if (r.get("tmdb_id") or 0) > 0:
+                st.markdown(show_status_chip(r))
             _wc = wcounts.get(r["tmdb_id"], 0)
             if _wc:
                 st.caption(f"✓ {_wc} watched")
@@ -1078,6 +1080,17 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                                   use_container_width=True, on_click=_add_related)
 
 
+def show_status_chip(r) -> str:
+    """A colored status chip for a watchlist card (markdown background-highlight)."""
+    ss = (r.get("show_status") or "")
+    ps = (r.get("production_status") or "").upper()
+    if ss == "Canceled" or ps == "CANCELED":
+        return ":red-background[🚫 Canceled]"
+    if ss == "Ended" or ps == "ENDED":
+        return ":gray-background[🏁 Ended]"
+    return ":green-background[📺 Active]"
+
+
 def render_grid_gallery(rows, client, wcounts, per_row=5):
     """True poster-tile gallery for the grid view (vs. the detailed list rows).
     Each card's title is a button that opens the full show-detail page (PDP)."""
@@ -1102,8 +1115,8 @@ def render_grid_gallery(rows, client, wcounts, per_row=5):
                             shown = True
                     except Exception:
                         pass
-                if not shown:
-                    st.caption(r.get("production_status") or "—")
+                if (r.get("tmdb_id") or 0) > 0:   # status chip (skip sports rows)
+                    st.markdown(show_status_chip(r))
                 wc = wcounts.get(r["tmdb_id"], 0)
                 if wc:
                     st.caption(f"✓ {wc} watched")
