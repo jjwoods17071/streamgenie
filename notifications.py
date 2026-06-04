@@ -62,7 +62,7 @@ def create_notification(
                 if related_show_id is not None:
                     dup = dup.eq("related_show_id", related_show_id)
                 if dup.limit(1).execute().data:
-                    return True  # already exists → skip insert (still allow email below)
+                    return True  # already exists → skip insert and email
             except Exception:
                 pass  # if the dedup check fails, fall through and insert
 
@@ -76,7 +76,23 @@ def create_notification(
                 "sent_email": should_email
             }
 
-            client.table("notifications").insert(notification_data).execute()
+            # Atomic claim: the pre-check above can't stop CONCURRENT writers (several
+            # app instances firing the 8 AM job in the same second all pass it before
+            # any insert lands). With the notifications_dedup_idx unique index
+            # (migrations/2026-06-04_notifications_unique.sql), upsert+ignore_duplicates
+            # returns the row only to the ONE winner — losers get [] and skip the email.
+            try:
+                ins = client.table("notifications").upsert(
+                    notification_data,
+                    on_conflict="user_id,notification_type,related_show_id,message",
+                    ignore_duplicates=True
+                ).execute()
+                if not ins.data:
+                    return True  # another instance already created it → no email
+            except Exception:
+                # Unique index not created yet → plain insert (pre-check still
+                # blocks sequential dupes; concurrent dupes possible until migration runs)
+                client.table("notifications").insert(notification_data).execute()
 
         # Send email if user preferences allow
         if should_email:
