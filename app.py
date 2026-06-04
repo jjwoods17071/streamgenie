@@ -3534,10 +3534,64 @@ def render_sports_follow():
                             st.button(":material/add: Follow", key=f"follow_{_lk}_{_t['id']}",
                                       use_container_width=True, on_click=_follow)
 
-(_main_upcoming, _main_catchup, _main_watch, _main_sports, _main_new, _main_trending,
+def render_ask_genie():
+    """Ask Genie — in-app chat with StreamGenie's AI assistant (Jan Bot pattern:
+    named persona, honest-AI disclosure, Claude primary + Gemini failover,
+    grounded in the user's own watchlist/sports/leaving-soon context)."""
+    import genie as _genie
+
+    st.subheader("✨ Ask Genie")
+    st.caption("Genie is StreamGenie's AI assistant — ask what to watch tonight, "
+               "when your teams play, or what's leaving soon. Spoiler-free, always.")
+
+    if not (os.getenv("ANTHROPIC_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()):
+        st.info("Genie isn't connected yet — add **ANTHROPIC_API_KEY** to the app "
+                "secrets (Streamlit Cloud → Settings → Secrets) to enable chat.")
+        return
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _genie_ctx(uid: str):
+        import newsletter as _nl
+        return _nl.build_chat_context(client, uid)
+
+    _hist = st.session_state.setdefault("genie_chat", [])
+    if not _hist:
+        with st.chat_message("assistant", avatar="🧞"):
+            st.markdown("Hi, I'm **Genie** — your AI streaming sidekick. "
+                        "Try *\"what should I watch tonight?\"* or "
+                        "*\"when do my teams play this week?\"*")
+    for _m in _hist:
+        with st.chat_message(_m["role"], avatar="🧞" if _m["role"] == "assistant" else None):
+            st.markdown(_m["content"])
+
+    _q = st.chat_input("Ask Genie about your shows or teams…", key="genie_chat_input")
+    if _q:
+        _hist.append({"role": "user", "content": _q})
+        with st.chat_message("user"):
+            st.markdown(_q)
+        with st.chat_message("assistant", avatar="🧞"):
+            with st.spinner("Genie is thinking…"):
+                try:
+                    _ctx = _genie_ctx(get_user_id())
+                except Exception:
+                    _ctx = {}
+                _ans = _genie.chat(_hist, _ctx)
+            if _ans:
+                st.markdown(_ans)
+                _hist.append({"role": "assistant", "content": _ans})
+            else:
+                st.warning("Genie couldn't answer just now — try again in a moment.")
+        st.session_state["genie_chat"] = _hist[-24:]  # keep history bounded
+
+    if _hist and st.button(":material/refresh: New conversation", key="genie_reset"):
+        st.session_state["genie_chat"] = []
+        st.rerun()
+
+
+(_main_upcoming, _main_catchup, _main_watch, _main_sports, _main_genie, _main_new, _main_trending,
  _main_top, _main_grow, _main_search) = st.tabs([
     ":material/upcoming: Upcoming", ":material/download: Catch Up",
-    ":material/tv: Your Watchlist", ":material/sports_football: Sports",
+    ":material/tv: Your Watchlist", ":material/sports_football: Sports", ":material/auto_awesome: Ask Genie",
     ":material/fiber_new: New This Month", ":material/trending_up: Trending",
     ":material/star: Top Rated", ":material/playlist_add: Grow Watchlist",
     ":material/search: Search",
@@ -3545,6 +3599,9 @@ def render_sports_follow():
 
 with _main_sports:
     render_sports_follow()
+
+with _main_genie:
+    render_ask_genie()
 
 with _main_upcoming:
     _up_rows = refresh_stale_air_dates(client, list_shows(client))

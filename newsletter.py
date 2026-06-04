@@ -128,23 +128,42 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # --- Recommendations (seeded from up to 3 watchlist shows, dedup vs watchlist) ---
-    recs, seen = [], set(wl_ids)
-    for r in tv[:3]:
+    # --- Recommendation candidates (seeded from up to 4 watchlist shows) ---
+    # A pool of ~12 goes to Genie, who curates the 3 best fits for this user's
+    # taste; recs defaults to the top 3 by rating when Genie is unavailable.
+    pool, seen = [], set(wl_ids)
+    for r in tv[:4]:
         try:
             for c in _tmdb(f"/tv/{r['tmdb_id']}/recommendations").get("results", [])[:10]:
                 if c.get("id") in seen:
                     continue
                 seen.add(c.get("id"))
-                recs.append({"title": c.get("name"), "vote": c.get("vote_average") or 0,
+                pool.append({"title": c.get("name"), "vote": c.get("vote_average") or 0,
                              "votes": c.get("vote_count") or 0, "seed": r["title"]})
         except Exception:
             continue
-    recs = sorted([x for x in recs if x["votes"] >= 50],
-                  key=lambda x: -x["vote"])[:3]
+    candidates = sorted([x for x in pool if x["votes"] >= 50],
+                        key=lambda x: -x["vote"])[:12]
 
     return {"week_start": t_iso, "week_end": w_iso, "airing": airing,
-            "highlights": highlights, "games": games, "leaving": leaving, "recs": recs}
+            "highlights": highlights, "games": games, "leaving": leaving,
+            "watchlist_titles": [r["title"] for r in tv],
+            "rec_candidates": candidates, "recs": candidates[:3]}
+
+
+def build_chat_context(client, user_id: str) -> Dict[str, Any]:
+    """Sections + full watchlist/follows — the grounding context for Ask Genie."""
+    s = build_sections(client, user_id)
+    rows = client.table("shows")\
+        .select("tmdb_id,title,provider_name,next_air_date")\
+        .eq("user_id", user_id).execute().data or []
+    s["watchlist"] = [
+        {"title": r["title"], "app": (r.get("provider_name") or None),
+         "next_air_date": r.get("next_air_date")}
+        for r in rows if (r.get("tmdb_id") or 0) > 0
+    ]
+    s["sports_follows"] = [r["title"] for r in rows if (r.get("tmdb_id") or 0) < 0]
+    return s
 
 
 # ---------------- rendering ----------------
@@ -312,6 +331,13 @@ def send_weekly_newsletters(client, log=print) -> int:
         editorial = genie.generate_editorial(s, log=log)
         if editorial:
             log(f"newsletter: Genie editorial generated for {email}")
+            # Genie curates: replace the rating-sorted top 3 with Genie's picks
+            # (matched back to the candidate pool so vote/seed metadata is kept)
+            by_title = {(c.get("title") or "").strip().lower(): c
+                        for c in s.get("rec_candidates", [])}
+            picked = [by_title[t] for t in editorial.get("picks", []) if t in by_title]
+            if picked:
+                s["recs"] = picked[:3]
 
         subject = f"StreamGenie Weekly: {summary}"
         if mailer.send_email(email, subject, render_html(s, editorial)):

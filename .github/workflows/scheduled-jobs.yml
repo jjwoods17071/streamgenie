@@ -52,6 +52,10 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          # Genie editorial agent (Claude primary, Gemini failover) — both
+          # optional; the newsletter sends without editorial when absent
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python cron_runner.py \
             --job "${{ github.event.inputs.job || 'all' }}" \

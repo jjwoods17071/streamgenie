@@ -39,6 +39,9 @@ for older seasons. Describe shows by tone, genre, and reputation only.
 spam. One emoji maximum across the whole intro, none in blurbs.
 - You are an AI assistant and never claim to be human.
 - Write at most 2 sentences for the intro and 1 sentence per recommendation blurb.
+- For recommendations: choose the 3 candidates that best fit this user's taste, \
+judging from their watchlist — fit beats rating. Only ever pick titles that appear \
+in recommendation_candidates, spelled exactly as given.
 - If the data is sparse, keep it short rather than padding."""
 
 EDITORIAL_SCHEMA = {
@@ -48,12 +51,13 @@ EDITORIAL_SCHEMA = {
             "type": "string",
             "description": "1-2 sentence personalized intro for the week, referencing the most notable items",
         },
-        "rec_blurbs": {
+        "picks": {
             "type": "array",
+            "description": "The 3 best-fit recommendations chosen from recommendation_candidates, best first",
             "items": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Exact show title as given"},
+                    "title": {"type": "string", "description": "Exact candidate title as given"},
                     "blurb": {"type": "string", "description": "One spoiler-free sentence on why this user might like it"},
                 },
                 "required": ["title", "blurb"],
@@ -61,7 +65,7 @@ EDITORIAL_SCHEMA = {
             },
         },
     },
-    "required": ["intro", "rec_blurbs"],
+    "required": ["intro", "picks"],
     "additionalProperties": False,
 }
 
@@ -86,10 +90,11 @@ def _week_payload(sections: Dict[str, Any]) -> str:
              "date": str(e.get("leaving_date"))}
             for e in sections.get("leaving", [])
         ],
-        "recommendations": [
+        "user_watchlist": sections.get("watchlist_titles", []),
+        "recommendation_candidates": [
             {"title": r.get("title"), "rating": r.get("vote"),
              "because_user_watches": r.get("seed")}
-            for r in sections.get("recs", [])
+            for r in (sections.get("rec_candidates") or sections.get("recs", []))
         ],
     }
     return json.dumps(data, sort_keys=True)
@@ -158,7 +163,8 @@ def _ask_gemini(payload: str) -> Optional[Dict[str, Any]]:
 def generate_editorial(sections: Dict[str, Any], log=print) -> Optional[Dict[str, Any]]:
     """Genie's editorial for one user's newsletter, or None (newsletter still sends).
 
-    Returns {"intro": str, "rec_blurbs": {title_lower: blurb}}.
+    Returns {"intro": str, "picks": [title_lower, ...], "rec_blurbs": {title_lower: blurb}}
+    — picks are Genie's taste-curated choices from the candidate pool, best first.
     Claude primary → Gemini failover → None.
     """
     payload = _week_payload(sections)
@@ -174,8 +180,81 @@ def generate_editorial(sections: Dict[str, Any], log=print) -> Optional[Dict[str
             log(f"genie: Gemini failed ({e})")
     if not result or not isinstance(result.get("intro"), str):
         return None
-    blurbs = {}
-    for b in result.get("rec_blurbs") or []:
+    picks, blurbs = [], {}
+    for b in result.get("picks") or result.get("rec_blurbs") or []:
         if isinstance(b, dict) and b.get("title") and b.get("blurb"):
-            blurbs[str(b["title"]).strip().lower()] = str(b["blurb"]).strip()
-    return {"intro": result["intro"].strip(), "rec_blurbs": blurbs}
+            key = str(b["title"]).strip().lower()
+            picks.append(key)
+            blurbs[key] = str(b["blurb"]).strip()
+    return {"intro": result["intro"].strip(), "picks": picks, "rec_blurbs": blurbs}
+
+
+# ---------------- Ask Genie (in-app chat) ----------------
+
+CHAT_SYSTEM_PROMPT = """You are Genie, the friendly TV-buff AI assistant inside \
+StreamGenie, a personal streaming tracker. You chat with the user about their \
+watchlist, followed sports teams, and what to watch.
+
+Rules you must always follow:
+- Ground every answer in the user context provided. If something isn't in the \
+context, say you don't have it rather than guessing — never invent air dates, \
+networks, scores, or availability.
+- NO SPOILERS, ever. Describe shows by tone, genre, and reputation only.
+- You are an AI assistant and never claim to be human.
+- Be warm, concise, and a little playful. Short answers for short questions. \
+Use markdown lists when listing shows or games.
+- When recommending what to watch tonight, prefer their own watchlist (unwatched \
+or airing soon) before suggesting anything new.
+- You cannot yet take actions (adding shows, marking episodes watched) — if \
+asked, explain how to do it in the app instead."""
+
+
+def chat(history: list, context: Dict[str, Any], log=print) -> Optional[str]:
+    """One Ask-Genie turn. history = [{"role": "user"|"assistant", "content": str}].
+
+    Claude primary (static prompt cached; volatile user context after it) →
+    Gemini failover → None.
+    """
+    ctx = "Current user context (refreshed every ~15 min):\n" + _week_payload(context) \
+        + "\nFull watchlist with apps: " + json.dumps(context.get("watchlist", []), sort_keys=True) \
+        + "\nFollowed teams/series: " + json.dumps(context.get("sports_follows", []), sort_keys=True)
+    msgs = [{"role": m["role"], "content": m["content"]} for m in history][-12:]
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if api_key:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=1024,
+                system=[
+                    {"type": "text", "text": CHAT_SYSTEM_PROMPT,
+                     "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": ctx},
+                ],
+                messages=msgs,
+            )
+            text = next((b.text for b in response.content if b.type == "text"), "")
+            if text:
+                return text
+        except Exception as e:
+            log(f"genie chat: Claude failed ({e}); trying Gemini")
+
+    gem_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if gem_key:
+        try:
+            contents = [{"role": "model" if m["role"] == "assistant" else "user",
+                         "parts": [{"text": m["content"]}]} for m in msgs]
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                params={"key": gem_key},
+                json={"system_instruction": {"parts": [{"text": CHAT_SYSTEM_PROMPT + "\n\n" + ctx}]},
+                      "contents": contents},
+                timeout=30,
+            )
+            r.raise_for_status()
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            log(f"genie chat: Gemini failed ({e})")
+    return None
