@@ -14,6 +14,8 @@ WHERE a.id > b.id
   AND a.related_show_id IS NOT DISTINCT FROM b.related_show_id
   AND a.message = b.message;
 
--- 2) One notification per (user, type, show, message)
+-- 2) One notification per (user, type, show, message).
+-- NULLS NOT DISTINCT so digest notifications (related_show_id = NULL) also dedup.
 CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedup_idx
-  ON notifications (user_id, notification_type, related_show_id, message);
+  ON notifications (user_id, notification_type, related_show_id, message)
+  NULLS NOT DISTINCT;

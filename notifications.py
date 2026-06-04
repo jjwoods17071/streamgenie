@@ -380,6 +380,34 @@ def notify_new_episode(
     )
 
 
+def notify_airing_digest(client: Client, user_id: str, shows: list):
+    """ONE consolidated notification + email for all of a user's shows airing today.
+
+    `shows` are rows from the shows table (title, provider_name, next_air_date).
+    Only called on days when something actually airs — no empty digests.
+    """
+    if not shows:
+        return
+
+    def _label(s):
+        p = (s.get("provider_name") or "").strip()
+        return f"{s['title']} ({p})" if p and p != "Multiple Providers" else s["title"]
+
+    air_date = shows[0].get("next_air_date", "")
+    n = len(shows)
+    create_notification(
+        client=client,
+        user_id=user_id,
+        notification_type="new_episode",
+        title="New Episode Today" if n == 1 else f"{n} Shows Airing Today",
+        message=f"New episode{'s' if n > 1 else ''} on {air_date}: " +
+                ", ".join(_label(s) for s in shows),
+        related_show_id=None,
+        related_show_title=", ".join(s["title"] for s in shows),
+        send_email=True
+    )
+
+
 def notify_show_status_change(
     client: Client,
     user_id: str,

@@ -106,7 +106,8 @@ class TaskScheduler:
 
             logger.info(f"Found {len(users_shows)} users with shows airing today")
 
-            # Send reminders to each user
+            # Send ONE consolidated reminder per user (not one per show).
+            # Days with nothing airing were already skipped above — no empty digests.
             emails_sent = 0
             for user_id, shows in users_shows.items():
                 try:
@@ -117,19 +118,14 @@ class TaskScheduler:
 
                     user_email = user_result.data[0]["email"]
 
-                    # Send email and create notifications for each show
-                    for show in shows:
-                        notifications.notify_new_episode(
-                            client=self.client,
-                            user_id=user_id,
-                            show_title=show["title"],
-                            show_id=show["tmdb_id"],
-                            air_date=show["next_air_date"],
-                            send_email=True
-                        )
-                        emails_sent += 1
+                    notifications.notify_airing_digest(
+                        client=self.client,
+                        user_id=user_id,
+                        shows=shows
+                    )
+                    emails_sent += 1
 
-                    logger.info(f"Sent {len(shows)} reminders to {user_email}")
+                    logger.info(f"Sent digest ({len(shows)} shows) to {user_email}")
 
                 except Exception as e:
                     logger.error(f"Error sending reminders to user {user_id}: {e}")
