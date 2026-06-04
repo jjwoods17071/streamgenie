@@ -365,9 +365,9 @@ def notify_new_episode(
     show_title: str,
     show_id: int,
     air_date: str,
-    send_email: bool = True
+    send_email: bool = False
 ):
-    """Create notification for new episode"""
+    """Create notification for new episode (bell only by default — see newsletter.py)"""
     create_notification(
         client=client,
         user_id=user_id,
@@ -381,8 +381,10 @@ def notify_new_episode(
 
 
 def notify_airing_digest(client: Client, user_id: str, shows: list):
-    """ONE consolidated notification + email for all of a user's shows airing today.
+    """ONE consolidated in-app notification for all of a user's shows airing today.
 
+    Bell only — no email. The weekly newsletter (newsletter.py) is the single
+    email surface; day-of nudges live in the notification bell.
     `shows` are rows from the shows table (title, provider_name, next_air_date).
     Only called on days when something actually airs — no empty digests.
     """
@@ -404,7 +406,7 @@ def notify_airing_digest(client: Client, user_id: str, shows: list):
                 ", ".join(_label(s) for s in shows),
         related_show_id=None,
         related_show_title=", ".join(s["title"] for s in shows),
-        send_email=True
+        send_email=False  # weekly newsletter is the only email
     )
 
 

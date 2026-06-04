@@ -137,137 +137,21 @@ class TaskScheduler:
             logger.error(f"Error in daily reminder job: {e}")
 
     def _send_weekly_preview_to_all_users(self):
-        """Send weekly preview to all users"""
+        """Send the weekly newsletter (the only email StreamGenie sends).
+
+        Delegates to newsletter.send_weekly_newsletters: one Sunday email per
+        user covering the week ahead (episodes, premieres/finales, sports,
+        leaving-soon, recommendations). Skips users with nothing happening and
+        is race-proof via an atomic weekly_digest claim in the notifications
+        table, so concurrent app instances can't double-send.
+        """
         try:
-            logger.info("Starting weekly preview job...")
-
-            # Get date range (today + 7 days)
-            today = dt.date.today()
-            week_later = today + dt.timedelta(days=7)
-
-            # Get all users
-            users_result = self.client.table("users").select("id, email").execute()
-            if not users_result.data:
-                logger.info("No users found")
-                return
-
-            previews_sent = 0
-
-            for user in users_result.data:
-                try:
-                    user_id = user["id"]
-                    user_email = user["email"]
-
-                    # Get shows airing this week for this user
-                    shows_result = self.client.table("shows")\
-                        .select("title, next_air_date, provider_name")\
-                        .eq("user_id", user_id)\
-                        .gte("next_air_date", today.isoformat())\
-                        .lte("next_air_date", week_later.isoformat())\
-                        .order("next_air_date")\
-                        .execute()
-
-                    shows = shows_result.data
-
-                    if not shows:
-                        logger.info(f"No shows this week for {user_email}")
-                        continue
-
-                    # Send weekly preview email
-                    self._send_weekly_preview_email(user_email, shows)
-
-                    # Create in-app notification
-                    show_list = "\n".join([f"• {s['title']} ({s['next_air_date']})" for s in shows[:5]])
-                    if len(shows) > 5:
-                        show_list += f"\n• ...and {len(shows) - 5} more"
-
-                    notifications.create_notification(
-                        client=self.client,
-                        user_id=user_id,
-                        notification_type="reminder",
-                        title=f"This Week: {len(shows)} Episodes Airing",
-                        message=f"You have {len(shows)} new episodes this week:\n{show_list}",
-                        send_email=False  # Already sent via preview email
-                    )
-
-                    previews_sent += 1
-                    logger.info(f"Sent weekly preview to {user_email} ({len(shows)} shows)")
-
-                except Exception as e:
-                    logger.error(f"Error sending preview to user {user['id']}: {e}")
-                    continue
-
-            logger.info(f"Weekly preview job complete: {previews_sent} previews sent")
-
+            import newsletter
+            sent = newsletter.send_weekly_newsletters(
+                self.client, log=lambda m: logger.info(m))
+            logger.info(f"Weekly newsletter job complete: {sent} sent")
         except Exception as e:
-            logger.error(f"Error in weekly preview job: {e}")
-
-    def _send_weekly_preview_email(self, user_email: str, shows: list):
-        """Send weekly preview email to a user"""
-        try:
-            import mailer
-            if not mailer.is_configured():
-                logger.warning("Email transport not configured")
-                return
-
-            # Group shows by day
-            shows_by_day = {}
-            for show in shows:
-                air_date = show["next_air_date"]
-                if air_date not in shows_by_day:
-                    shows_by_day[air_date] = []
-                shows_by_day[air_date].append(show)
-
-            # Build email HTML
-            html_content = """
-            <html>
-            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                    <h1 style="color: white; margin: 0; font-size: 28px;">🍿 StreamGenie</h1>
-                    <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Your Weekly Preview</p>
-                </div>
-                <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-                    <h2 style="color: #333; margin-top: 0;">This Week's New Episodes</h2>
-                    <p style="color: #666; font-size: 16px;">You have {count} new episodes airing this week!</p>
-            """.format(count=len(shows))
-
-            # Add shows grouped by day
-            for air_date in sorted(shows_by_day.keys()):
-                date_obj = dt.date.fromisoformat(air_date)
-                day_name = date_obj.strftime("%A, %B %d")
-
-                html_content += f"""
-                    <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #667eea;">
-                        <h3 style="margin: 0 0 10px 0; color: #667eea;">{day_name}</h3>
-                """
-
-                for show in shows_by_day[air_date]:
-                    html_content += f"""
-                        <div style="padding: 10px 0; border-bottom: 1px solid #eee;">
-                            <strong style="color: #333; font-size: 16px;">📺 {show['title']}</strong><br>
-                            <span style="color: #999; font-size: 14px;">{show['provider_name']}</span>
-                        </div>
-                    """
-
-                html_content += "</div>"
-
-            html_content += """
-                    <p style="color: #999; font-size: 14px; margin-top: 30px; text-align: center;">
-                        Sent by StreamGenie - Your personal streaming tracker<br>
-                        <a href="https://streamgenie-estero.streamlit.app" style="color: #667eea;">Open StreamGenie</a>
-                    </p>
-                </div>
-            </body>
-            </html>
-            """
-
-            subject = f"🍿 This Week: {len(shows)} New Episodes"
-            mailer.send_email(user_email, subject, html_content)
-
-            logger.info(f"Weekly preview email sent to {user_email}")
-
-        except Exception as e:
-            logger.error(f"Error sending weekly preview email: {e}")
+            logger.error(f"Error in weekly newsletter job: {e}")
 
     def test_daily_reminders_now(self):
         """Manually trigger daily reminders (for testing)"""

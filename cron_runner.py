@@ -111,7 +111,8 @@ def run_leaving(client, window_days: int, dry: bool):
                 title=f"⏳ Leaving {prov} soon: {e['title']}",
                 message=f"{e['title']} leaves {prov} on {lv} ({days} {day_word} left). "
                         f"Catch it before it's gone!",
-                related_show_id=tmdb_id, related_show_title=e["title"], send_email=True)
+                related_show_id=tmdb_id, related_show_title=e["title"],
+                send_email=False)  # bell only; weekly newsletter covers leaving-soon
             sent += 1
             log(f"  alert -> user {uid[:8]} for {e['title']} ({days}d)")
     log(f"  leaving-soon: {sent} alert(s) {'(dry)' if dry else 'sent'}")

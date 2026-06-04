@@ -186,7 +186,7 @@ def notify_production_changes(
                 message=(f"{show_title} is back in production — a new season is being made. "
                          f"No air date has been announced yet, but it's officially returning."),
                 related_show_id=tmdb_id, related_show_title=show_title,
-                send_email=True)  # respects prefs
+                send_email=False)  # bell only; weekly newsletter is the email surface
             logger.info(f"Sent renewal notification for {show_title}")
             return
 
@@ -260,7 +260,7 @@ def notify_status_change(
                 message=message,
                 related_show_id=tmdb_id,
                 related_show_title=show_title,
-                send_email=True  # Respects user preferences
+                send_email=False  # bell only; weekly newsletter is the email surface
             )
 
             logger.info(f"Sent series finale notification for {show_title}")
@@ -280,7 +280,7 @@ def notify_status_change(
                 message=message,
                 related_show_id=tmdb_id,
                 related_show_title=show_title,
-                send_email=True  # Respects user preferences
+                send_email=False  # bell only; weekly newsletter is the email surface
             )
 
             logger.info(f"Sent cancellation notification for {show_title}")
