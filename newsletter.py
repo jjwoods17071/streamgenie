@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+import genie
 import mailer
 import preferences
 import leaving_soon as leaving_mod
@@ -169,8 +170,17 @@ def _section(title: str, body: str) -> str:
       </div>"""
 
 
-def render_html(s: Dict[str, Any]) -> str:
+def render_html(s: Dict[str, Any], editorial: Optional[Dict[str, Any]] = None) -> str:
     blocks = []
+    editorial = editorial or {}
+    rec_blurbs = editorial.get("rec_blurbs") or {}
+
+    if editorial.get("intro"):
+        blocks.append(f"""
+      <div style="background:white;padding:16px 20px;border-radius:8px;margin:14px 0;border-left:4px solid #667eea;">
+        <p style="margin:0;color:#444;font-size:15px;line-height:1.6;font-style:italic;">{editorial['intro']}</p>
+        <p style="margin:6px 0 0;color:#aaa;font-size:12px;">— Genie, your AI streaming assistant</p>
+      </div>""")
 
     if s["airing"]:
         by_day = defaultdict(list)
@@ -202,9 +212,16 @@ def render_html(s: Dict[str, Any]) -> str:
             for e in s["leaving"]])))
 
     if s["recs"]:
-        blocks.append(_section("✨ Recommended For You", _rows([
-            f"<b>{r['title']}</b> — rated {r['vote']:.1f}/10 (because you watch {r['seed']})"
-            for r in s["recs"]])))
+        def _rec_line(r):
+            line = (f"<b>{r['title']}</b> — rated {r['vote']:.1f}/10 "
+                    f"(because you watch {r['seed']})")
+            blurb = rec_blurbs.get((r.get("title") or "").strip().lower())
+            if blurb:
+                line += (f'<br><span style="color:#888;font-size:13px;'
+                         f'font-style:italic;">Genie says: {blurb}</span>')
+            return line
+        blocks.append(_section("✨ Recommended For You", _rows(
+            [_rec_line(r) for r in s["recs"]])))
 
     return f"""
     <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -291,8 +308,13 @@ def send_weekly_newsletters(client, log=print) -> int:
             log(f"newsletter: already sent this week to {email}")
             continue
 
+        # Genie editorial (Claude → Gemini → None); newsletter sends either way
+        editorial = genie.generate_editorial(s, log=log)
+        if editorial:
+            log(f"newsletter: Genie editorial generated for {email}")
+
         subject = f"StreamGenie Weekly: {summary}"
-        if mailer.send_email(email, subject, render_html(s)):
+        if mailer.send_email(email, subject, render_html(s, editorial)):
             sent += 1
             log(f"newsletter: sent to {email} ({summary})")
         else:
