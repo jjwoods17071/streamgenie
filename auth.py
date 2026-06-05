@@ -28,50 +28,43 @@ except Exception:
 _COOKIE_NAME = "sg_session"
 
 
-def _cookie_manager():
-    if stx is None:
-        return None
-    if "_cookie_mgr" not in st.session_state:
-        try:
-            st.session_state["_cookie_mgr"] = stx.CookieManager(key="sg_cookie_mgr")
-        except Exception:
-            st.session_state["_cookie_mgr"] = None
-    return st.session_state.get("_cookie_mgr")
+def _js_set_cookie(value: str, max_age: int):
+    """Write the session cookie via inline JS. components.html renders a same-origin
+    srcdoc iframe, so document.cookie lands on the app's domain. No round-trip
+    component state to race with (the old stx CookieManager lost the write whenever
+    st.rerun() fired before its iframe mounted)."""
+    try:
+        import streamlit.components.v1 as components
+        components.html(
+            f"<script>document.cookie = '{_COOKIE_NAME}={value}; max-age={max_age}; "
+            f"path=/; samesite=lax' + (location.protocol === 'https:' ? '; secure' : '');</script>",
+            height=0,
+        )
+    except Exception:
+        pass
 
 
 def persist_session(refresh_token: Optional[str]):
     """Store the Supabase refresh token in a 30-day cookie."""
-    cm = _cookie_manager()
-    if not cm or not refresh_token:
-        return
-    try:
-        import datetime as _dt
-        cm.set(_COOKIE_NAME, refresh_token,
-               expires_at=_dt.datetime.now() + _dt.timedelta(days=30), key="sg_cookie_set")
-    except Exception:
-        pass
+    if refresh_token:
+        _js_set_cookie(refresh_token, 30 * 24 * 3600)
 
 
 def clear_persisted_session():
-    cm = _cookie_manager()
-    if not cm:
-        return
-    try:
-        cm.delete(_COOKIE_NAME, key="sg_cookie_del")
-    except Exception:
-        pass
+    _js_set_cookie("", 0)
 
 
 def restore_session(client: Client) -> bool:
     """If there's no in-memory user but a valid refresh-token cookie exists,
-    refresh the Supabase session and restore login. Returns True if restored."""
+    refresh the Supabase session and restore login. Returns True if restored.
+
+    Reads via st.context.cookies — the cookies the browser sent when this
+    session connected. Available synchronously on the FIRST run (no component
+    mount/rerun dance), so a page refresh restores login with no flash."""
     if st.session_state.get("user"):
         return False
-    cm = _cookie_manager()
-    if not cm:
-        return False
     try:
-        rt = cm.get(_COOKIE_NAME)
+        rt = st.context.cookies.get(_COOKIE_NAME)
     except Exception:
         rt = None
     if not rt:
@@ -84,23 +77,15 @@ def restore_session(client: Client) -> bool:
         if res and getattr(res, "user", None):
             st.session_state.user = {"id": res.user.id, "email": res.user.email}
             ensure_user_record(client, res.user.id, res.user.email)
+            # Supabase rotates refresh tokens — persist the new one for next time
             new_rt = getattr(getattr(res, "session", None), "refresh_token", None)
             if new_rt:
-                persist_session(new_rt)
+                st.session_state["_sg_pending_rt"] = new_rt  # flushed on stable render
             return True
     except Exception:
         # expired / invalid cookie — drop it and show the login screen
         clear_persisted_session()
     return False
-
-
-def flush_pending_session():
-    """Write a login's queued refresh token to the cookie. Called from the main
-    app body AFTER authentication, where the render completes without an
-    immediate rerun — so the browser-side cookie component actually mounts."""
-    rt = st.session_state.pop("_sg_pending_rt", None)
-    if rt:
-        persist_session(rt)
 
 
 def init_auth_session():

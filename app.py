@@ -1113,7 +1113,10 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
 def _tmdb_provider_logos() -> Dict[str, Any]:
     """US streaming-provider logos from TMDB, keyed by provider_id AND lowercased name."""
     try:
-        d = tmdb_get("/watch/providers/tv", {"language": "en-US", "watch_region": "US"})
+        # No watch_region filter: the US-filtered list omits base providers like
+        # Paramount+ (531), leaving only bundle variants ("...Apple TV Channel"),
+        # whose co-branded logos we must never show for the base service.
+        d = tmdb_get("/watch/providers/tv", {"language": "en-US"})
         by_id, by_name = {}, {}
         for p in d.get("results", []):
             lp = p.get("logo_path")
@@ -1148,9 +1151,10 @@ def provider_logo_url(name: str) -> Optional[str]:
         return data["by_name"][nl]
     if data["by_name"].get(norm):
         return data["by_name"][norm]
-    for tmdb_name, url in data["by_name"].items():
-        if normalize_provider_name(tmdb_name).lower() == norm:
-            return url
+    matches = [(tmdb_name, url) for tmdb_name, url in data["by_name"].items()
+               if normalize_provider_name(tmdb_name).lower() == norm]
+    if matches:
+        return min(matches, key=lambda m: len(m[0]))[1]  # base service beats bundle variants
     return None
 
 
@@ -2786,6 +2790,16 @@ if DEV_LOGIN_BYPASS and not auth.is_authenticated():
     except Exception:
         pass
 
+# Fresh page load (new browser session): drop any leftover ?show=<id> deep link so
+# the app opens at the top of the list instead of restoring an old detail page.
+if "_sg_fresh_session" not in st.session_state:
+    st.session_state["_sg_fresh_session"] = True
+    if "show" in st.query_params:
+        try:
+            del st.query_params["show"]
+        except Exception:
+            pass
+
 # Persistent login: if the in-memory session was wiped (phone screen-lock / tab
 # reconnect) but a refresh-token cookie exists, restore the session silently.
 if not auth.is_authenticated():
@@ -2854,8 +2868,8 @@ if not st.session_state.get('_user_record_ensured'):
         auth.ensure_user_record(client, _cu.get('id'), _cu.get('email'))
         st.session_state['_user_record_ensured'] = True
 
-# Show notifications in sidebar
-notifications.render_notifications_ui(client, get_user_id())
+# Notifications live in the header bell popover only (single surface — the old
+# sidebar slide-out duplicated it).
 
 # Hero Banner with Netflix-style gradient
 st.markdown("""
