@@ -1604,13 +1604,16 @@ def render_upcoming(rows, as_tab=False):
         tid = r.get("tmdb_id")
         ne = get_next_episode(tid) if (tid or 0) > 0 else None
         ep = f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season") else ""
-        if not ep and (tid or 0) < 0:
-            ep = _sports_matchup(r)   # e.g. "vs Athletics" / "@ Giants"
+        _mh = _sports_matchup_html(r) if (tid or 0) < 0 else ""
+        if not ep and (tid or 0) < 0 and not _mh:
+            ep = _sports_matchup(r)   # text fallback when the aligned strip is unavailable
         c = st.columns([1, 4, 1.1]) if show_pin else st.columns([1, 5])
         with c[0]:
             clickable_poster(tid, r.get("poster_path"))
         with c[1]:
             clickable_title(r['title'], r)
+            if _mh:
+                st.markdown(_mh, unsafe_allow_html=True)
             if d is not None:
                 days = (d - today).days
                 when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
@@ -2107,6 +2110,61 @@ def _sports_matchup(r: Dict[str, Any]) -> str:
     except Exception:
         pass
     return ""
+
+
+def _sports_matchup_html(r: Dict[str, Any]) -> str:
+    """Aligned away-@-home strip for a followed team's next game (list view).
+    Fixed grid columns (logo|name|@|logo|name|time·network) so every game row
+    in the list lines up identically regardless of team-name length."""
+    tid = r.get("tmdb_id")
+    if not tid or tid >= 0:
+        return ""
+    league, team_id = sports.decode_id(tid)
+    if not league or sports.is_event_league(league):
+        return ""
+    try:
+        ng = sports.next_game(sports.get_team_schedule(league, team_id))
+    except Exception:
+        return ""
+    if not ng or not (ng.get("home") and ng.get("away")):
+        return ""
+    # tip-off / first-pitch time in the user's timezone
+    when = ""
+    try:
+        d = dt.datetime.fromisoformat((ng.get("datetime") or "").replace("Z", "+00:00"))
+        when = d.astimezone(ZoneInfo(_user_tz_name())).strftime("%-I:%M %p")
+    except Exception:
+        pass
+    # national network logo (same resolution path as the hero cards)
+    casts = ng.get("broadcasts") or []
+    nat = next((b["name"] for b in casts if b.get("market") == "national"), "")
+    raw = nat or ng.get("network") or (casts[0]["name"] if casts else "")
+    net = sports.normalize_broadcast(raw) if raw else ""
+    netlogo = broadcast_logo_url(net) if net else None
+    right = ""
+    if when:
+        right += f'<span style="color:#888;">{when}</span>'
+    if netlogo:
+        right += f'<img src="{netlogo}" style="height:16px;margin-left:8px;vertical-align:middle;" title="{net}">'
+    elif net:
+        right += f'<span style="color:#888;margin-left:8px;">{net}</span>'
+
+    def _team(logo, name, bold):
+        img = (f'<img src="{logo}" style="width:22px;height:22px;object-fit:contain;">'
+               if logo else '<span style="width:22px;display:inline-block;"></span>')
+        w = "700" if bold else "500"
+        return (img, f'<span style="font-weight:{w};white-space:nowrap;overflow:hidden;'
+                     f'text-overflow:ellipsis;">{name}</span>')
+    mine = r.get("title")
+    ai, an = _team(ng.get("away_logo"), ng.get("away"), ng.get("away") == mine)
+    hi, hn = _team(ng.get("home_logo"), ng.get("home"), ng.get("home") == mine)
+    return (
+        '<div style="display:grid;grid-template-columns:24px minmax(0,170px) 18px 24px '
+        'minmax(0,170px) 1fr;align-items:center;column-gap:6px;margin:2px 0 4px;'
+        'font-size:0.95rem;">'
+        f'{ai}{an}<span style="color:#999;text-align:center;">@</span>{hi}{hn}'
+        f'<span style="text-align:right;white-space:nowrap;">{right}</span></div>'
+    )
 
 
 def _sports_context(r: Dict[str, Any]) -> str:
