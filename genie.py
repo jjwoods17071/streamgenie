@@ -40,8 +40,10 @@ spam. One emoji maximum across the whole intro, none in blurbs.
 - You are an AI assistant and never claim to be human.
 - Write at most 2 sentences for the intro and 1 sentence per recommendation blurb.
 - For recommendations: choose the 3 candidates that best fit this user's taste, \
-judging from their watchlist — fit beats rating. Only ever pick titles that appear \
-in recommendation_candidates, spelled exactly as given.
+judging from their watchlist AND user_feedback (their 👍/👎 on past picks) — \
+likes are positive taste signals; avoid anything resembling the dislikes. Fit \
+beats rating. Only ever pick titles that appear in recommendation_candidates, \
+spelled exactly as given.
 - If the data is sparse, keep it short rather than padding."""
 
 EDITORIAL_SCHEMA = {
@@ -91,6 +93,7 @@ def _week_payload(sections: Dict[str, Any]) -> str:
             for e in sections.get("leaving", [])
         ],
         "user_watchlist": sections.get("watchlist_titles", []),
+        "user_feedback": sections.get("rec_feedback") or {},
         "recommendation_candidates": [
             {"title": r.get("title"), "rating": r.get("vote"),
              "because_user_watches": r.get("seed")}

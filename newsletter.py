@@ -138,14 +138,27 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
                 if c.get("id") in seen:
                     continue
                 seen.add(c.get("id"))
-                pool.append({"title": c.get("name"), "vote": c.get("vote_average") or 0,
+                pool.append({"tmdb_id": c.get("id"), "title": c.get("name"),
+                             "vote": c.get("vote_average") or 0,
                              "votes": c.get("vote_count") or 0, "seed": r["title"]})
         except Exception:
             continue
-    candidates = sorted([x for x in pool if x["votes"] >= 50],
+    # --- 👍/👎 feedback (rec_feedback table; absent table → no signal) ---
+    liked, disliked = [], []
+    try:
+        for f in (client.table("rec_feedback").select("title,verdict")
+                  .eq("user_id", user_id).execute().data or []):
+            (liked if f["verdict"] == "up" else disliked).append(f["title"])
+    except Exception:
+        pass
+    _voted = {t.strip().lower() for t in liked + disliked}
+
+    candidates = sorted([x for x in pool if x["votes"] >= 50
+                         and (x.get("title") or "").strip().lower() not in _voted],
                         key=lambda x: -x["vote"])[:12]
 
     return {"week_start": t_iso, "week_end": w_iso, "airing": airing,
+            "rec_feedback": {"liked": liked, "disliked": disliked},
             "highlights": highlights, "games": games, "leaving": leaving,
             "watchlist_titles": [r["title"] for r in tv],
             "rec_candidates": candidates, "recs": candidates[:3]}
@@ -242,6 +255,12 @@ def render_html(s: Dict[str, Any], editorial: Optional[Dict[str, Any]] = None) -
             if blurb:
                 line += (f'<br><span style="color:#888;font-size:13px;'
                          f'font-style:italic;">Genie says: {blurb}</span>')
+            # 👍/👎 — one click teaches Genie; handled by the app via query params
+            base = os.getenv("APP_BASE_URL", "https://streamgenie-estero.streamlit.app").rstrip("/")
+            from urllib.parse import quote
+            q = f"rec_title={quote(r['title'])}&rec_id={r.get('tmdb_id') or ''}"
+            line += (f'<br><a href="{base}/?rec_vote=up&{q}" style="text-decoration:none;font-size:14px;">👍 More like this</a>'
+                     f'&nbsp;&nbsp;<a href="{base}/?rec_vote=down&{q}" style="text-decoration:none;font-size:14px;">👎 Not for me</a>')
             return line
         blocks.append(_section("✨ Recommended For You", _rows(
             [_rec_line(r) for r in s["recs"]])))

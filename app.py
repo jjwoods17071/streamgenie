@@ -2883,6 +2883,28 @@ if not auth.is_authenticated():
 auth.render_user_menu(client)
 auth.flush_pending_session()  # write the post-login cookie now that rendering is stable
 
+# 👍/👎 from the newsletter: ?rec_vote=up|down&rec_title=...&rec_id=... — record the
+# verdict for Genie's taste loop, thank the user, and clean the URL.
+if st.query_params.get("rec_vote") in ("up", "down"):
+    _rv = st.query_params.get("rec_vote")
+    _rt = (st.query_params.get("rec_title") or "").strip()
+    _rid = st.query_params.get("rec_id") or None
+    if _rt:
+        try:
+            client.table("rec_feedback").upsert(
+                {"user_id": get_user_id(), "tmdb_id": int(_rid) if _rid else None,
+                 "title": _rt, "verdict": _rv},
+                on_conflict="user_id,title").execute()
+            st.toast(("👍 Noted — more like " if _rv == "up" else "👎 Got it — less like ")
+                     + f"**{_rt}**. Genie will remember.", icon="🧞")
+        except Exception:
+            st.toast("Couldn't record that vote (the rec_feedback table may need its migration).")
+    for _k in ("rec_vote", "rec_title", "rec_id"):
+        try:
+            del st.query_params[_k]
+        except Exception:
+            pass
+
 # Clickable-poster styling: invisible button overlaid on each poster image so a
 # click opens the detail page via an in-app rerun (no page reload → keeps login).
 st.markdown("""
