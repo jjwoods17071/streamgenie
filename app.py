@@ -4135,28 +4135,35 @@ with _main_watch:
                 return "ended"
             return "active"
 
-        _groups = {"active": [], "canceled": [], "ended": []}
-        for r in rows:
-            _groups[_status_group(r)].append(r)
-        _n_active = len(_groups["active"])
-        _n_done = len(_groups["ended"]) + len(_groups["canceled"])
+        # Viewer-centric split (replaces production-status "Active / Ended & Canceled"):
+        #   ▶️ Still Watching  — anything not finished BY YOU: series still running, OR
+        #                        aired episodes you haven't watched (even if the series
+        #                        ended years ago — e.g. mid-rewatch Battlestar Galactica)
+        #   ✅ Watched History — the series is over AND you've watched every episode
+        def _viewer_group(rr):
+            tid = rr.get("tmdb_id") or 0
+            if tid < 0:
+                return "watching"   # sports follows never "finish"
+            w = _wcounts.get(tid, 0)
+            series_over = _status_group(rr) in ("ended", "canceled")
+            if series_over and w > 0 and available_now_count(tid, w) == 0:
+                return "history"
+            return "watching"
 
-        # Single list with a status filter (no more 3 separate sub-tabs).
+        _groups = {"watching": [], "history": []}
+        for r in rows:
+            _groups[_viewer_group(r)].append(r)
+
         _filter_opts = {
             f"All ({len(rows)})": "all",
-            f"📺 Active ({_n_active})": "active",
-            f"🏁 Ended & Canceled ({_n_done})": "done",
+            f"▶️ Still Watching ({len(_groups['watching'])})": "watching",
+            f"✅ Watched History ({len(_groups['history'])})": "history",
         }
         with sc[1]:
             _fl = st.radio("Status", list(_filter_opts.keys()), horizontal=True,
                            key="wl_status_filter", label_visibility="collapsed")
         _fmode = _filter_opts.get(_fl, "all")
-        if _fmode == "active":
-            _shown = _groups["active"]
-        elif _fmode == "done":
-            _shown = _groups["ended"] + _groups["canceled"]
-        else:
-            _shown = rows   # already sorted
+        _shown = _groups.get(_fmode, rows) if _fmode != "all" else rows
 
         if not _shown:
             st.info("No shows match this filter.")
