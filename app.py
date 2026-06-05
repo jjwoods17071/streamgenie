@@ -3777,9 +3777,9 @@ with _main_search:
                                           use_container_width=True, on_click=_wl_add,
                                           args=(client, tmdb_id, title, region, _onp, next_air, overview, poster_path, np_))
                     else:
-                        st.caption("📺 Not on streaming here — add to track manually:")
+                        st.caption("📺 Streaming info not listed yet (common for brand-new shows) — pick the app to track it on:")
                         for provider in ["Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+",
-                                         "ESPN", "ABC", "NBC", "CBS", "Fox", "Broadcast TV"]:
+                                         "Apple TV+", "Peacock", "ESPN", "ABC", "NBC", "CBS", "Fox", "Broadcast TV"]:
                             if (tmdb_id, normalize_provider_name(provider)) in owned_pairs:
                                 st.markdown(f":blue[✓ {provider} — in your list]")
                             else:
