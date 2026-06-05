@@ -264,7 +264,7 @@ def _claim(client, user_id: str, week_key: str, summary: str) -> bool:
     row = {"user_id": user_id, "notification_type": "weekly_digest",
            "title": "📬 Your Week in Streaming",
            "message": f"Weekly preview for {week_key}: {summary}",
-           "related_show_id": None, "related_show_title": None, "sent_email": True}
+           "related_show_id": 0, "related_show_title": None, "sent_email": True}
     try:
         ins = client.table("notifications").upsert(
             row, on_conflict="user_id,notification_type,related_show_id,message",

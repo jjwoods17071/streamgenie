@@ -404,10 +404,32 @@ def notify_airing_digest(client: Client, user_id: str, shows: list):
         title="New Episode Today" if n == 1 else f"{n} Shows Airing Today",
         message=f"New episode{'s' if n > 1 else ''} on {air_date}: " +
                 ", ".join(_label(s) for s in shows),
-        related_show_id=None,
+        # Sentinel 0 (not NULL): the dedup unique index treats NULLs as distinct,
+        # so NULL digests race past it — a real value makes the atomic claim work.
+        related_show_id=0,
         related_show_title=", ".join(s["title"] for s in shows),
         send_email=False  # weekly newsletter is the only email
     )
+
+
+def expire_stale_airing(client: Client) -> int:
+    """Delete airing notifications whose air date has passed — the episodes now
+    live in Catch Up, so the bell shouldn't keep announcing them. Returns count."""
+    import re as _re
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    try:
+        rows = client.table("notifications").select("id,message")\
+            .eq("notification_type", "new_episode").execute().data or []
+        stale = [x["id"] for x in rows
+                 if (m := _re.search(r"(\d{4}-\d{2}-\d{2})", x.get("message") or ""))
+                 and m.group(1) < today]
+        for i in range(0, len(stale), 50):
+            client.table("notifications").delete().in_("id", stale[i:i+50]).execute()
+        return len(stale)
+    except Exception as e:
+        print(f"Error expiring stale notifications: {e}")
+        return 0
 
 
 def notify_show_status_change(

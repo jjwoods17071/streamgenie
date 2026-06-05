@@ -84,6 +84,12 @@ class TaskScheduler:
         try:
             logger.info("Starting daily reminder job...")
 
+            # Yesterday's "airing today" notices are stale — those episodes now
+            # show in Catch Up. Clear them before posting today's digest.
+            expired = notifications.expire_stale_airing(self.client)
+            if expired:
+                logger.info(f"Expired {expired} stale airing notification(s)")
+
             today = dt.date.today().isoformat()
 
             # Get all users who have shows airing today

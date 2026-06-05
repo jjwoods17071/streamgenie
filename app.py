@@ -250,17 +250,9 @@ def upsert_show(client: Client, tmdb_id:int, title:str, region:str, on_provider:
     # Upsert: insert or update if exists
     client.table("shows").upsert(data, on_conflict="user_id,tmdb_id,provider_name").execute()
 
-    # Create notification for new shows
+    # New shows: no "added to your watchlist" bell notice — you just did it
+    # yourself, so it's noise. (Finale/cancellation detection below still runs.)
     if is_new_show:
-        status = "available" if on_provider else "unavailable"
-        notifications.notify_show_status_change(
-            client=client,
-            user_id=user_id,
-            show_title=title,
-            show_id=tmdb_id,
-            new_status="added",
-            send_email=False
-        )
 
         # Check and update show status from TMDB (series finale/cancellation detection)
         show_status.update_show_status(client, user_id, tmdb_id, title)
@@ -1307,7 +1299,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 _nad = _nxt.get("air_date") if isinstance(_nxt, dict) else None
                 upsert_show(client, tmdb_id, title, DEFAULT_REGION, True, _nad,
                             (meta.get("overview") or show.get("overview") or ""),
-                            show.get("poster_path"), _pick_add)
+                            (show.get("poster_path") or meta.get("poster_path")), _pick_add)
                 st.rerun()
 
         # Description sits beside the poster, under the add/remove button
