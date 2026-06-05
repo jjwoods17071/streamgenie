@@ -25,6 +25,17 @@ import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 # Load environment variables
 load_dotenv()
 
+# Streamlit Cloud: st.secrets updates live, but env-var copies of secrets are
+# only made at container boot — a secret added after boot is invisible to
+# os.getenv() until a reboot. Mirror root-level secrets into the environment so
+# modules that read env vars (genie, newsletter, mailer, ...) always see them.
+try:
+    for _sk, _sv in st.secrets.items():
+        if isinstance(_sv, str) and _sk not in os.environ:
+            os.environ[_sk] = _sv
+except Exception:
+    pass  # no secrets.toml locally — .env covers it
+
 # --------------- CONFIG ---------------
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_BASE = "https://api.themoviedb.org/3"
