@@ -137,10 +137,93 @@ class TaskScheduler:
                     logger.error(f"Error sending reminders to user {user_id}: {e}")
                     continue
 
-            logger.info(f"Daily reminder job complete: {emails_sent} emails sent")
+            logger.info(f"Daily reminder job complete: {emails_sent} digest(s) sent")
+
+            # Catch-up nudges (bell only, spoiler-free, ≤3 shows/user, weekly per show)
+            try:
+                self._send_catchup_nudges()
+            except Exception as e:
+                logger.error(f"Error in catch-up nudges: {e}")
 
         except Exception as e:
             logger.error(f"Error in daily reminder job: {e}")
+
+    def _aired_profile(self, tmdb_id: int):
+        """(aired_episode_count, last_ep_is_finale, series_over) from TMDB."""
+        import os as _os
+        import requests as _rq
+        key = _os.getenv("TMDB_API_KEY", "").strip()
+        d = _rq.get(f"https://api.themoviedb.org/3/tv/{tmdb_id}",
+                    params={"api_key": key, "language": "en-US"}, timeout=15).json()
+        last = d.get("last_episode_to_air") or {}
+        ls, le = last.get("season_number"), last.get("episode_number")
+        if not ls:
+            return 0, False, False
+        total = 0
+        for season in d.get("seasons", []):
+            sn = season.get("season_number") or 0
+            if sn == 0:
+                continue            # skip specials
+            if sn < ls:
+                total += season.get("episode_count") or 0
+            elif sn == ls:
+                total += le or 0
+        finale = (last.get("episode_type") or "") == "finale"
+        over = d.get("status") in ("Ended", "Canceled")
+        return total, finale, over
+
+    def _send_catchup_nudges(self):
+        """Spoiler-free bell nudges for shows the user has STARTED and fallen behind on.
+        Counts only — never plot. Max 3 shows per user per run; each show nudged at
+        most once every 7 days (checked against the notification history)."""
+        from collections import Counter
+        cutoff = (dt.datetime.utcnow() - dt.timedelta(days=7)).isoformat()
+        users = self.client.table("users").select("id").execute().data or []
+        sent = 0
+        for u in users:
+            uid = u["id"]
+            wrows = self.client.table("watched_episodes").select("tmdb_id")\
+                .eq("user_id", uid).execute().data or []
+            if not wrows:
+                continue
+            wcounts = Counter(x["tmdb_id"] for x in wrows)
+            srows = self.client.table("shows").select("tmdb_id,title")\
+                .eq("user_id", uid).execute().data or []
+            titles = {r["tmdb_id"]: r["title"] for r in srows}
+            candidates = []
+            for tid, w in wcounts.items():
+                if tid not in titles or tid <= 0:
+                    continue                      # removed shows / sports
+                try:
+                    aired, finale, over = self._aired_profile(tid)
+                except Exception:
+                    continue
+                behind = aired - w
+                if behind > 0:
+                    candidates.append((behind, tid, titles[tid], finale, over))
+            for behind, tid, title, finale, over in sorted(candidates, reverse=True)[:3]:
+                # weekly cadence per show
+                prev = self.client.table("notifications").select("created_at")\
+                    .eq("user_id", uid).eq("notification_type", "catchup_nudge")\
+                    .eq("related_show_id", tid).gte("created_at", cutoff)\
+                    .limit(1).execute().data
+                if prev:
+                    continue
+                tail = "."
+                if finale and over:
+                    tail = " — the series finale is in there."
+                elif finale:
+                    tail = " — including a season finale."
+                notifications.create_notification(
+                    client=self.client, user_id=uid,
+                    notification_type="catchup_nudge",
+                    title=f"📥 Catch up: {title}",
+                    message=f"You have {behind} aired episode{'s' if behind != 1 else ''} "
+                            f"waiting{tail} See the Catch Up tab.",
+                    related_show_id=tid, related_show_title=title,
+                    send_email=False)
+                sent += 1
+        logger.info(f"Catch-up nudges: {sent} sent")
 
     def _send_weekly_preview_to_all_users(self):
         """Send the weekly newsletter (the only email StreamGenie sends).
