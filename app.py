@@ -684,15 +684,21 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
                 else:
                     is_watched = (sel, en) in wset
                     # Encode the stored state in the key so the box is recreated whenever the DB
-                    # value changes. Without this, a keyed checkbox keeps its clicked state across
-                    # reruns even if the write never persisted — showing a ✓ the DB doesn't have
-                    # (the "all checked but 5/6" illusion).
-                    new_val = st.checkbox("✓", value=is_watched,
-                                          key=f"{key_prefix}_w_{sel}_{en}_{nonce}_{int(is_watched)}",
-                                          help="Mark watched")
-                    if new_val != is_watched:
-                        watched.set_watched(client, user_id, tv_id, sel, en, new_val)
-                        st.rerun()
+                    # value changes (prevents the "checked but not stored" illusion). Persist via
+                    # on_change — it runs BEFORE the rerun, once per click. The old pattern
+                    # (compare-then-st.rerun) aborted the loop on the first changed box, so
+                    # rapid clicks down a season lost everything after the first few.
+                    _wkey = f"{key_prefix}_w_{sel}_{en}_{nonce}_{int(is_watched)}"
+
+                    def _persist_watch(k=_wkey, s=sel, e=en):
+                        try:
+                            watched.set_watched(client, user_id, tv_id, s, e,
+                                                bool(st.session_state.get(k)))
+                        except Exception:
+                            pass
+
+                    st.checkbox("✓", value=is_watched, key=_wkey,
+                                help="Mark watched", on_change=_persist_watch)
         st.markdown("<hr style='margin:2px 0;opacity:0.15'>", unsafe_allow_html=True)
 
 def render_show_row(r, view_mode, client, wcounts):
