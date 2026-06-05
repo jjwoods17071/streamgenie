@@ -158,11 +158,15 @@ def build_chat_context(client, user_id: str) -> Dict[str, Any]:
         .select("tmdb_id,title,provider_name,next_air_date")\
         .eq("user_id", user_id).execute().data or []
     s["watchlist"] = [
-        {"title": r["title"], "app": (r.get("provider_name") or None),
+        {"tmdb_id": r["tmdb_id"], "title": r["title"],
+         "app": (r.get("provider_name") or None),
          "next_air_date": r.get("next_air_date")}
         for r in rows if (r.get("tmdb_id") or 0) > 0
     ]
-    s["sports_follows"] = [r["title"] for r in rows if (r.get("tmdb_id") or 0) < 0]
+    s["sports_follows"] = [
+        {"tmdb_id": r["tmdb_id"], "title": r["title"]}
+        for r in rows if (r.get("tmdb_id") or 0) < 0
+    ]
     return s
 
 

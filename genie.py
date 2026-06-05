@@ -205,15 +205,124 @@ networks, scores, or availability.
 Use markdown lists when listing shows or games.
 - When recommending what to watch tonight, prefer their own watchlist (unwatched \
 or airing soon) before suggesting anything new.
-- You cannot yet take actions (adding shows, marking episodes watched) — if \
-asked, explain how to do it in the app instead."""
+- You can take actions with your tools: add shows, remove shows/teams, change \
+which app a show is tracked on, and mark a show fully caught up. Use the tmdb_id \
+from the user context when the show is already in the watchlist; use search_show \
+to resolve new shows. The context can be a few minutes stale — if the user refers \
+to a show that isn't in it (e.g. one just added), resolve it with search_show \
+rather than telling them it doesn't exist. After acting, confirm plainly what you \
+did. If a search returns several plausible matches, ask which one before adding. \
+Never remove anything unless the user explicitly asked for that show/team to be \
+removed."""
 
 
-def chat(history: list, context: Dict[str, Any], log=print) -> Optional[str]:
+GENIE_TOOLS = [
+    {"name": "search_show",
+     "description": "Search TMDB for a TV show by name. Use to resolve a show the user wants to add (or asks about) that is not already in their watchlist. Returns up to 5 candidates with tmdb_id, first air year, and a short overview.",
+     "input_schema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "Show name to search for"}},
+         "required": ["query"]}},
+    {"name": "add_show",
+     "description": "Add a show to the user's watchlist, tracked on a specific app. Resolve tmdb_id first (from user context or search_show). provider_name examples: Netflix, Prime Video, Hulu, Max, Paramount+, Apple TV+, Peacock, Disney+, Broadcast TV.",
+     "input_schema": {"type": "object", "properties": {
+         "tmdb_id": {"type": "integer"},
+         "provider_name": {"type": "string", "description": "The app the user will watch it on"}},
+         "required": ["tmdb_id", "provider_name"]}},
+    {"name": "remove_show",
+     "description": "Remove a show or followed team from the watchlist. tmdb_id comes from the user context (negative ids are sports follows). Only when the user explicitly asks.",
+     "input_schema": {"type": "object", "properties": {
+         "tmdb_id": {"type": "integer"}},
+         "required": ["tmdb_id"]}},
+    {"name": "set_provider",
+     "description": "Change which app a watchlist show is tracked on.",
+     "input_schema": {"type": "object", "properties": {
+         "tmdb_id": {"type": "integer"},
+         "provider_name": {"type": "string"}},
+         "required": ["tmdb_id", "provider_name"]}},
+    {"name": "mark_caught_up",
+     "description": "Mark every already-aired episode of a show as watched (the user says they are caught up). Optionally only through a given season.",
+     "input_schema": {"type": "object", "properties": {
+         "tmdb_id": {"type": "integer"},
+         "through_season": {"type": "integer", "description": "Optional: last season to mark"}},
+         "required": ["tmdb_id"]}},
+]
+
+
+def _exec_tool(client, user_id: str, name: str, inp: Dict[str, Any]) -> str:
+    """Execute one Genie tool against TMDB/Supabase. Returns a plain-text result."""
+    import datetime as _dt
+    tid = int(inp.get("tmdb_id") or 0)
+
+    if name == "search_show":
+        r = _tmdb_get("/search/tv", query=inp.get("query", ""))
+        out = [{"tmdb_id": x.get("id"), "title": x.get("name"),
+                "year": (x.get("first_air_date") or "")[:4],
+                "overview": (x.get("overview") or "")[:140]}
+               for x in r.get("results", [])[:5]]
+        return json.dumps(out) if out else "No matches found."
+
+    if name == "add_show":
+        d = _tmdb_get(f"/tv/{tid}")
+        nxt = d.get("next_episode_to_air") or {}
+        row = {"user_id": user_id, "tmdb_id": tid, "title": d.get("name") or f"Show {tid}",
+               "region": "US", "on_provider": True,
+               "next_air_date": nxt.get("air_date"),
+               "overview": d.get("overview") or "",
+               "poster_path": d.get("poster_path"),
+               "provider_name": inp.get("provider_name") or "Multiple Providers"}
+        client.table("shows").upsert(row, on_conflict="user_id,tmdb_id,provider_name").execute()
+        return f"Added '{row['title']}' on {row['provider_name']}."
+
+    if name == "remove_show":
+        got = client.table("shows").select("title").eq("user_id", user_id).eq("tmdb_id", tid).execute().data
+        if not got:
+            return "That show isn't in the watchlist."
+        client.table("shows").delete().eq("user_id", user_id).eq("tmdb_id", tid).execute()
+        return f"Removed '{got[0]['title']}' from the watchlist."
+
+    if name == "set_provider":
+        prov = inp.get("provider_name") or ""
+        got = client.table("shows").select("title").eq("user_id", user_id).eq("tmdb_id", tid).execute().data
+        if not got:
+            return "That show isn't in the watchlist."
+        client.table("shows").update({"provider_name": prov}).eq("user_id", user_id).eq("tmdb_id", tid).execute()
+        return f"'{got[0]['title']}' is now tracked on {prov}."
+
+    if name == "mark_caught_up":
+        import watched as _watched
+        d = _tmdb_get(f"/tv/{tid}")
+        today = _dt.date.today().isoformat()
+        through = int(inp.get("through_season") or 999)
+        total = 0
+        for s in d.get("seasons", []):
+            sn = s.get("season_number")
+            if not sn or sn > through:  # skip specials (0) and beyond requested
+                continue
+            sd = _tmdb_get(f"/tv/{tid}/season/{sn}")
+            eps = [e["episode_number"] for e in sd.get("episodes", [])
+                   if e.get("air_date") and e["air_date"] <= today]
+            if eps:
+                _watched.set_season(client, user_id, tid, sn, eps, True)
+                total += len(eps)
+        return f"Marked {total} aired episode(s) of '{d.get('name')}' as watched."
+
+    return f"Unknown tool: {name}"
+
+
+def _tmdb_get(path: str, **params) -> Dict[str, Any]:
+    params.update(api_key=os.getenv("TMDB_API_KEY", "").strip(), language="en-US")
+    r = requests.get(f"https://api.themoviedb.org/3{path}", params=params, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def chat(history: list, context: Dict[str, Any], client=None, user_id=None, log=print) -> Optional[Dict[str, Any]]:
     """One Ask-Genie turn. history = [{"role": "user"|"assistant", "content": str}].
 
-    Claude primary (static prompt cached; volatile user context after it) →
-    Gemini failover → None.
+    Returns {"text": str, "acted": bool} or None. With client+user_id, Genie gets
+    tools (add/remove/set-provider/mark-watched/search) and runs a bounded agentic
+    loop (Jan Bot pattern). Claude primary (static prompt cached; volatile user
+    context after it) → Gemini failover (Q&A only, no tools) → None.
     """
     ctx = "Current user context (refreshed every ~15 min):\n" + _week_payload(context) \
         + "\nFull watchlist with apps: " + json.dumps(context.get("watchlist", []), sort_keys=True) \
@@ -224,20 +333,42 @@ def chat(history: list, context: Dict[str, Any], log=print) -> Optional[str]:
     if api_key:
         try:
             import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=1024,
-                system=[
-                    {"type": "text", "text": CHAT_SYSTEM_PROMPT,
-                     "cache_control": {"type": "ephemeral"}},
-                    {"type": "text", "text": ctx},
-                ],
-                messages=msgs,
-            )
-            text = next((b.text for b in response.content if b.type == "text"), "")
-            if text:
-                return text
+            ac = anthropic.Anthropic(api_key=api_key)
+            tools = GENIE_TOOLS if (client is not None and user_id) else []
+            convo = list(msgs)
+            acted = False
+            for _hop in range(6):  # bounded agentic loop
+                response = ac.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=1024,
+                    system=[
+                        {"type": "text", "text": CHAT_SYSTEM_PROMPT,
+                         "cache_control": {"type": "ephemeral"}},
+                        {"type": "text", "text": ctx},
+                    ],
+                    tools=tools,
+                    messages=convo,
+                )
+                if response.stop_reason == "tool_use":
+                    convo.append({"role": "assistant", "content": response.content})
+                    results = []
+                    for b in response.content:
+                        if b.type == "tool_use":
+                            try:
+                                out = _exec_tool(client, user_id, b.name, dict(b.input))
+                                acted = True
+                                log(f"genie tool: {b.name}({b.input}) -> {out[:80]}")
+                            except Exception as e:
+                                out = f"Error: {e}"
+                                log(f"genie tool FAILED: {b.name}: {e}")
+                            results.append({"type": "tool_result",
+                                            "tool_use_id": b.id, "content": out})
+                    convo.append({"role": "user", "content": results})
+                    continue
+                text = next((b.text for b in response.content if b.type == "text"), "")
+                if text:
+                    return {"text": text, "acted": acted}
+                break
         except Exception as e:
             log(f"genie chat: Claude failed ({e}); trying Gemini")
 
@@ -254,7 +385,8 @@ def chat(history: list, context: Dict[str, Any], log=print) -> Optional[str]:
                 timeout=30,
             )
             r.raise_for_status()
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return {"text": r.json()["candidates"][0]["content"]["parts"][0]["text"],
+                    "acted": False}
         except Exception as e:
             log(f"genie chat: Gemini failed ({e})")
     return None

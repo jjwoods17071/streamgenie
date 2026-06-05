@@ -3591,10 +3591,12 @@ def render_ask_genie():
                     _ctx = _genie_ctx(get_user_id())
                 except Exception:
                     _ctx = {}
-                _ans = _genie.chat(_hist, _ctx)
-            if _ans:
-                st.markdown(_ans)
-                _hist.append({"role": "assistant", "content": _ans})
+                _res = _genie.chat(_hist, _ctx, client=client, user_id=get_user_id())
+            if _res and _res.get("text"):
+                st.markdown(_res["text"])
+                _hist.append({"role": "assistant", "content": _res["text"]})
+                if _res.get("acted"):
+                    _genie_ctx.clear()  # watchlist changed — rebuild grounding context
             else:
                 st.warning("Genie couldn't answer just now — try again in a moment.")
         st.session_state["genie_chat"] = _hist[-24:]  # keep history bounded
