@@ -2282,6 +2282,46 @@ def _broadcast_info(r) -> str:
         return ""
 
 
+def _stakes_line(ins: Dict[str, Any], league: str) -> str:
+    """Punchy, deterministic stakes line from game-insight data: elimination games,
+    Game 7s, rubber matches, sweeps, hot streaks, tight division races. Returns ""
+    when nothing notable — silence beats manufactured drama."""
+    if not ins:
+        return ""
+    s = (ins.get("matchup_title") or ins.get("series_title") or "").lower()
+    teams = ins.get("teams") or []
+
+    m = re.search(r"leads(?: the)? series (\d+)-(\d+)", s)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if a == 3 and b < 3 and league in ("NBA", "NHL"):
+            return "🚨 Elimination game"
+        if league == "MLB" and a == 2 and b == 0:
+            return "🧹 Sweep on the line"
+    m = re.search(r"series tied (\d+)-(\d+)", s)
+    if m and m.group(1) == m.group(2):
+        n = int(m.group(1))
+        if n == 3:
+            return "🏆 Winner-take-all Game 7"
+        if n == 2:
+            return "⚔️ Pivotal Game 5"
+        if n == 1:
+            return "⚖️ Rubber match" if league == "MLB" else "⚔️ Series knotted — pivotal game"
+    for tm in teams:
+        ms = re.match(r"([WL])(\d+)", str(tm.get("streak") or ""))
+        if ms and int(ms.group(2)) >= 4:
+            kind = "win" if ms.group(1) == "W" else "losing"
+            return f"🔥 {tm.get('abbrev') or tm.get('name')} on a {ms.group(2)}-game {kind} streak"
+    for tm in teams:
+        try:
+            gb = float(tm.get("gb"))
+            if 0 < gb <= 2:
+                return f"📊 {tm.get('abbrev')} just {tm.get('gb')} GB in the {tm.get('division') or 'division'}"
+        except (TypeError, ValueError):
+            continue
+    return ""
+
+
 def _render_sports_hero(r) -> bool:
     """Player-hero card for a sports row in the grid: the two teams' key players (probable
     pitchers / stat leaders) facing off, over a dark gradient. Returns False (→ fall back to
@@ -2342,6 +2382,10 @@ def _render_sports_hero(r) -> bool:
         mt = f"{away.get('abbrev')} vs {home.get('abbrev')}" if home else "Game day"
     title_html = (f'<div style="text-align:center;font-size:.66rem;font-weight:700;letter-spacing:.03em;'
                   f'color:#475569;text-transform:uppercase;margin:6px 0 2px">🏆 {mt}</div>' if mt else "")
+    _stk = _stakes_line(ins, league)
+    if _stk:
+        title_html += (f'<div style="text-align:center;font-size:.72rem;font-weight:700;'
+                       f'color:#b45309;margin:0 0 2px">{_stk}</div>')
 
     # Win-probability bar (two-color split in team colors)
     aw, hw = away.get("win_pct"), (home.get("win_pct") if home else None)
