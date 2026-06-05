@@ -94,6 +94,15 @@ def restore_session(client: Client) -> bool:
     return False
 
 
+def flush_pending_session():
+    """Write a login's queued refresh token to the cookie. Called from the main
+    app body AFTER authentication, where the render completes without an
+    immediate rerun — so the browser-side cookie component actually mounts."""
+    rt = st.session_state.pop("_sg_pending_rt", None)
+    if rt:
+        persist_session(rt)
+
+
 def init_auth_session():
     """Initialize authentication session state"""
     if 'user' not in st.session_state:
@@ -170,7 +179,8 @@ def signup_user(client: Client, email: str, password: str) -> tuple[bool, str]:
                 'id': response.user.id,
                 'email': response.user.email
             }
-            persist_session(getattr(getattr(response, "session", None), "refresh_token", None))
+            st.session_state["_sg_pending_rt"] = getattr(
+                getattr(response, "session", None), "refresh_token", None)  # flushed next render
             return True, "Account created successfully! Welcome to StreamGenie!"
         else:
             return False, "Failed to create account. Please try again."
@@ -203,7 +213,11 @@ def login_user(client: Client, email: str, password: str) -> tuple[bool, str]:
             }
             # Self-heal: guarantee the public.users FK parent row exists
             ensure_user_record(client, response.user.id, response.user.email)
-            persist_session(getattr(getattr(response, "session", None), "refresh_token", None))
+            # Don't write the cookie here: the caller st.rerun()s immediately, which
+            # unmounts the cookie component before it can save. Queue the token and
+            # flush_pending_session() writes it on the next (stable) render.
+            st.session_state["_sg_pending_rt"] = getattr(
+                getattr(response, "session", None), "refresh_token", None)
             return True, f"Welcome back, {email}!"
         else:
             return False, "Invalid email or password."

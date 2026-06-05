@@ -2799,6 +2799,7 @@ if not auth.is_authenticated():
 
 # User is authenticated - show user menu and continue with app
 auth.render_user_menu(client)
+auth.flush_pending_session()  # write the post-login cookie now that rendering is stable
 
 # Clickable-poster styling: invisible button overlaid on each poster image so a
 # click opens the detail page via an in-app rerun (no page reload → keeps login).
