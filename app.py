@@ -1801,7 +1801,7 @@ def render_upcoming(rows, as_tab=False):
     if as_tab:
         st.subheader(f"📅 Upcoming Episodes ({len(up)})")
         if not up and not pinned_ids:
-            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Search tab "
+            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Discover tab "
                     "to see what's coming up.")
             return
         # Top controls: bulk calendar export + agenda/month toggle
@@ -2829,8 +2829,6 @@ div[data-testid="stTabs"] button[role="tab"] p{
 div[data-testid="stTabs"] button[role="tab"]:hover{background:rgba(128,128,128,0.10);}
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{background:rgba(28,131,225,0.10);}
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p{color:#1c83e1;}
-/* Search tab → far right of the nav bar */
-div[data-testid="stTabs"] > div > div[role="tablist"] > button[role="tab"]:last-of-type{margin-left:auto;}
 /* Full poster, natural 2:3 aspect (no cropping) */
 .sgposter{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
 div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
@@ -3588,14 +3586,20 @@ def render_ask_genie():
         st.rerun()
 
 
-(_main_upcoming, _main_catchup, _main_watch, _main_sports, _main_genie, _main_new, _main_trending,
- _main_top, _main_grow, _main_search) = st.tabs([
+(_main_upcoming, _main_catchup, _main_watch, _main_sports, _main_genie,
+ _main_discover) = st.tabs([
     ":material/upcoming: Upcoming", ":material/download: Catch Up",
-    ":material/tv: Your Watchlist", ":material/sports_football: Sports", ":material/auto_awesome: Ask Genie",
-    ":material/fiber_new: New This Month", ":material/trending_up: Trending",
-    ":material/star: Top Rated", ":material/playlist_add: Grow Watchlist",
-    ":material/search: Search",
+    ":material/tv: Your Watchlist", ":material/sports_football: Sports",
+    ":material/auto_awesome: Ask Genie", ":material/explore: Discover",
 ])
+
+# Discover consolidates the five discovery lenses into sub-tabs (banner stays compact)
+with _main_discover:
+    (_main_search, _main_grow, _main_new, _main_trending, _main_top) = st.tabs([
+        ":material/search: Search", ":material/playlist_add: For You",
+        ":material/fiber_new: New This Month", ":material/trending_up: Trending",
+        ":material/star: Top Rated",
+    ])
 
 with _main_sports:
     render_sports_follow()
