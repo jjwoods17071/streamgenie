@@ -3560,9 +3560,26 @@ def render_ask_genie():
     st.caption("Genie is StreamGenie's AI assistant — ask what to watch tonight, "
                "when your teams play, or what's leaving soon. Spoiler-free, always.")
 
+    # Last-resort key resolution straight from st.secrets (covers any env-mirror gap)
+    for _k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        if not os.getenv(_k, "").strip():
+            try:
+                _v = str(st.secrets.get(_k, "") or "").strip()
+                if _v:
+                    os.environ[_k] = _v
+            except Exception:
+                pass
     if not (os.getenv("ANTHROPIC_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()):
         st.info("Genie isn't connected yet — add **ANTHROPIC_API_KEY** to the app "
                 "secrets (Streamlit Cloud → Settings → Secrets) to enable chat.")
+        # Diagnostics (no values shown) so we can see WHERE the key is missing
+        _in_secrets = False
+        try:
+            _in_secrets = bool(str(st.secrets.get("ANTHROPIC_API_KEY", "") or "").strip())
+        except Exception:
+            pass
+        st.caption(f"diagnostics — key in secrets file: {'✅ yes' if _in_secrets else '❌ no'} · "
+                   f"key in environment: {'✅ yes' if os.getenv('ANTHROPIC_API_KEY') is not None else '❌ no'}")
         return
 
     @st.cache_data(ttl=900, show_spinner=False)
