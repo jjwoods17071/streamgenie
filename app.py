@@ -1658,6 +1658,7 @@ def render_upcoming(rows, as_tab=False):
             for j, (d, r) in enumerate(ordered[i:i + per]):
                 with cols[j]:
                     with st.container(border=True):
+                        st.markdown('<span class="sg-tile"></span>', unsafe_allow_html=True)
                         tid = r.get("tmdb_id")
                         _hero = False
                         if (tid or 0) < 0:
@@ -1681,9 +1682,12 @@ def render_upcoming(rows, as_tab=False):
                             _sc = _sports_context(r)
                             if _sc:
                                 st.caption(_sc)
-                        _ov = _overview_text(r, 170)
-                        if _ov:
-                            st.caption(_ov)
+                        if not _hero:
+                            # Clamped 4-line overview that RESERVES its space even when
+                            # short/empty — the main source of ragged tile heights.
+                            _ov = (_overview_text(r, 300)
+                                   .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+                            st.markdown(f'<div class="sg-ov">{_ov}</div>', unsafe_allow_html=True)
                         ac = st.columns(3)
                         with ac[0]:
                             if d is not None:
@@ -2911,6 +2915,16 @@ div[data-testid="stTabs"] button[role="tab"] p{
 div[data-testid="stTabs"] button[role="tab"]:hover{background:rgba(128,128,128,0.10);}
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{background:rgba(28,131,225,0.10);}
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p{color:#1c83e1;}
+/* Equal-height Upcoming-grid tiles: stretch tiles to the row's tallest sibling,
+   clamp/reserve the overview zone, and pin the action buttons to the tile bottom. */
+div[data-testid="stHorizontalBlock"]:has(.sg-tile){align-items:stretch;}
+div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorderWrapper"]{height:100%;}
+div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorderWrapper"] > div,
+div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock"]{height:100%;}
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.sg-tile) div[data-testid="stVerticalBlock"] > div:last-child{margin-top:auto;}
+/* Overview zone: exactly 4 lines — longer text clips, shorter text still reserves the space */
+.sg-ov{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;
+       color:inherit;opacity:0.65;font-size:0.85rem;line-height:1.45;min-height:4.95rem;margin:2px 0 4px;}
 /* Full poster, natural 2:3 aspect (no cropping) */
 .sgposter{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
 div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
