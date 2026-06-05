@@ -4161,7 +4161,7 @@ with _main_watch:
         }
         with sc[1]:
             _fl = st.radio("Status", list(_filter_opts.keys()), horizontal=True,
-                           key="wl_status_filter", label_visibility="collapsed")
+                           key="wl_viewer_filter", label_visibility="collapsed")
         _fmode = _filter_opts.get(_fl, "all")
         _shown = _groups.get(_fmode, rows) if _fmode != "all" else rows
 
