@@ -88,6 +88,15 @@ def restore_session(client: Client) -> bool:
     return False
 
 
+def flush_pending_session():
+    """Write a login's queued refresh token to the cookie. Called from the main
+    app body AFTER authentication, where the render completes without an
+    immediate rerun — so the cookie write actually lands in the browser."""
+    rt = st.session_state.pop("_sg_pending_rt", None)
+    if rt:
+        persist_session(rt)
+
+
 def init_auth_session():
     """Initialize authentication session state"""
     if 'user' not in st.session_state:
