@@ -1530,6 +1530,45 @@ def _service_label(r) -> str:
     return prov
 
 
+_SERVICE_SEARCH = {
+    # provider (normalized) -> search-URL template that opens the show in the service
+    "netflix":        "https://www.netflix.com/search?q={q}",
+    "prime video":    "https://www.amazon.com/s?k={q}&i=instant-video",
+    "amazon prime video": "https://www.amazon.com/s?k={q}&i=instant-video",
+    "hulu":           "https://www.hulu.com/search?q={q}",
+    "max":            "https://play.max.com/search?q={q}",
+    "hbo max":        "https://play.max.com/search?q={q}",
+    "disney+":        "https://www.disneyplus.com/search?q={q}",
+    "paramount+":     "https://www.paramountplus.com/search/?query={q}",
+    "apple tv+":      "https://tv.apple.com/search?term={q}",
+    "apple tv":       "https://tv.apple.com/search?term={q}",
+    "peacock":        "https://www.peacocktv.com/search?q={q}",
+    "starz":          "https://www.starz.com/us/en/search?q={q}",
+    "showtime":       "https://www.paramountplus.com/search/?query={q}",
+    "amc+":           "https://www.amcplus.com/search?q={q}",
+}
+
+
+def _service_watch_url(provider: str, title: str, tmdb_id=None) -> Optional[str]:
+    """Deep link that opens this show in the given streaming service (search by title).
+    Falls back to TMDB's per-show 'where to watch' page when the service is unknown."""
+    from urllib.parse import quote_plus
+    norm = normalize_provider_name(provider or "").lower()
+    tmpl = _SERVICE_SEARCH.get(norm) or _SERVICE_SEARCH.get((provider or "").lower())
+    if tmpl:
+        return tmpl.format(q=quote_plus(title or ""))
+    # Unknown / generic ("Multiple Providers", broadcast) → TMDB watch page
+    if tmdb_id and int(tmdb_id) > 0:
+        try:
+            link = ((tv_watch_providers(int(tmdb_id)).get("results") or {})
+                    .get("US") or {}).get("link")
+            if link:
+                return link
+        except Exception:
+            pass
+    return None
+
+
 def _render_service_logo(r) -> None:
     """Where to watch — the streaming service's actual logo (name fallback). No generic
     TV icon. Sports rows are handled separately by _broadcast_info."""
@@ -1539,14 +1578,22 @@ def _render_service_logo(r) -> None:
     if not prov:
         return
     url = provider_logo_url(prov)
+    watch = _service_watch_url(prov, r.get("title") or "", r.get("tmdb_id"))
+    _inner = ""
     if url:
+        _inner = (f'<img src="{url}" title="Watch {prov}" alt="{prov}" '
+                  f'style="height:24px;border-radius:5px;vertical-align:middle">'
+                  f'&nbsp;<span style="font-size:.82rem;opacity:.85">{prov}</span>')
+    else:
+        _inner = f'<span style="font-size:.82rem;opacity:.85">{prov}</span>'
+    if watch:
         st.markdown(
-            f'<img src="{url}" title="{prov}" alt="{prov}" '
-            f'style="height:24px;border-radius:5px;vertical-align:middle">'
-            f'&nbsp;<span style="font-size:.82rem;opacity:.85">{prov}</span>',
+            f'<a href="{watch}" target="_blank" rel="noopener" '
+            f'style="text-decoration:none" title="Open on {prov} (new tab)">{_inner} '
+            f'<span style="font-size:.7rem;opacity:.55">↗</span></a>',
             unsafe_allow_html=True)
     else:
-        st.caption(prov)
+        st.markdown(_inner, unsafe_allow_html=True)
 
 
 def render_upcoming(rows, as_tab=False):
