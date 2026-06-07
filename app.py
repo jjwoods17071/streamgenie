@@ -3028,14 +3028,13 @@ div[data-testid="stTabs"] button[role="tab"] p{
 div[data-testid="stTabs"] button[role="tab"]:hover{background:rgba(128,128,128,0.10);}
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{background:rgba(28,131,225,0.10);}
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p{color:#1c83e1;}
-/* Equal-height Upcoming-grid tiles: stretch tiles to the row's tallest sibling,
-   clamp/reserve the overview zone, and pin the action buttons to the tile bottom. */
+/* Equal-height Upcoming-grid tiles: make the bordered tiles in a row match height,
+   WITHOUT touching the inner vertical block (whose flow the poster's invisible-overlay
+   click-button depends on — manipulating its height/flex breaks the click target). */
 div[data-testid="stHorizontalBlock"]:has(.sg-tile){align-items:stretch;}
 div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorderWrapper"]{height:100%;}
-div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorderWrapper"] > div,
-div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stVerticalBlock"]{height:100%;}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.sg-tile) div[data-testid="stVerticalBlock"] > div:last-child{margin-top:auto;}
-/* Overview zone: exactly 4 lines — longer text clips, shorter text still reserves the space */
+/* Overview zone: exactly 4 lines — longer text clips, shorter text still reserves the
+   space. This (not flex tricks) is what evens out tile heights. */
 .sg-ov{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;
        color:inherit;opacity:0.65;font-size:0.85rem;line-height:1.45;min-height:4.95rem;margin:2px 0 4px;}
 /* Full poster, natural 2:3 aspect (no cropping) */
