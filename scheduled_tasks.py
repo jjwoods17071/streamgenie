@@ -280,9 +280,17 @@ def init_scheduler(client: Client) -> TaskScheduler:
     if _scheduler is None:
         _scheduler = TaskScheduler(client)
 
-        # Schedule default jobs
-        _scheduler.schedule_daily_reminders(hour=8, minute=0, timezone="America/New_York")
-        _scheduler.schedule_weekly_preview(day_of_week='sun', hour=18, minute=0, timezone="America/New_York")
+        # NOTE: the recurring reminder/newsletter jobs are intentionally NOT scheduled
+        # here. They run from GitHub Actions cron (cron_runner.py) instead — a single
+        # fresh runner per fire. The in-app APScheduler lived inside long-running
+        # Streamlit Cloud containers: several would be awake at once AND could be running
+        # stale code (pre-deploy), so each fired the 8 AM job independently and produced
+        # duplicate notifications that slipped past the dedup index. GitHub Actions is
+        # the authoritative scheduler; this object stays only for the manual
+        # test_*_now() buttons in the admin panel.
+        if os.getenv("ENABLE_INAPP_SCHEDULER", "").strip() == "1":
+            _scheduler.schedule_daily_reminders(hour=8, minute=0, timezone="America/New_York")
+            _scheduler.schedule_weekly_preview(day_of_week='sun', hour=18, minute=0, timezone="America/New_York")
 
     return _scheduler
 
