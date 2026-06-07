@@ -613,16 +613,18 @@ def _render_season_episodes(tv_id:int, sel:int, key_prefix:str, client=None, use
             st.progress(seen / len(aired))
             bc = st.columns(2)
             aired_nums = [e.get("episode_number") for e in aired]
-            if bc[0].button("✓ Mark season watched", key=f"{key_prefix}_markall_{sel}",
-                            use_container_width=True):
-                watched.set_season(client, user_id, tv_id, sel, aired_nums, True)
-                st.session_state[nonce_key] = nonce + 1
-                st.rerun()
-            if bc[1].button("Clear season", key=f"{key_prefix}_clearall_{sel}",
-                            use_container_width=True):
-                watched.set_season(client, user_id, tv_id, sel, aired_nums, False)
-                st.session_state[nonce_key] = nonce + 1
-                st.rerun()
+
+            # on_click callbacks (run BEFORE the auto-rerun, atomically) — the robust
+            # pattern. The old "if button: set_season(); st.rerun()" form could no-op at
+            # the bottom-of-script PDP position; this matches the per-episode checkbox fix.
+            def _mark_season(watch, nk=nonce_key, n=nonce, s=sel, nums=tuple(aired_nums)):
+                watched.set_season(client, user_id, tv_id, s, list(nums), watch)
+                st.session_state[nk] = n + 1
+
+            bc[0].button("✓ Mark season watched", key=f"{key_prefix}_markall_{sel}",
+                         use_container_width=True, on_click=_mark_season, args=(True,))
+            bc[1].button("Clear season", key=f"{key_prefix}_clearall_{sel}",
+                         use_container_width=True, on_click=_mark_season, args=(False,))
 
     # Calendar reminders for this season's upcoming episodes (bulk .ics, with VALARMs)
     if _upcoming_eps:
