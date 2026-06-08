@@ -1109,13 +1109,26 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
         with c[1]:
             score = ""
             if g.get("completed") and g.get("home_score") not in (None, ""):
-                score = f' <span style="opacity:.65">— {g.get("away_score")}–{g.get("home_score")}</span>'
-            wt = "font-weight:700;" if highlight else ""
+                score = (f'<span style="opacity:.65;white-space:nowrap">'
+                         f'{g.get("away_score")}–{g.get("home_score")}</span>')
+            wt = "font-weight:700;" if highlight else "font-weight:500;"
+
+            def _lg(u):
+                return (f'<img src="{u}" style="width:26px;height:26px;object-fit:contain">'
+                        if u else '<span style="width:26px;display:inline-block"></span>')
+
+            # Fixed-column grid so logos & names line up DOWN the list regardless of
+            # team-name length: [flag] away-name @ [flag] home-name | score
             st.markdown(
-                f'<div style="{wt}display:flex;align-items:center;flex-wrap:wrap">'
-                f'{"🟢 " if highlight else ""}{_logo_img(g.get("away_logo"))}{g.get("away")}'
-                f'<span style="opacity:.55;margin:0 6px">@</span>'
-                f'{_logo_img(g.get("home_logo"))}{g.get("home")}{score}</div>',
+                f'<div style="{wt}display:grid;align-items:center;column-gap:6px;'
+                f'grid-template-columns:18px 26px minmax(0,1fr) 16px 26px minmax(0,1fr) auto">'
+                f'<span>{"🟢" if highlight else ""}</span>'
+                f'{_lg(g.get("away_logo"))}'
+                f'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{g.get("away") or ""}</span>'
+                f'<span style="opacity:.5;text-align:center">@</span>'
+                f'{_lg(g.get("home_logo"))}'
+                f'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{g.get("home") or ""}</span>'
+                f'<span style="text-align:right">{score}</span></div>',
                 unsafe_allow_html=True)
             if g.get("network"):
                 st.caption(f"📺 {g['network']}")
