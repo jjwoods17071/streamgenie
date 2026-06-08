@@ -56,6 +56,7 @@ LEAGUES = {
     "ucl":  ("soccer", "uefa.champions",  "⚽ UCL", 7, None),
     "mls":  ("soccer", "usa.1",           "⚽ MLS", 8, None),
     "wc":   ("soccer", "fifa.world",      "🌍 World Cup", 9, None),
+    "wwc":  ("soccer", "fifa.wwc",         "🌍 Women's World Cup", 17, None),
     "cfb":  ("football",   "college-football",         "🏈 College FB", 10, None),
     "cbb":  ("basketball", "mens-college-basketball",  "🏀 College BB", 11, None),
     # Event-model series: you follow the whole series, "episodes" are races/tournaments/cards.
@@ -65,7 +66,7 @@ LEAGUES = {
     "atp":  ("tennis", "atp",  "🎾 ATP",        15, None),
     "wta":  ("tennis", "wta",  "🎾 WTA",        16, None),
 }
-SOCCER = {"epl", "ucl", "mls", "wc"}      # leagues that can draw → W-D-L records
+SOCCER = {"epl", "ucl", "mls", "wc", "wwc"}      # leagues that can draw → W-D-L records
 EVENT = {"f1", "golf", "ufc", "atp", "wta"}   # series, not head-to-head teams
 SEASON_CAL = {"f1", "golf", "ufc"}        # event leagues with a labeled season calendar
 _IDX_TO_LEAGUE = {v[3]: k for k, v in LEAGUES.items()}
@@ -76,6 +77,7 @@ _LOGO_OVERRIDE = {
     "ucl": "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png",
     "mls": "https://a.espncdn.com/i/leaguelogos/soccer/500/19.png",
     "wc":  "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png",
+    "wwc": "https://a.espncdn.com/i/leaguelogos/soccer/500/60.png",
     "cfb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
     "cbb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
 }
