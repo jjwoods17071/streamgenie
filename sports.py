@@ -80,8 +80,13 @@ _LOGO_OVERRIDE = {
     "wwc": "https://a.espncdn.com/i/leaguelogos/soccer/500/60.png",
     "cfb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
     "cbb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
+    "golf": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500/pgatour.png",
+    # ESPN has no ATP/WTA brand badge — its tennis icon is the best available (the
+    # 🎾 ATP / 🎾 WTA text label distinguishes the two).
+    "atp": "https://a.espncdn.com/combiner/i?img=/redesign/assets/img/icons/ESPN-icon-tennis.png",
+    "wta": "https://a.espncdn.com/combiner/i?img=/redesign/assets/img/icons/ESPN-icon-tennis.png",
 }
-_NO_LOGO = {"golf", "atp", "wta"}         # ESPN has no league badge for these
+_NO_LOGO = set()                            # all leagues now resolve a logo
 
 
 def is_event_league(league) -> bool:
