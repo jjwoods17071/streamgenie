@@ -159,7 +159,58 @@ def _logo(c):
     return t.get("logo")
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+def _league_fixtures(league: str):
+    """All scheduled games for a league via a single date-ranged scoreboard query
+    (today .. +75d). ESPN leaves the per-team /schedule endpoint EMPTY for
+    tournaments like the World Cup, but the ranged scoreboard returns the full
+    fixture list. One request — no preliminary calendar call (that made ESPN's edge
+    intermittently return an empty set)."""
+    try:
+        sp, lg = LEAGUES[league][0], LEAGUES[league][1]
+        s = dt.date.today()
+        e = s + dt.timedelta(days=75)
+        rng = f"{s.strftime('%Y%m%d')}-{e.strftime('%Y%m%d')}"
+        d = requests.get(f"{_BASE}/{sp}/{lg}/scoreboard",
+                         params={"dates": rng, "limit": 500}, headers=_UA, timeout=25).json()
+        games = []
+        for ev in d.get("events", []):
+            comp = (ev.get("competitions") or [{}])[0]
+            cs = comp.get("competitors", [])
+            home = next((c for c in cs if c.get("homeAway") == "home"), {})
+            away = next((c for c in cs if c.get("homeAway") == "away"), {})
+            stype = (comp.get("status") or {}).get("type") or {}
+            casts = []
+            for b in (comp.get("broadcasts") or []):
+                if isinstance(b, str):
+                    nm, mkt = b, ""
+                else:
+                    nm = (", ".join(b.get("names", [])) if b.get("names")
+                          else (b.get("media") or {}).get("shortName") or b.get("station"))
+                    # `market` is a dict {type:...} on most leagues but a plain string
+                    # ("national") on the World Cup — handle both.
+                    _mk = b.get("market")
+                    mkt = (_mk.get("type") if isinstance(_mk, dict) else _mk) or ""
+                    mkt = str(mkt).lower()
+                if nm:
+                    casts.append({"name": nm, "market": mkt})
+            net = casts[0]["name"] if casts else ""
+            games.append({
+                "id": ev.get("id"), "date": (ev.get("date") or "")[:10],
+                "datetime": ev.get("date") or "",
+                "home": (home.get("team") or {}).get("displayName"),
+                "away": (away.get("team") or {}).get("displayName"),
+                "home_logo": _logo(home), "away_logo": _logo(away),
+                "home_score": _score(home), "away_score": _score(away),
+                "status": stype.get("description") or stype.get("name"),
+                "completed": bool(stype.get("completed")),
+                "network": net, "broadcasts": casts,
+            })
+        games.sort(key=lambda g: g["datetime"] or "")
+        return games
+    except Exception:
+        return []
+
+
 def get_team_schedule(league: str, team_id: str):
     """A team's season schedule (oldest→newest) as a list of game dicts."""
     try:
@@ -201,9 +252,24 @@ def get_team_schedule(league: str, team_id: str):
                 "week": wk.get("number") or wk.get("text"),
             })
         games.sort(key=lambda g: g["datetime"] or "")
-        return games
+        if games:
+            return games
     except Exception:
-        return []
+        pass
+    # Fallback for tournaments (World Cup) with empty per-team schedules: pull the
+    # whole league fixture list and keep the games this team plays in.
+    try:
+        nm = None
+        for t in get_teams(league):
+            if str(t.get("id")) == str(team_id):
+                nm = t.get("name")
+                break
+        if nm:
+            return [g for g in _league_fixtures(league)
+                    if g.get("home") == nm or g.get("away") == nm]
+    except Exception:
+        pass
+    return []
 
 
 def next_game(games):

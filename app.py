@@ -1916,17 +1916,17 @@ def render_upcoming(rows, as_tab=False):
                                 _sep = "@" if (lbl or "").startswith("@") else "v"
                                 st.markdown(
                                     f'<div style="display:flex;align-items:center;justify-content:center;'
-                                    f'gap:3px;height:30px;margin:1px 0">'
-                                    f'<img src="{_mine}" style="height:26px;width:26px;object-fit:contain">'
-                                    f'<span style="font-size:.6rem;opacity:.5">{_sep}</span>'
-                                    f'<img src="{_opp}" style="height:26px;width:26px;object-fit:contain">'
+                                    f'gap:4px;height:56px;margin:1px 0">'
+                                    f'<img src="{_mine}" style="height:48px;width:48px;object-fit:contain">'
+                                    f'<span style="font-size:.75rem;opacity:.5">{_sep}</span>'
+                                    f'<img src="{_opp}" style="height:48px;width:48px;object-fit:contain">'
                                     f'</div>', unsafe_allow_html=True)
                             elif _mine:
                                 # centered single logo (show / event-series / lone team)
                                 st.markdown(
                                     f'<div style="display:flex;align-items:center;justify-content:center;'
-                                    f'height:30px;margin:1px 0">'
-                                    f'<img src="{_mine}" style="height:28px;max-width:42px;object-fit:contain">'
+                                    f'height:56px;margin:1px 0">'
+                                    f'<img src="{_mine}" style="height:52px;max-width:84px;object-fit:contain">'
                                     f'</div>', unsafe_allow_html=True)
                             st.button(lbl[:14], key=f"mo_{day.isoformat()}_{tid}_{_ix}",
                                       help=f"{r['title']} — {lbl}",
