@@ -1922,7 +1922,12 @@ def render_upcoming(rows, as_tab=False):
                                     f'<img src="{_opp}" style="height:26px;width:26px;object-fit:contain">'
                                     f'</div>', unsafe_allow_html=True)
                             elif _mine:
-                                st.image(_mine, width=42)   # show / event-series / lone team logo
+                                # centered single logo (show / event-series / lone team)
+                                st.markdown(
+                                    f'<div style="display:flex;align-items:center;justify-content:center;'
+                                    f'height:30px;margin:1px 0">'
+                                    f'<img src="{_mine}" style="height:28px;max-width:42px;object-fit:contain">'
+                                    f'</div>', unsafe_allow_html=True)
                             st.button(lbl[:14], key=f"mo_{day.isoformat()}_{tid}_{_ix}",
                                       help=f"{r['title']} — {lbl}",
                                       on_click=open_show_page, args=(r,), use_container_width=True)
