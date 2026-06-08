@@ -1827,15 +1827,42 @@ def render_upcoming(rows, as_tab=False):
                             continue
                         if g.get("home") == nm:
                             lbl = f"vs {g.get('away', '')}"
+                            opp_logo = g.get("away_logo")
                         elif g.get("away") == nm:
                             lbl = f"@ {g.get('home', '')}"
+                            opp_logo = g.get("home_logo")
                         else:
-                            lbl = "game"
-                        by_date.setdefault(d, []).append({"r": r, "label": lbl})
-        # Everything else (TV next-episodes + event-series) — one entry on its date from `up`
+                            lbl, opp_logo = "game", None
+                        by_date.setdefault(d, []).append(
+                            {"r": r, "label": lbl, "opp_logo": opp_logo})
+        # Event-series follows (F1, golf, UFC, ATP, WTA): expand the whole season
+        # calendar so every event shows on its date — like team games above.
+        _event_series_ids = set()
+        for r in rows:
+            tid = r.get("tmdb_id")
+            if tid and tid < 0:
+                league, team_id = sports.decode_id(tid)
+                if league and sports.is_event_league(league):
+                    _event_series_ids.add(tid)
+                    try:
+                        _cal_evs = sports.get_event_schedule(league).get("events", [])
+                    except Exception:
+                        _cal_evs = []
+                    for _ev in _cal_evs:
+                        try:
+                            _d = dt.date.fromisoformat((_ev.get("start") or "")[:10])
+                        except Exception:
+                            continue
+                        if _d < today:
+                            continue
+                        by_date.setdefault(_d, []).append(
+                            {"r": r, "label": (_ev.get("label") or "")[:14], "opp_logo": None})
+
+        # Everything else (TV next-episodes) — one entry on its date from `up`
         for d, r in up:
-            if r.get("tmdb_id") not in _sports_team_ids:
-                by_date.setdefault(d, []).append({"r": r, "label": None})
+            if r.get("tmdb_id") not in _sports_team_ids \
+               and r.get("tmdb_id") not in _event_series_ids:
+                by_date.setdefault(d, []).append({"r": r, "label": None, "opp_logo": None})
 
         if not by_date:
             st.caption("Nothing scheduled.")
@@ -1881,9 +1908,11 @@ def render_upcoming(rows, as_tab=False):
                                 ne = get_next_episode(tid) if (tid or 0) > 0 else None
                                 lbl = (f"{ne['season']}×{ne['episode']}"
                                        if ne and ne.get("season") else r['title'][:10])
-                            src = _poster_src(r.get("poster_path"))
+                            # For a sports game, the opponent's logo is more useful than
+                            # your own team's (you know who you follow) — show it when present.
+                            src = _poster_src(item.get("opp_logo") or r.get("poster_path"))
                             if src:
-                                st.image(src, width=42)   # small show logo / team logo
+                                st.image(src, width=42)   # opponent / show / team logo
                             st.button(lbl[:14], key=f"mo_{day.isoformat()}_{tid}_{_ix}",
                                       help=f"{r['title']} — {lbl}",
                                       on_click=open_show_page, args=(r,), use_container_width=True)
