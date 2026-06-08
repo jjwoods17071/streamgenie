@@ -527,7 +527,28 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None, o
     nums = [s["season_number"] for s in seasons]
     sel_key = f"{key_prefix}_selseason"
     if st.session_state.get(sel_key) not in nums:
-        st.session_state[sel_key] = nums[-1]   # default to most recent season
+        # Default to the season the user is CURRENTLY working through — the lowest
+        # season with unwatched aired episodes — instead of the most recent one
+        # (the old default landed you on the final/empty season of a show you're
+        # mid-rewatch on, so 'Mark season watched' looked like it did nothing).
+        _default_season = nums[0]
+        try:
+            if client is not None and user_id and watched.table_available(client):
+                _w = watched.get_watched(client, user_id, tv_id)
+                _todayiso = local_today().isoformat()
+                for _s in seasons:
+                    _sn = _s["season_number"]
+                    if _sn == 0:
+                        continue  # skip specials
+                    _eps = get_season_episodes(tv_id, _sn) or []
+                    _aired = [e.get("episode_number") for e in _eps
+                              if e.get("air_date") and e["air_date"] <= _todayiso]
+                    if _aired and any((_sn, en) not in _w for en in _aired):
+                        _default_season = _sn   # first season you haven't finished
+                        break
+        except Exception:
+            pass
+        st.session_state[sel_key] = _default_season
     st.markdown("**Seasons** — tap one for its episode guide")
     per_row = 6
     for i in range(0, len(seasons), per_row):
@@ -542,7 +563,7 @@ def render_episode_guide(tv_id:int, key_prefix:str, client=None, user_id=None, o
                              type="primary" if is_sel else "secondary"):
                     st.session_state[sel_key] = n
                     st.rerun()
-    sel = st.session_state.get(sel_key, nums[-1])
+    sel = st.session_state.get(sel_key, nums[0])
     st.markdown(f"#### {labels.get(sel, f'Season {sel}')}")
     _render_season_episodes(tv_id, sel, key_prefix, client, user_id)
 
@@ -1364,7 +1385,7 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                         f'<div style="font-size:0.66rem;color:#888;text-align:center;line-height:1.5">{cap}</div>',
                         unsafe_allow_html=True)
 
-    sel = st.session_state.get(sel_key, nums[-1])
+    sel = st.session_state.get(sel_key, nums[0])
     head = f"#### {labels.get(sel, f'Season {sel}')}"
     if sel == cur:
         head += f"  {_cur_mark} *{_cur_word.capitalize()}*"
