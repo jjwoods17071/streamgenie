@@ -2458,22 +2458,29 @@ def _render_sports_hero(r) -> bool:
         return c if (c and c.lower() not in ("#ffffff", "#fff")) else fallback
 
     def _card(t):
+        # Poster-scale hero half: a large player headshot (or large team crest) so the
+        # card carries the same visual weight as a TV poster.
         p = t.get("player") or {}
         hs = p.get("headshot")
         logo = t.get("logo")
-        logo_html = (f'<img src="{logo}" style="height:24px;object-fit:contain;margin-bottom:2px">'
-                     if logo else "")
-        img = (f'<img src="{hs}" style="height:74px;width:74px;border-radius:50%;object-fit:cover;'
-               f'background:#f1f5f9;border:2px solid #cbd5e1">' if hs
-               else f'<img src="{logo}" style="height:60px;object-fit:contain">')
+        crest = (f'<img src="{logo}" style="height:30px;object-fit:contain">' if logo else "")
+        if hs:
+            hero = (f'<img src="{hs}" style="height:128px;width:128px;border-radius:50%;'
+                    f'object-fit:cover;background:rgba(255,255,255,.85);'
+                    f'border:3px solid rgba(255,255,255,.9);box-shadow:0 2px 8px rgba(0,0,0,.25)">')
+        else:
+            hero = (f'<img src="{logo}" style="height:104px;max-width:128px;object-fit:contain;'
+                    f'filter:drop-shadow(0 2px 6px rgba(0,0,0,.3))">' if logo else "")
         parts = (p.get("name") or "").split()
         short = f"{parts[0][0]}. {parts[-1]}" if len(parts) > 1 else (parts[0] if parts else "")
         rec = f' · {t.get("record")}' if t.get("record") else ""
-        return (f'<div style="text-align:center;flex:1">{logo_html}<div>{img}</div>'
-                f'<div style="font-size:.72rem;font-weight:800;margin-top:3px;color:#0f172a">'
-                f'{t.get("abbrev") or ""}<span style="font-weight:500;color:#64748b">{rec}</span></div>'
-                f'<div style="font-size:.66rem;color:#1e293b">{short}</div>'
-                f'<div style="font-size:.6rem;color:#64748b">{p.get("note") or ""}</div></div>')
+        return (f'<div style="text-align:center;flex:1;display:flex;flex-direction:column;'
+                f'align-items:center;gap:3px">{crest}<div>{hero}</div>'
+                f'<div style="font-size:.82rem;font-weight:800;color:#fff;'
+                f'text-shadow:0 1px 3px rgba(0,0,0,.5)">{t.get("abbrev") or ""}'
+                f'<span style="font-weight:500;opacity:.85">{rec}</span></div>'
+                f'<div style="font-size:.7rem;color:#f1f5f9;text-shadow:0 1px 2px rgba(0,0,0,.5)">{short}</div>'
+                f'<div style="font-size:.62rem;color:#cbd5e1">{p.get("note") or ""}</div></div>')
 
     away = ts[0]
     home = ts[1] if len(ts) > 1 else None
@@ -2481,12 +2488,17 @@ def _render_sports_hero(r) -> bool:
     hc = _team_col(home, "#94a3b8") if home else "#94a3b8"
 
     inner = _card(away) + (
-        '<div style="align-self:center;font-weight:800;color:#94a3b8;padding:0 4px">vs</div>' + _card(home)
+        '<div style="align-self:center;font-weight:800;color:rgba(255,255,255,.9);'
+        'padding:0 4px;font-size:.9rem;text-shadow:0 1px 3px rgba(0,0,0,.5)">vs</div>' + _card(home)
         if home else "")
 
-    # Top color bar (away | home team colors)
-    bar = (f'<div style="display:flex;height:6px;border-radius:6px 6px 0 0;overflow:hidden">'
-           f'<div style="flex:1;background:{ac}"></div><div style="flex:1;background:{hc}"></div></div>')
+    # Poster-scale HERO BAND: diagonal team-color gradient holding both player cards,
+    # the tall top half of the tile (matches a TV poster's visual mass).
+    hero_band = (
+        f'<div style="background:linear-gradient(135deg,{ac} 0%, #1e293b 50%, {hc} 100%);'
+        f'padding:14px 10px;display:flex;align-items:center;justify-content:space-around;'
+        f'min-height:208px">{inner}</div>')
+    bar = ""  # the gradient band replaces the thin color bar
 
     # Matchup/series title (the 'S5E1' analog). Never blank — fall back to a generic label
     # so the card always carries a title line like the show tiles.
@@ -2542,11 +2554,10 @@ def _render_sports_hero(r) -> bool:
 
     st.markdown(
         f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;'
-        f'min-height:340px;display:flex;flex-direction:column">'
-        f'{bar}<div style="padding:12px 10px 14px;display:flex;flex-direction:column;flex:1;'
-        f'justify-content:center;gap:6px">{title_html}'
-        f'<div style="display:flex;align-items:flex-start;justify-content:space-around">{inner}</div>'
-        f'{wp_html}{foot}{net_html}</div></div>', unsafe_allow_html=True)
+        f'min-height:430px;display:flex;flex-direction:column">'
+        f'{hero_band}'
+        f'<div style="padding:10px 10px 14px;display:flex;flex-direction:column;flex:1;gap:6px">'
+        f'{title_html}{wp_html}{foot}{net_html}</div></div>', unsafe_allow_html=True)
     return True
 
 
