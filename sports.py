@@ -76,7 +76,7 @@ _LOGO_OVERRIDE = {
     "epl": "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png",
     "ucl": "https://a.espncdn.com/i/leaguelogos/soccer/500/2.png",
     "mls": "https://a.espncdn.com/i/leaguelogos/soccer/500/19.png",
-    "wc":  "https://a.espncdn.com/i/leaguelogos/soccer/500/9.png",
+    "wc":  "https://a.espncdn.com/i/leaguelogos/soccer/500/4.png",
     "wwc": "https://a.espncdn.com/i/leaguelogos/soccer/500/60.png",
     "cfb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
     "cbb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
