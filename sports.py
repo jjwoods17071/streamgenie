@@ -81,10 +81,10 @@ _LOGO_OVERRIDE = {
     "cfb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
     "cbb": "https://a.espncdn.com/i/espn/misc_logos/500/ncaa.png",
     "golf": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/leagues/500/pgatour.png",
-    # ESPN has no ATP/WTA brand badge — its tennis icon is the best available (the
-    # 🎾 ATP / 🎾 WTA text label distinguishes the two).
-    "atp": "https://a.espncdn.com/combiner/i?img=/redesign/assets/img/icons/ESPN-icon-tennis.png",
-    "wta": "https://a.espncdn.com/combiner/i?img=/redesign/assets/img/icons/ESPN-icon-tennis.png",
+    # Real ATP/WTA brand logos, self-hosted in the repo (ESPN has no brand badge for
+    # them). Served from the GitHub raw CDN.
+    "atp": "https://raw.githubusercontent.com/jjwoods17071/StreamGenie/main/assets/leagues/atp.png",
+    "wta": "https://raw.githubusercontent.com/jjwoods17071/StreamGenie/main/assets/leagues/wta.png",
 }
 _NO_LOGO = set()                            # all leagues now resolve a logo
 
