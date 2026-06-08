@@ -3836,12 +3836,18 @@ def render_ask_genie():
         st.rerun()
 
 
-(_main_upcoming, _main_catchup, _main_watch, _main_sports, _main_genie,
- _main_discover) = st.tabs([
-    ":material/upcoming: Upcoming", ":material/download: Catch Up",
-    ":material/tv: Your Watchlist", ":material/sports_football: Sports",
+(_main_shows, _main_sports, _main_genie, _main_discover) = st.tabs([
+    ":material/tv: My Shows", ":material/sports_football: Sports",
     ":material/auto_awesome: Ask Genie", ":material/explore: Discover",
 ])
+
+# My Shows consolidates the three watchlist lenses into sub-tabs — each keeps its
+# own natural layout (date agenda / urgency backlog / management grid).
+with _main_shows:
+    (_main_upcoming, _main_catchup, _main_watch) = st.tabs([
+        ":material/upcoming: Up Next", ":material/download: Catch Up",
+        ":material/tv: All Shows",
+    ])
 
 # Discover consolidates the five discovery lenses into sub-tabs (banner stays compact)
 with _main_discover:
