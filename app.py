@@ -1908,11 +1908,21 @@ def render_upcoming(rows, as_tab=False):
                                 ne = get_next_episode(tid) if (tid or 0) > 0 else None
                                 lbl = (f"{ne['season']}×{ne['episode']}"
                                        if ne and ne.get("season") else r['title'][:10])
-                            # For a sports game, the opponent's logo is more useful than
-                            # your own team's (you know who you follow) — show it when present.
-                            src = _poster_src(item.get("opp_logo") or r.get("poster_path"))
-                            if src:
-                                st.image(src, width=42)   # opponent / show / team logo
+                            # Sports game: show BOTH team logos (yours + opponent) side by
+                            # side. Non-sports: the single show/team logo.
+                            _opp = _poster_src(item.get("opp_logo"))
+                            _mine = _poster_src(r.get("poster_path"))
+                            if _opp and _mine:
+                                _sep = "@" if (lbl or "").startswith("@") else "v"
+                                st.markdown(
+                                    f'<div style="display:flex;align-items:center;justify-content:center;'
+                                    f'gap:3px;height:30px;margin:1px 0">'
+                                    f'<img src="{_mine}" style="height:26px;width:26px;object-fit:contain">'
+                                    f'<span style="font-size:.6rem;opacity:.5">{_sep}</span>'
+                                    f'<img src="{_opp}" style="height:26px;width:26px;object-fit:contain">'
+                                    f'</div>', unsafe_allow_html=True)
+                            elif _mine:
+                                st.image(_mine, width=42)   # show / event-series / lone team logo
                             st.button(lbl[:14], key=f"mo_{day.isoformat()}_{tid}_{_ix}",
                                       help=f"{r['title']} — {lbl}",
                                       on_click=open_show_page, args=(r,), use_container_width=True)
