@@ -100,7 +100,8 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
                         seen_events.add(key)
                         games.append({"date": ev.get("start") or t_iso,
                                       "matchup": ev.get("label") or r["title"],
-                                      "network": "", "team": r["title"]})
+                                      "network": "", "team": r["title"],
+                                      "league": sports.league_label(league)})
                 continue
             for g in sports.get_team_schedule(league, team_id):
                 gd = g.get("date") or ""
@@ -115,7 +116,8 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
                 raw = nat or g.get("network") or (casts[0]["name"] if casts else "")
                 net = sports.normalize_broadcast(raw) if raw else ""
                 games.append({"date": gd, "matchup": f"{g.get('away')} @ {g.get('home')}",
-                              "network": net, "team": r["title"]})
+                              "network": net, "team": r["title"],
+                              "league": sports.league_label(league)})
         except Exception:
             continue
     games.sort(key=lambda g: g["date"])
@@ -237,7 +239,8 @@ def render_html(s: Dict[str, Any], editorial: Optional[Dict[str, Any]] = None) -
 
     if s["games"]:
         blocks.append(_section("🏈 Sports This Week", _rows([
-            f"{_day(g['date'])}: <b>{g['matchup']}</b>"
+            (f"{_day(g['date'])} · {g['league']}: " if g.get("league") else f"{_day(g['date'])}: ")
+            + f"<b>{g['matchup']}</b>"
             + (f" — {g['network']}" if g.get("network") else "")
             for g in s["games"]])))
 

@@ -83,8 +83,8 @@ def _week_payload(sections: Dict[str, Any]) -> str:
         ],
         "premieres_finales": sections.get("highlights", []),
         "games": [
-            {"date": g.get("date"), "matchup": g.get("matchup"),
-             "network": g.get("network") or None}
+            {"date": g.get("date"), "league": g.get("league"),
+             "matchup": g.get("matchup"), "network": g.get("network") or None}
             for g in sections.get("games", [])
         ],
         "leaving_soon": [

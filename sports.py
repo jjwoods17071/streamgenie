@@ -407,10 +407,22 @@ def get_event_schedule(league: str):
                     "start": (c.get("startDate") or "")[:10],
                     "end": (c.get("endDate") or "")[:10],
                 })
+        ev = d.get("events") or []
+        if not events and ev:
+            # Tennis-style: no labeled season calendar — build the schedule from the
+            # tournaments listed in events[] (Roland Garros, Boss Open, ...). Dedup by
+            # name so multiple draws of one tournament collapse to a single entry.
+            _seen = set()
+            for _e in ev:
+                _nm = _e.get("name") or _e.get("shortName")
+                if not _nm or _nm in _seen:
+                    continue
+                _seen.add(_nm)
+                _d = (_e.get("date") or "")[:10]
+                events.append({"label": _nm, "start": _d, "end": _d})
         events.sort(key=lambda e: e["start"] or "")
 
         cur = None
-        ev = d.get("events") or []
         if ev and ev[0]:
             e = ev[0]
             comp = (e.get("competitions") or [{}])[0]

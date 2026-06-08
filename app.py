@@ -3736,6 +3736,24 @@ def render_sports_follow():
             st.info("Couldn't load teams right now — try again shortly.")
         else:
             st.markdown(f"#### {sports.league_label(_lk)} — pick a team to follow")
+            # Follow every team in the league at once (e.g. all 48 World Cup nations)
+            _unfollowed = [t for t in _teams
+                           if sports.encode_id(_lk, t["id"]) not in _wl_ids]
+            _fa, _fb = st.columns([3, 1])
+            with _fa:
+                st.caption(f"{len(_teams) - len(_unfollowed)}/{len(_teams)} followed")
+            with _fb:
+                if _unfollowed and st.button(f"➕ Follow all {len(_unfollowed)}",
+                                             key=f"followall_{_lk}", use_container_width=True,
+                                             help="Follow every team in this league"):
+                    for _t in _unfollowed:
+                        _g = sports.get_team_schedule(_lk, _t["id"])
+                        _ng = sports.next_game(_g)
+                        upsert_show(client, sports.encode_id(_lk, _t["id"]), _t["name"], "US",
+                                    True, (_game_local_date(_ng) if _ng else None),
+                                    f"{_lab} team", _t.get("logo"), _lab)
+                    st.toast(f"Following all {len(_unfollowed)} {_lab} teams", icon="🏟️")
+                    st.rerun()
             _q = st.text_input("Filter teams", "", key=f"team_filter_{_lk}",
                                placeholder="Type to filter…", label_visibility="collapsed")
             if _q:
