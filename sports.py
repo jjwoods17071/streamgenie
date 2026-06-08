@@ -159,6 +159,7 @@ def _logo(c):
     return t.get("logo")
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
 def _league_fixtures(league: str):
     """All scheduled games for a league via a single date-ranged scoreboard query
     (today .. +75d). ESPN leaves the per-team /schedule endpoint EMPTY for
@@ -211,6 +212,7 @@ def _league_fixtures(league: str):
         return []
 
 
+@st.cache_data(ttl=900, show_spinner=False)
 def get_team_schedule(league: str, team_id: str):
     """A team's season schedule (oldest→newest) as a list of game dicts."""
     try:
