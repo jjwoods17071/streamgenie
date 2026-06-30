@@ -3816,6 +3816,11 @@ def _add_discovered(tmdb_id, title, overview, poster_path, provider="Multiple Pr
     upsert_show(client, tmdb_id, title, region, True, None, overview or "", poster_path, provider or "Multiple Providers")
 
 
+def _dismiss_discovered(tmdb_id):
+    """Mark a discovered show 'Not interested' so it stops appearing in Discover."""
+    dismissed.dismiss(client, get_user_id(), tmdb_id)
+
+
 def render_sports_follow():
     """Follow your sports teams/series — lives in the top-level 'Sports' tab."""
     st.caption("Follow your sports teams — games show up in **Upcoming** like episodes, with TV "
@@ -4359,7 +4364,8 @@ with _main_grow:
     dtab1, dtab2 = st.tabs([
         "🔎 New & Returning on Your Services", "📥 Import Netflix History"])
     with dtab1:
-        discover.render_discover_section(region, _wl_ids, _add_discovered)
+        discover.render_discover_section(region, _wl_ids, _add_discovered,
+                                         _dismissed_ids, _dismiss_discovered)
     with dtab2:
         discover.render_netflix_import(_wl_ids, _add_discovered)
 

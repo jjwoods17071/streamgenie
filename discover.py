@@ -112,7 +112,9 @@ def _provider_chips(provs) -> None:
         st.markdown("📺&nbsp;" + imgs, unsafe_allow_html=True)
 
 
-def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callable) -> None:
+def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callable,
+                            dismissed_ids: Set[int] = frozenset(),
+                            dismiss_fn: Callable = None) -> None:
     st.caption("Pick your services and we'll surface **returning** shows on them — the ones with new episodes coming.")
     default = [p for p in ["Max", "Netflix", "Apple TV+", "Paramount+", "Amazon Prime Video", "Hulu"]
                if p in PROVIDERS]
@@ -129,15 +131,25 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
         return
 
     owned = {int(x) for x in watchlist_ids if x is not None}
-    # Hide anything already on the watchlist — Discover is for shows you don't track yet.
-    not_owned = [s for s in found if int(s["tmdb_id"]) not in owned]
-    already = len(found) - len(not_owned)
-    note = f"**{len(not_owned)}** returning shows on your services not yet tracked"
-    if already:
-        note += f"  ·  **{already}** already on your watchlist (hidden)"
+    dismissed_set = {int(x) for x in dismissed_ids if x is not None}
+    # Hide shows already on the watchlist AND ones marked "Not interested" — Discover is
+    # for new shows you might actually want.
+    visible = [s for s in found
+               if int(s["tmdb_id"]) not in owned and int(s["tmdb_id"]) not in dismissed_set]
+    hidden_owned = sum(1 for s in found if int(s["tmdb_id"]) in owned)
+    hidden_dismissed = sum(1 for s in found
+                           if int(s["tmdb_id"]) in dismissed_set and int(s["tmdb_id"]) not in owned)
+    note = f"**{len(visible)}** returning shows on your services not yet tracked"
+    extra = []
+    if hidden_owned:
+        extra.append(f"{hidden_owned} on your watchlist")
+    if hidden_dismissed:
+        extra.append(f"{hidden_dismissed} not interested")
+    if extra:
+        note += "  ·  " + ", ".join(extra) + " (hidden)"
     st.success(note + ".")
 
-    for s in not_owned[:30]:
+    for s in visible[:30]:
         with st.container(border=True):
             c = st.columns([1, 5, 2])
             with c[0]:
@@ -151,13 +163,18 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
                 _provider_chips(stream_providers(s["tmdb_id"], region))
             with c[2]:
                 # on_click keeps the results in place; the show drops off the list after
-                # adding (next rerun recomputes watchlist_ids and filters it out).
+                # adding/dismissing (next rerun recomputes the hidden sets).
                 _pv = stream_providers(s["tmdb_id"], region)
                 _pname = _pv[0][0] if _pv else "Multiple Providers"
                 st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
                           type="primary",
                           on_click=add_fn,
                           args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"], _pname))
+                if dismiss_fn is not None:
+                    st.button("🚫 Not interested", key=f"disc_dis_{s['tmdb_id']}",
+                              use_container_width=True,
+                              help="Hide this and stop suggesting it",
+                              on_click=dismiss_fn, args=(s["tmdb_id"],))
 
 
 # ---------------- Netflix history import ----------------
