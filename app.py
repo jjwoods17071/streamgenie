@@ -221,19 +221,25 @@ def get_supabase_client() -> Client:
         st.stop()
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
+PLACEHOLDER_PROVIDERS = (None, "", "Multiple Providers")
+
 def upsert_show(client: Client, tmdb_id:int, title:str, region:str, on_provider:bool, next_air_date:Optional[str], overview:str, poster_path:Optional[str], provider_name:str):
-    """Insert or update a show in the user's watchlist"""
+    """Insert or update a show in the user's watchlist.
+
+    Invariant: ONE row per (user_id, tmdb_id). The table allows multiple
+    provider rows per show, but the app treats ownership as per-tmdb_id, so if
+    the show is already tracked under ANY provider we update that row in place
+    instead of inserting a second one (which is how duplicates used to form).
+    """
     user_id = get_user_id()
 
-    # Check if show already exists
+    # Find any existing row for this show, regardless of provider_name.
     existing = client.table("shows")\
-        .select("id")\
+        .select("id, provider_name, on_provider, created_at")\
         .eq("user_id", user_id)\
         .eq("tmdb_id", tmdb_id)\
-        .eq("provider_name", provider_name)\
-        .execute()
-
-    is_new_show = len(existing.data) == 0
+        .order("created_at")\
+        .execute().data or []
 
     data = {
         "user_id": user_id,
@@ -247,15 +253,23 @@ def upsert_show(client: Client, tmdb_id:int, title:str, region:str, on_provider:
         "provider_name": provider_name
     }
 
-    # Upsert: insert or update if exists
-    client.table("shows").upsert(data, on_conflict="user_id,tmdb_id,provider_name").execute()
+    if existing:
+        keeper = existing[0]  # earliest row wins
+        # Don't let a placeholder / "not on provider" add overwrite better info.
+        if provider_name in PLACEHOLDER_PROVIDERS and keeper.get("provider_name") not in PLACEHOLDER_PROVIDERS:
+            data["provider_name"] = keeper["provider_name"]
+        if not on_provider and keeper.get("on_provider"):
+            data["on_provider"] = True
+        client.table("shows").update(data).eq("id", keeper["id"]).execute()
+        # Converge any stragglers (e.g. legacy duplicate provider rows) to one.
+        for extra in existing[1:]:
+            client.table("shows").delete().eq("id", extra["id"]).execute()
+        # Existing show — no "added" bell notice and no re-run of status detection.
+        return
 
-    # New shows: no "added to your watchlist" bell notice — you just did it
-    # yourself, so it's noise. (Finale/cancellation detection below still runs.)
-    if is_new_show:
-
-        # Check and update show status from TMDB (series finale/cancellation detection)
-        show_status.update_show_status(client, user_id, tmdb_id, title)
+    # New show: insert, then run finale/cancellation detection from TMDB.
+    client.table("shows").insert(data).execute()
+    show_status.update_show_status(client, user_id, tmdb_id, title)
 
 def delete_show(client: Client, tmdb_id:int, region:str, provider_name:str):
     """Delete a show from the user's watchlist"""
