@@ -71,9 +71,21 @@ def set_season(client, user_id: str, tmdb_id: int, season: int,
 
 
 def watched_counts(client, user_id: str) -> Dict[int, int]:
-    """tmdb_id -> number of watched episodes for the user (single query, for card badges)."""
+    """tmdb_id -> number of watched episodes for the user (for card badges, catch-up and
+    the watchlist's caught-up/history grouping). Pages past Supabase's 1000-row response
+    cap — without this, users with large histories are undercounted and fully-watched
+    shows wrongly look 'behind' (e.g. a 40-episode show counted as 32)."""
     try:
-        r = client.table("watched_episodes").select("tmdb_id").eq("user_id", user_id).execute()
-        return dict(Counter(x["tmdb_id"] for x in (r.data or [])))
+        counts: Counter = Counter()
+        start, page = 0, 1000
+        while True:
+            r = (client.table("watched_episodes").select("tmdb_id")
+                 .eq("user_id", user_id).range(start, start + page - 1).execute())
+            batch = r.data or []
+            counts.update(x["tmdb_id"] for x in batch)
+            if len(batch) < page:
+                break
+            start += page
+        return dict(counts)
     except Exception:
         return {}
