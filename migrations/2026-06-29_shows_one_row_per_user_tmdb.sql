@@ -32,7 +32,7 @@ BEGIN
     WHERE rel.relname = 'shows'
       AND con.contype = 'u'
       AND (
-        SELECT array_agg(att.attname ORDER BY att.attname)
+        SELECT array_agg(att.attname::text ORDER BY att.attname::text)
         FROM unnest(con.conkey) AS k(attnum)
         JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = k.attnum
       ) = ARRAY['provider_name', 'tmdb_id', 'user_id']
