@@ -4504,18 +4504,24 @@ with _main_watch:
             if tid < 0:
                 return "watching"   # sports follows never "finish"
             w = _wcounts.get(tid, 0)
-            series_over = _status_group(rr) in ("ended", "canceled")
-            if series_over and w > 0 and available_now_count(tid, w) == 0:
-                return "history"
+            # Nothing left to watch right now — every aired episode is watched.
+            if w > 0 and available_now_count(tid, w) == 0:
+                # Series done for good → Watched History. Merely between seasons (still
+                # returning) → Caught Up; it rejoins Still Watching the moment a new
+                # episode airs (available_now_count goes > 0 again).
+                if _status_group(rr) in ("ended", "canceled"):
+                    return "history"
+                return "caught_up"
             return "watching"
 
-        _groups = {"watching": [], "history": []}
+        _groups = {"watching": [], "caught_up": [], "history": []}
         for r in rows:
             _groups[_viewer_group(r)].append(r)
 
         _filter_opts = {
             f"All ({len(rows)})": "all",
             f"▶️ Still Watching ({len(_groups['watching'])})": "watching",
+            f"✅ Caught Up ({len(_groups['caught_up'])})": "caught_up",
             f"✅ Watched History ({len(_groups['history'])})": "history",
         }
         with sc[1]:
