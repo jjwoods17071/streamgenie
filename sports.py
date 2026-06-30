@@ -69,6 +69,8 @@ LEAGUES = {
 SOCCER = {"epl", "ucl", "mls", "wc", "wwc"}      # leagues that can draw → W-D-L records
 EVENT = {"f1", "golf", "ufc", "atp", "wta"}   # series, not head-to-head teams
 SEASON_CAL = {"f1", "golf", "ufc"}        # event leagues with a labeled season calendar
+TOURNAMENT = {"wc", "wwc"}                # ESPN's per-team /schedule only has the group
+                                          # stage; knockout fixtures need a league merge
 _IDX_TO_LEAGUE = {v[3]: k for k, v in LEAGUES.items()}
 
 # ESPN serves some league logos from non-default paths; others have none at all.
@@ -217,6 +219,31 @@ def _league_fixtures(league: str):
         return []
 
 
+def _team_name(league: str, team_id: str):
+    """Display name ESPN uses for a team in this league (for fixture matching)."""
+    for t in get_teams(league):
+        if str(t.get("id")) == str(team_id):
+            return t.get("name")
+    return None
+
+
+def _merge_league_fixtures(league: str, team_id: str, games: list) -> list:
+    """Add this team's league-wide fixtures (e.g. World Cup knockout games) that the
+    per-team /schedule endpoint omits, deduped by event id, oldest→newest."""
+    nm = _team_name(league, team_id)
+    if not nm:
+        return games
+    seen = {g.get("id") for g in games if g.get("id")}
+    for g in _league_fixtures(league):
+        if g.get("id") in seen:
+            continue
+        if g.get("home") == nm or g.get("away") == nm:
+            games.append(g)
+            seen.add(g.get("id"))
+    games.sort(key=lambda g: g["datetime"] or "")
+    return games
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def get_team_schedule(league: str, team_id: str):
     """A team's season schedule (oldest→newest) as a list of game dicts."""
@@ -259,18 +286,18 @@ def get_team_schedule(league: str, team_id: str):
                 "week": wk.get("number") or wk.get("text"),
             })
         games.sort(key=lambda g: g["datetime"] or "")
+        # Tournaments: the per-team endpoint only lists the group stage, so merge in
+        # this team's league-wide knockout fixtures (else next_game() goes blank once
+        # the group stage ends and the team drops off calendars).
+        if league in TOURNAMENT:
+            games = _merge_league_fixtures(league, team_id, games)
         if games:
             return games
     except Exception:
         pass
-    # Fallback for tournaments (World Cup) with empty per-team schedules: pull the
-    # whole league fixture list and keep the games this team plays in.
+    # Fallback when the per-team schedule is empty: derive purely from league fixtures.
     try:
-        nm = None
-        for t in get_teams(league):
-            if str(t.get("id")) == str(team_id):
-                nm = t.get("name")
-                break
+        nm = _team_name(league, team_id)
         if nm:
             return [g for g in _league_fixtures(league)
                     if g.get("home") == nm or g.get("away") == nm]
