@@ -211,6 +211,7 @@ def _league_fixtures(league: str):
                 "home_score": _score(home), "away_score": _score(away),
                 "status": stype.get("description") or stype.get("name"),
                 "completed": bool(stype.get("completed")),
+                "time_valid": bool(comp.get("timeValid", True)),  # False => kickoff TBD
                 "network": net, "broadcasts": casts,
             })
         games.sort(key=lambda g: g["datetime"] or "")
@@ -281,6 +282,7 @@ def get_team_schedule(league: str, team_id: str):
                 "away_score": _score(away),
                 "status": stype.get("description") or stype.get("name"),
                 "completed": bool(stype.get("completed")),
+                "time_valid": bool(comp.get("timeValid", True)),  # False => kickoff TBD
                 "network": net,
                 "broadcasts": casts,
                 "week": wk.get("number") or wk.get("text"),

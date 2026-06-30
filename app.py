@@ -98,6 +98,18 @@ def _game_local_date(g: Dict[str, Any]) -> str:
         return g.get("date") or ""
 
 
+def _local_clock(iso: str):
+    """(minutes_since_local_midnight, '7:00 PM') for a UTC ISO timestamp in the user's
+    timezone, or (None, '') if it can't be parsed. Used to sort and label same-day
+    calendar items by start time."""
+    try:
+        d = dt.datetime.fromisoformat((iso or "").replace("Z", "+00:00"))
+        ld = d.astimezone(ZoneInfo(_user_tz_name()))
+    except Exception:
+        return None, ""
+    return ld.hour * 60 + ld.minute, ld.strftime("%I:%M %p").lstrip("0")
+
+
 def _ord(n) -> str:
     """1 -> '1st', 2 -> '2nd', etc."""
     try:
@@ -1860,8 +1872,12 @@ def render_upcoming(rows, as_tab=False):
                             opp_logo = g.get("home_logo")
                         else:
                             lbl, opp_logo = "game", None
+                        # Kickoff time in the user's tz (blank when ESPN flags it TBD).
+                        _mins, _tlabel = (_local_clock(g.get("datetime"))
+                                          if g.get("time_valid", True) else (None, ""))
                         by_date.setdefault(d, []).append(
-                            {"r": r, "label": lbl, "opp_logo": opp_logo})
+                            {"r": r, "label": lbl, "opp_logo": opp_logo,
+                             "time": _tlabel, "sort": _mins if _mins is not None else 10**6})
         # Event-series follows (F1, golf, UFC, ATP, WTA): expand the whole season
         # calendar so every event shows on its date — like team games above.
         _event_series_ids = set()
@@ -1882,14 +1898,25 @@ def render_upcoming(rows, as_tab=False):
                             continue
                         if _d < today:
                             continue
+                        # Event sessions carry a real start time; show it when present.
+                        _start = _ev.get("start") or ""
+                        _mins, _tlabel = (_local_clock(_start) if len(_start) > 10 else (None, ""))
                         by_date.setdefault(_d, []).append(
-                            {"r": r, "label": (_ev.get("label") or "")[:14], "opp_logo": None})
+                            {"r": r, "label": (_ev.get("label") or "")[:14], "opp_logo": None,
+                             "time": _tlabel, "sort": _mins if _mins is not None else 10**6})
 
-        # Everything else (TV next-episodes) — one entry on its date from `up`
+        # Everything else (TV next-episodes) — one entry on its date from `up`.
+        # No start time (date-only), so it has no time label and sorts after timed items.
         for d, r in up:
             if r.get("tmdb_id") not in _sports_team_ids \
                and r.get("tmdb_id") not in _event_series_ids:
-                by_date.setdefault(d, []).append({"r": r, "label": None, "opp_logo": None})
+                by_date.setdefault(d, []).append(
+                    {"r": r, "label": None, "opp_logo": None, "time": "", "sort": 10**6})
+
+        # Order every day's entries by start time (timed items first, chronological;
+        # date-only items last, keeping their alphabetical-by-title order).
+        for _items in by_date.values():
+            _items.sort(key=lambda it: it.get("sort", 10**6))
 
         if not by_date:
             st.caption("Nothing scheduled.")
@@ -1955,8 +1982,15 @@ def render_upcoming(rows, as_tab=False):
                                     f'height:56px;margin:1px 0">'
                                     f'<img src="{_mine}" style="height:52px;max-width:84px;object-fit:contain">'
                                     f'</div>', unsafe_allow_html=True)
+                            # Start time above the entry — only for items that have one
+                            # (games / event sessions); date-only TV shows none.
+                            _tm = item.get("time")
+                            if _tm:
+                                st.markdown(
+                                    f"<div style='text-align:center;font-size:.7rem;opacity:.7;"
+                                    f"margin:-2px 0 1px'>{_tm}</div>", unsafe_allow_html=True)
                             st.button(lbl[:14], key=f"mo_{day.isoformat()}_{tid}_{_ix}",
-                                      help=f"{r['title']} — {lbl}",
+                                      help=f"{r['title']} — {lbl}" + (f" · {_tm}" if _tm else ""),
                                       on_click=open_show_page, args=(r,), use_container_width=True)
 
     if as_tab:
