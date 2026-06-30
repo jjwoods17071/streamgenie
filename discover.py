@@ -19,6 +19,8 @@ from typing import List, Dict, Any, Callable, Set, Optional
 import requests
 import streamlit as st
 
+import genre_prefs
+
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_BASE = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p"
@@ -81,6 +83,8 @@ def discover_returning(provider_ids: tuple, region: str = "US", pages: int = 2) 
                 "poster_path": s.get("poster_path"),
                 "overview": s.get("overview", ""),
                 "vote": s.get("vote_average", 0),
+                "genre_ids": s.get("genre_ids") or [],
+                "original_language": s.get("original_language"),
             })
     return out
 
@@ -114,7 +118,9 @@ def _provider_chips(provs) -> None:
 
 def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callable,
                             dismissed_ids: Set[int] = frozenset(),
-                            dismiss_fn: Callable = None) -> None:
+                            dismiss_fn: Callable = None,
+                            excluded_genres: Set[str] = frozenset(),
+                            exclude_genre_fn: Callable = None) -> None:
     st.caption("Pick your services and we'll surface **returning** shows on them — the ones with new episodes coming.")
     default = [p for p in ["Max", "Netflix", "Apple TV+", "Paramount+", "Amazon Prime Video", "Hulu"]
                if p in PROVIDERS]
@@ -132,19 +138,32 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
 
     owned = {int(x) for x in watchlist_ids if x is not None}
     dismissed_set = {int(x) for x in dismissed_ids if x is not None}
-    # Hide shows already on the watchlist AND ones marked "Not interested" — Discover is
+    excluded = set(excluded_genres or ())
+
+    def _hidden_reason(s):
+        if int(s["tmdb_id"]) in owned:
+            return "owned"
+        if int(s["tmdb_id"]) in dismissed_set:
+            return "dismissed"
+        if genre_prefs.show_genre_keys(s) & excluded:
+            return "genre"
+        return None
+
+    # Hide watchlisted shows, "Not interested" shows, and excluded genres — Discover is
     # for new shows you might actually want.
-    visible = [s for s in found
-               if int(s["tmdb_id"]) not in owned and int(s["tmdb_id"]) not in dismissed_set]
-    hidden_owned = sum(1 for s in found if int(s["tmdb_id"]) in owned)
-    hidden_dismissed = sum(1 for s in found
-                           if int(s["tmdb_id"]) in dismissed_set and int(s["tmdb_id"]) not in owned)
+    visible = [s for s in found if _hidden_reason(s) is None]
+    _reasons = [_hidden_reason(s) for s in found]
+    hidden_owned = _reasons.count("owned")
+    hidden_dismissed = _reasons.count("dismissed")
+    hidden_genre = _reasons.count("genre")
     note = f"**{len(visible)}** returning shows on your services not yet tracked"
     extra = []
     if hidden_owned:
         extra.append(f"{hidden_owned} on your watchlist")
     if hidden_dismissed:
         extra.append(f"{hidden_dismissed} not interested")
+    if hidden_genre:
+        extra.append(f"{hidden_genre} hidden genre")
     if extra:
         note += "  ·  " + ", ".join(extra) + " (hidden)"
     st.success(note + ".")
@@ -175,6 +194,14 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
                               use_container_width=True,
                               help="Hide this and stop suggesting it",
                               on_click=dismiss_fn, args=(s["tmdb_id"],))
+                # Per-show genre exclude: hide every show of a genre this one belongs to.
+                if exclude_genre_fn is not None:
+                    for _gk in sorted(genre_prefs.show_genre_keys(s) - excluded):
+                        _glabel = genre_prefs.EXCLUDABLE_GENRES[_gk][0]
+                        st.button(f"🙈 Hide all {_glabel}", key=f"disc_gx_{_gk}_{s['tmdb_id']}",
+                                  use_container_width=True,
+                                  help=f"Stop showing {_glabel} shows in Discover (change in your profile)",
+                                  on_click=exclude_genre_fn, args=(_gk,))
 
 
 # ---------------- Netflix history import ----------------

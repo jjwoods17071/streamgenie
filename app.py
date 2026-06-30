@@ -19,6 +19,7 @@ import leaving_soon  # Admin-curated "leaving soon" list
 import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
 import dismissed  # "Not interested" dismissals for discovery carousels
+import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
 import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
@@ -3790,6 +3791,23 @@ if show_settings:
                     "(Email Reminders tab). **Leaving-soon** alerts aren't toggle-able yet — tell me if you "
                     "want them added here.")
 
+            # ── Discover filters: hide whole genres (opt-in per user) ──
+            st.divider()
+            st.markdown("**🙈 Hide genres from Discover**")
+            st.caption("Hide whole genres from the Discover list. Off by default — turn on only what "
+                       "you never want to see. (Doesn't affect anyone else's account.)")
+            _cur_excl = genre_prefs.get_excluded(client, user_id)
+            _excl_new = set()
+            _gcols = st.columns(len(genre_prefs.EXCLUDABLE_GENRES))
+            for _i, (_gk, (_glabel, _gids, _ja)) in enumerate(genre_prefs.EXCLUDABLE_GENRES.items()):
+                if _gcols[_i].checkbox(f"Hide {_glabel}", value=(_gk in _cur_excl), key=f"genx_{_gk}"):
+                    _excl_new.add(_gk)
+            if st.button(":material/save: Save Discover filters", key="save_genre_excl",
+                         use_container_width=True, type="primary"):
+                genre_prefs.set_excluded(client, user_id, _excl_new)
+                st.success("Saved! Hidden genres won't appear in Discover.")
+                st.rerun()
+
         st.write("---")
 else:
     region = DEFAULT_REGION
@@ -3819,6 +3837,11 @@ def _add_discovered(tmdb_id, title, overview, poster_path, provider="Multiple Pr
 def _dismiss_discovered(tmdb_id):
     """Mark a discovered show 'Not interested' so it stops appearing in Discover."""
     dismissed.dismiss(client, get_user_id(), tmdb_id)
+
+
+def _exclude_genre(genre_key):
+    """Hide a whole genre (Kids/Reality/Anime) from Discover for this user."""
+    genre_prefs.exclude(client, get_user_id(), genre_key)
 
 
 def render_sports_follow():
@@ -4365,7 +4388,9 @@ with _main_grow:
         "🔎 New & Returning on Your Services", "📥 Import Netflix History"])
     with dtab1:
         discover.render_discover_section(region, _wl_ids, _add_discovered,
-                                         _dismissed_ids, _dismiss_discovered)
+                                         _dismissed_ids, _dismiss_discovered,
+                                         genre_prefs.get_excluded(client, get_user_id()),
+                                         _exclude_genre)
     with dtab2:
         discover.render_netflix_import(_wl_ids, _add_discovered)
 
