@@ -1841,6 +1841,7 @@ def render_upcoming(rows, as_tab=False):
         # schedule (every game), so the calendar shows all their games — not just the next one.
         by_date = {}
         _sports_team_ids = set()
+        _seen_games = set()   # (date, game id) — collapse a match you follow both sides of
         for r in rows:
             tid = r.get("tmdb_id")
             if tid and tid < 0:
@@ -1864,6 +1865,13 @@ def render_upcoming(rows, as_tab=False):
                             continue
                         if d < today:
                             continue
+                        # If both teams in this match are on the watchlist, the game
+                        # comes up once per team — keep only the first (both team logos
+                        # render either way), so the match shows once on the calendar.
+                        gkey = (d, g.get("id") or frozenset((g.get("home"), g.get("away"))))
+                        if gkey in _seen_games:
+                            continue
+                        _seen_games.add(gkey)
                         if g.get("home") == nm:
                             lbl = f"vs {g.get('away', '')}"
                             opp_logo = g.get("away_logo")
