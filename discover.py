@@ -129,14 +129,15 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
         return
 
     owned = {int(x) for x in watchlist_ids if x is not None}
+    # Hide anything already on the watchlist — Discover is for shows you don't track yet.
     not_owned = [s for s in found if int(s["tmdb_id"]) not in owned]
     already = len(found) - len(not_owned)
     note = f"**{len(not_owned)}** returning shows on your services not yet tracked"
     if already:
-        note += f"  ·  **{already}** already on your watchlist (shown in blue)"
+        note += f"  ·  **{already}** already on your watchlist (hidden)"
     st.success(note + ".")
 
-    for s in found[:30]:
+    for s in not_owned[:30]:
         with st.container(border=True):
             c = st.columns([1, 5, 2])
             with c[0]:
@@ -149,16 +150,14 @@ def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callab
                     st.caption(s["overview"])
                 _provider_chips(stream_providers(s["tmdb_id"], region))
             with c[2]:
-                if int(s["tmdb_id"]) in owned:
-                    st.markdown(":blue[✓ In your list]")
-                else:
-                    # on_click keeps the results in place; the show flips to blue after adding
-                    _pv = stream_providers(s["tmdb_id"], region)
-                    _pname = _pv[0][0] if _pv else "Multiple Providers"
-                    st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
-                              type="primary",
-                              on_click=add_fn,
-                              args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"], _pname))
+                # on_click keeps the results in place; the show drops off the list after
+                # adding (next rerun recomputes watchlist_ids and filters it out).
+                _pv = stream_providers(s["tmdb_id"], region)
+                _pname = _pv[0][0] if _pv else "Multiple Providers"
+                st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
+                          type="primary",
+                          on_click=add_fn,
+                          args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"], _pname))
 
 
 # ---------------- Netflix history import ----------------
