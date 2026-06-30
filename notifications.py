@@ -6,6 +6,7 @@ import streamlit as st
 from supabase import Client
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import html
 import mailer
 import os
 import preferences  # User notification preferences
@@ -301,18 +302,32 @@ def render_notifications_panel(client: Client, user_id: str, key_prefix: str = "
                 "system": "ℹ️"
             }.get(notification["notification_type"], "📢")
 
-            st.markdown(f"""
-            <div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #667eea;">
-                <div style="display: flex; align-items: start; justify-content: space-between;">
-                    <div style="flex: 1;">
-                        <strong>{type_emoji} {notification['title']}</strong>
-                        <p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">{notification['message']}</p>
-                        {f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #667eea;">📺 {notification["related_show_title"]}</p>' if notification.get("related_show_title") else ''}
-                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #999;">{format_notification_time(notification['created_at'])}</p>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            # Escape dynamic text so titles/messages can't break the layout or inject markup.
+            title_html = html.escape(notification['title'] or "")
+            message_html = html.escape(notification['message'] or "")
+            time_html = html.escape(format_notification_time(notification['created_at']))
+            show_line = ""
+            if notification.get("related_show_title"):
+                show_title_html = html.escape(notification["related_show_title"])
+                show_line = (
+                    f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #667eea;">'
+                    f'📺 {show_title_html}</p>'
+                )
+
+            # Single-line HTML rendered via st.html() — no Markdown pass, so an empty
+            # optional line can't terminate the block early and leak raw tags as text.
+            card_html = (
+                f'<div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; '
+                f'margin-bottom: 8px; border-left: 4px solid #667eea;">'
+                f'<div style="display: flex; align-items: start; justify-content: space-between;">'
+                f'<div style="flex: 1;">'
+                f'<strong>{type_emoji} {title_html}</strong>'
+                f'<p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">{message_html}</p>'
+                f'{show_line}'
+                f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #999;">{time_html}</p>'
+                f'</div></div></div>'
+            )
+            st.html(card_html)
 
             col1, col2 = st.columns([1, 1])
             with col1:
