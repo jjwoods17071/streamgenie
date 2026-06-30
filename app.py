@@ -2014,8 +2014,12 @@ def render_catch_up(rows):
         cu_view = st.radio("View", ["▦ Grid", "📋 List"], horizontal=True,
                            key="cu_view", label_visibility="collapsed")
 
-    def _cu_remove(r):
-        st.button("🗑", key=f"cu_rm_{r['tmdb_id']}", help="Remove from your list",
+    def _cu_remove(r, idx):
+        # Key must be unique per rendered row: the same show (tmdb_id) can appear under
+        # multiple regions/providers, so include the region, provider AND the list position.
+        key = (f"cu_rm_{r['tmdb_id']}_{r.get('region') or DEFAULT_REGION}_"
+               f"{r.get('provider_name') or DEFAULT_PROVIDER}_{idx}")
+        st.button("🗑", key=key, help="Remove from your list",
                   on_click=delete_show,
                   args=(client, r['tmdb_id'], r.get('region') or DEFAULT_REGION,
                         r.get('provider_name') or DEFAULT_PROVIDER))
@@ -2034,9 +2038,9 @@ def render_catch_up(rows):
                         _ov = _overview_text(r, 170)
                         if _ov:
                             st.caption(_ov)
-                        _cu_remove(r)
+                        _cu_remove(r, i + j)
     else:
-        for n, r in avail:
+        for idx, (n, r) in enumerate(avail):
             c = st.columns([1, 4, 1])
             with c[0]:
                 clickable_poster(r['tmdb_id'], r.get("poster_path"))
@@ -2048,7 +2052,7 @@ def render_catch_up(rows):
                 if _ov:
                     st.caption(_ov)
             with c[2]:
-                _cu_remove(r)
+                _cu_remove(r, idx)
 
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
