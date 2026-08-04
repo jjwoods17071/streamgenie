@@ -4022,12 +4022,11 @@ with _main_shows:
         ":material/play_circle: Watch Next", ":material/tv: All Shows",
     ])
 
-# Discover consolidates the five discovery lenses into sub-tabs (banner stays compact)
+# Discover: one scrollable Browse feed (New / Trending / Top Rated / For You stacked
+# as sections) + Search. Collapsed from 5 sub-tabs so browsing is one scroll, not 4 clicks.
 with _main_discover:
-    (_main_search, _main_grow, _main_new, _main_trending, _main_top) = st.tabs([
-        ":material/search: Search", ":material/playlist_add: For You",
-        ":material/fiber_new: New This Month", ":material/trending_up: Trending",
-        ":material/star: Top Rated",
+    (_disc_browse, _disc_search) = st.tabs([
+        ":material/explore: Browse", ":material/search: Search",
     ])
 
 with _main_sports:
@@ -4045,7 +4044,7 @@ with _main_watchnext:
     st.divider()
     render_upcoming(_wn_rows, as_tab=True)
 
-with _main_search:
+with _disc_search:
     # Vertical layout: Search on top, watchlist below
     search_header = st.columns([8, 1])
     with search_header[0]:
@@ -4225,7 +4224,8 @@ with _main_search:
                 st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 
-with _main_new:
+with _disc_browse:
+    st.subheader("🆕 New This Month")
     st.caption("Shows that premiered in the last 30 days")
     new_shows = [s for s in get_new_shows(region, limit=12) if s.get("id") not in _dismissed_ids][:5]
 
@@ -4277,7 +4277,9 @@ with _main_new:
         st.info("No new shows in the last 30 days")
 
 
-with _main_trending:
+with _disc_browse:
+    st.divider()
+    st.subheader("🔥 Trending This Week")
     st.caption("Most popular and talked-about shows this week")
     trending_shows = [s for s in get_trending_shows(limit=12) if s.get("id") not in _dismissed_ids][:5]
 
@@ -4330,7 +4332,9 @@ with _main_trending:
         st.info("No trending shows available")
 
 
-with _main_top:
+with _disc_browse:
+    st.divider()
+    st.subheader("⭐ Top Rated")
     st.caption("All-time highest rated shows on TMDB")
     top_rated_shows = [s for s in get_top_rated_shows(limit=12) if s.get("id") not in _dismissed_ids][:5]
 
@@ -4383,7 +4387,9 @@ with _main_top:
         st.info("No top rated shows available")
 
 
-with _main_grow:
+with _disc_browse:
+    st.divider()
+    st.subheader("✨ For You")
     dtab1, dtab2 = st.tabs([
         "🔎 New & Returning on Your Services", "📥 Import Netflix History"])
     with dtab1:
