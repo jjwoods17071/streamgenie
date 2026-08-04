@@ -4015,12 +4015,11 @@ def render_ask_genie():
     ":material/auto_awesome: Ask Genie", ":material/explore: Discover",
 ])
 
-# My Shows consolidates the three watchlist lenses into sub-tabs — each keeps its
-# own natural layout (date agenda / urgency backlog / management grid).
+# My Shows: one "Watch Next" view (catch-up backlog + upcoming agenda merged — answers
+# "what do I watch?" in one place) plus the All Shows management grid.
 with _main_shows:
-    (_main_upcoming, _main_catchup, _main_watch) = st.tabs([
-        ":material/upcoming: Up Next", ":material/download: Catch Up",
-        ":material/tv: All Shows",
+    (_main_watchnext, _main_watch) = st.tabs([
+        ":material/play_circle: Watch Next", ":material/tv: All Shows",
     ])
 
 # Discover consolidates the five discovery lenses into sub-tabs (banner stays compact)
@@ -4037,13 +4036,14 @@ with _main_sports:
 with _main_genie:
     render_ask_genie()
 
-with _main_upcoming:
-    _up_rows = refresh_stale_air_dates(client, list_shows(client))
-    _up_rows = refresh_sports_air_dates(client, _up_rows)
-    render_upcoming(_up_rows, as_tab=True)
-
-with _main_catchup:
-    render_catch_up(list_shows(client))
+with _main_watchnext:
+    # Unified "what should I watch?" view: what's ready to catch up right now (most
+    # actionable) first, then the upcoming-episode agenda. Merges the old Up Next + Catch Up.
+    _wn_rows = refresh_stale_air_dates(client, list_shows(client))
+    _wn_rows = refresh_sports_air_dates(client, _wn_rows)
+    render_catch_up(_wn_rows)
+    st.divider()
+    render_upcoming(_wn_rows, as_tab=True)
 
 with _main_search:
     # Vertical layout: Search on top, watchlist below
