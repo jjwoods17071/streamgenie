@@ -96,7 +96,9 @@ def _week_payload(sections: Dict[str, Any]) -> str:
         "user_feedback": sections.get("rec_feedback") or {},
         "recommendation_candidates": [
             {"title": r.get("title"), "rating": r.get("vote"),
-             "because_user_watches": r.get("seed")}
+             # full seed list, not just the first — candidates that several of the
+             # user's shows point at are the strongest fits (see recs.score)
+             "because_user_watches": [s for s in (r.get("seeds") or [r.get("seed")]) if s]}
             for r in (sections.get("rec_candidates") or sections.get("recs", []))
         ],
     }
@@ -393,3 +395,131 @@ def chat(history: list, context: Dict[str, Any], client=None, user_id=None, log=
         except Exception as e:
             log(f"genie chat: Gemini failed ({e})")
     return None
+
+
+# ---------------- recommendation ranking (in-app "For You" + newsletter) ----------------
+
+# Separate from SYSTEM_PROMPT so each stays byte-stable for prompt caching — this one
+# is a pure ranking job, not newsletter editorial.
+RECS_SYSTEM_PROMPT = """You are Genie, the TV-buff recommendation engine inside \
+StreamGenie, a personal streaming tracker. You rank candidate shows by how well they \
+fit one specific user's taste.
+
+Rules you must always follow:
+- Only ever return titles that appear in `candidates`, spelled exactly as given. \
+Never invent a show.
+- Judge FIT, not popularity. A lower-rated show that matches the user's taste beats a \
+higher-rated one that doesn't. `because_user_watches` tells you which of their shows \
+produced each candidate — candidates drawn from several of their shows at once are \
+usually the strongest fits.
+- `liked` and `disliked` are the user's explicit 👍/👎 on past picks. Lean into the \
+likes; avoid anything resembling the dislikes.
+- Prefer variety across the set: do not return several near-identical shows.
+- NO SPOILERS. Never reveal plot points, deaths, twists, or outcomes. Describe shows \
+by tone, genre, and reputation only.
+- Each blurb is ONE sentence saying why THIS user might like it, referencing what they \
+already watch where it helps. No hype words, no emoji.
+- You are an AI assistant and never claim to be human."""
+
+RECS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "picks": {
+            "type": "array",
+            "description": "The best-fit candidates for this user, best first",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Exact candidate title as given"},
+                    "blurb": {"type": "string", "description": "One spoiler-free sentence on why this user might like it"},
+                },
+                "required": ["title", "blurb"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["picks"],
+    "additionalProperties": False,
+}
+
+
+def _recs_payload(candidates, taste, limit: int) -> str:
+    """Compact, deterministic JSON of the ranking job for the model."""
+    return json.dumps({
+        "how_many_to_pick": limit,
+        "user_feedback": {"liked": taste.get("liked") or [],
+                          "disliked": taste.get("disliked") or []},
+        "candidates": [
+            {"title": c.get("title"), "year": c.get("year"),
+             "rating": c.get("vote"),
+             "because_user_watches": [s for s in (c.get("seeds") or []) if s],
+             "overview": (c.get("overview") or "")[:300]}
+            for c in candidates
+        ],
+    }, sort_keys=True)
+
+
+def rank_recommendations(candidates, taste, limit: int = 6, log=print):
+    """Pick the `limit` best-fit candidates for this user, each with a blurb.
+
+    Returns a list of {"title", "blurb"} best-first, or None when no model is
+    available — callers fall back to their own deterministic ordering, so a missing
+    API key degrades the recommendations rather than breaking them.
+    """
+    if not candidates:
+        return None
+    payload = _recs_payload(candidates, taste or {}, limit)
+    try:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if api_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=1024,
+                system=[{
+                    "type": "text",
+                    "text": RECS_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                output_config={"format": {"type": "json_schema", "schema": RECS_SCHEMA}},
+                messages=[{"role": "user",
+                           "content": "Rank these candidates for this user:\n" + payload}],
+            )
+            text = next((b.text for b in response.content if b.type == "text"), "")
+            if text:
+                return (json.loads(text).get("picks") or [])[:limit]
+    except Exception as e:
+        log(f"genie: Claude rec ranking failed ({e}) — trying Gemini")
+
+    try:
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            return None
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            params={"key": api_key},
+            json={
+                "system_instruction": {"parts": [{"text": RECS_SYSTEM_PROMPT}]},
+                "contents": [{"parts": [{"text": "Rank these candidates for this user:\n" + payload}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseSchema": {
+                        "type": "OBJECT",
+                        "properties": {"picks": {"type": "ARRAY", "items": {
+                            "type": "OBJECT",
+                            "properties": {"title": {"type": "STRING"},
+                                           "blurb": {"type": "STRING"}},
+                            "required": ["title", "blurb"]}}},
+                        "required": ["picks"],
+                    },
+                },
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        return (json.loads(text).get("picks") or [])[:limit]
+    except Exception as e:
+        log(f"genie: Gemini rec ranking failed: {e}")
+        return None

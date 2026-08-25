@@ -26,6 +26,8 @@ import genie
 import mailer
 import preferences
 import leaving_soon as leaving_mod
+import milestones
+import recs
 import sports
 
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
@@ -67,19 +69,11 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
             ep = d.get("next_episode_to_air") or {}
             if str(ep.get("air_date")) != r["next_air_date"]:
                 continue
-            season = ep.get("season_number")
-            tag = None
-            if ep.get("episode_number") == 1:
-                tag = "Series premiere" if season == 1 else f"Season {season} premiere"
-            etype = (ep.get("episode_type") or "").lower()
-            if etype == "finale":
-                ended = d.get("status") in ("Ended", "Canceled")
-                tag = "Series finale" if ended else f"Season {season} finale"
-            elif etype == "mid_season" and not tag:
-                tag = "Mid-season finale"
-            if tag:
+            ms = milestones.classify(ep, d.get("status"))
+            if ms:
                 highlights.append({"title": r["title"], "date": r["next_air_date"],
-                                   "tag": tag, "provider": r.get("provider_name") or ""})
+                                   "tag": ms["tag"], "badge": ms["badge"],
+                                   "provider": r.get("provider_name") or ""})
         except Exception:
             continue
 
@@ -130,36 +124,36 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # --- Recommendation candidates (seeded from up to 4 watchlist shows) ---
-    # A pool of ~12 goes to Genie, who curates the 3 best fits for this user's
-    # taste; recs defaults to the top 3 by rating when Genie is unavailable.
-    pool, seen = [], set(wl_ids)
-    for r in tv[:4]:
+    # --- Recommendation candidates (shared engine — see recs.py) ---
+    # The pool is built by recs.for_user: seeds are the watchlist shows the user has
+    # actually watched most, candidates come from /recommendations + /similar merged
+    # with attribution, and anything dismissed or already voted on is filtered out.
+    # use_genie=False on purpose — the newsletter's single editorial call below does
+    # the Genie curation (one model call per user per week, as before).
+    _r = recs.for_user(client, user_id, limit=12, watchlist_rows=rows,
+                       use_genie=False, pool_cap=12)
+    candidates = _r["picks"]
+    taste = recs.taste_signals(client, user_id)
+    liked, disliked = taste["liked"], taste["disliked"]
+
+    # --- Coming eventually (renewed, no date yet — invisible everywhere else) ---
+    # Capped: this is a weekly email and the list barely changes between sends.
+    coming, _dated = [], {r["tmdb_id"] for r in airing}
+    # Ranked by episodes watched, not alphabetically — with dozens of undated shows a
+    # cap of 5 would otherwise send the same five titles every single week.
+    _wc = recs.fetch_watched_counts(client, user_id)
+    _undated = sorted([x for x in tv if x["tmdb_id"] not in _dated and not x.get("next_air_date")],
+                      key=lambda x: -_wc.get(x["tmdb_id"], 0))
+    for r in _undated[:40]:
         try:
-            for c in _tmdb(f"/tv/{r['tmdb_id']}/recommendations").get("results", [])[:10]:
-                if c.get("id") in seen:
-                    continue
-                seen.add(c.get("id"))
-                pool.append({"tmdb_id": c.get("id"), "title": c.get("name"),
-                             "vote": c.get("vote_average") or 0,
-                             "votes": c.get("vote_count") or 0, "seed": r["title"]})
+            if milestones.is_returning_undated(_tmdb(f"/tv/{r['tmdb_id']}")):
+                coming.append({"title": r["title"], "provider": r.get("provider_name") or "",
+                               "watched": _wc.get(r["tmdb_id"], 0)})
         except Exception:
             continue
-    # --- 👍/👎 feedback (rec_feedback table; absent table → no signal) ---
-    liked, disliked = [], []
-    try:
-        for f in (client.table("rec_feedback").select("title,verdict")
-                  .eq("user_id", user_id).execute().data or []):
-            (liked if f["verdict"] == "up" else disliked).append(f["title"])
-    except Exception:
-        pass
-    _voted = {t.strip().lower() for t in liked + disliked}
+    coming = coming[:5]
 
-    candidates = sorted([x for x in pool if x["votes"] >= 50
-                         and (x.get("title") or "").strip().lower() not in _voted],
-                        key=lambda x: -x["vote"])[:12]
-
-    return {"week_start": t_iso, "week_end": w_iso, "airing": airing,
+    return {"week_start": t_iso, "week_end": w_iso, "airing": airing, "coming": coming,
             "rec_feedback": {"liked": liked, "disliked": disliked},
             "highlights": highlights, "games": games, "leaving": leaving,
             "watchlist_titles": [r["title"] for r in tv],
@@ -233,7 +227,7 @@ def render_html(s: Dict[str, Any], editorial: Optional[Dict[str, Any]] = None) -
 
     if s["highlights"]:
         blocks.append(_section("🎭 Premieres &amp; Finales", _rows([
-            f"<b>{h['title']}</b> — {h['tag']} on {_day(h['date'])}"
+            f"{h.get('badge', '')} <b>{h['title']}</b> — {h['tag']} on {_day(h['date'])}"
             + (f" ({h['provider']})" if h.get("provider") else "")
             for h in s["highlights"]])))
 
@@ -267,6 +261,14 @@ def render_html(s: Dict[str, Any], editorial: Optional[Dict[str, Any]] = None) -
             return line
         blocks.append(_section("✨ Recommended For You", _rows(
             [_rec_line(r) for r in s["recs"]])))
+
+    # Renewed shows with no announced date. They can't appear in "This Week" (no date to
+    # sort by), so without this they're invisible until TMDB publishes one.
+    if s.get("coming"):
+        blocks.append(_section("🌱 Coming Eventually", _rows([
+            f"<b>{c['title']}</b> — renewed, no date announced yet"
+            + (f" ({c['provider']})" if c.get("provider") else "")
+            for c in s["coming"]])))
 
     return f"""
     <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">

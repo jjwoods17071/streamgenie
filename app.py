@@ -18,6 +18,8 @@ import show_status  # Show status tracking from TMDB
 import leaving_soon  # Admin-curated "leaving soon" list
 import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
+import recs  # shared like-for-like recommendation engine (app + newsletter)
+import milestones  # season premiere / finale classification (app + newsletter)
 import dismissed  # "Not interested" dismissals for discovery carousels
 import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
 import calendar_ics  # Episode → ICS / Google Calendar export
@@ -25,6 +27,8 @@ import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
 # Load environment variables
 load_dotenv()
+
+st.set_page_config(page_title="StreamGenie - Streaming Tracker", page_icon="🍿", layout="wide")
 
 # Streamlit Cloud: st.secrets updates live, but env-var copies of secrets are
 # only made at container boot — a secret added after boot is invisible to
@@ -356,10 +360,25 @@ def get_next_episode(tv_id:int) -> Optional[Dict[str, Any]]:
                 "episode": nxt.get("episode_number"),
                 "name": nxt.get("name"),
                 "air_date": nxt.get("air_date"),
+                "episode_type": nxt.get("episode_type"),
             }
     except Exception:
         pass
     return None
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_milestone(tv_id:int) -> Optional[Dict[str, Any]]:
+    """Season/series premiere or finale for a show's NEXT episode, else None.
+
+    "A new season starts" is the moment users are waiting for, but it used to render as
+    plain "S3E1" — indistinguishable from "S2E7 airs Tuesday". See milestones.py.
+    """
+    try:
+        d = tv_details(tv_id)
+        return milestones.classify(d.get("next_episode_to_air"), d.get("status"))
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -1659,6 +1678,62 @@ def _render_service_logo(r) -> None:
         st.markdown(_inner, unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_returning_undated(tv_ids: tuple) -> list:
+    """Of these shows, which are coming back but have no announced date yet.
+
+    tv_details is itself cached, so after the first build this is nearly free. Cached as
+    an aggregate (keyed on the id tuple) so a rerun doesn't re-walk the whole watchlist.
+    """
+    out = []
+    for tid in tv_ids:
+        try:
+            if milestones.is_returning_undated(tv_details(tid)):
+                out.append(tid)
+        except Exception:
+            continue
+    return out
+
+
+def render_coming_eventually(rows, shown_ids):
+    """🌱 Coming eventually — renewed shows with no date, which appear NOWHERE else.
+
+    The agenda only lists shows with a next_air_date and the newsletter only covers the
+    next 7 days, so a renewed show silently vanishes from the app between seasons —
+    exactly when people start wondering whether it was cancelled.
+    """
+    candidates = [r for r in rows
+                  if (r.get("tmdb_id") or 0) > 0 and r.get("tmdb_id") not in shown_ids]
+    if not candidates:
+        return
+    undated = set(get_returning_undated(tuple(sorted(r["tmdb_id"] for r in candidates))))
+    shows = [r for r in candidates if r["tmdb_id"] in undated]
+    if not shows:
+        return
+
+    st.divider()
+    with st.expander(f"🌱 Coming eventually ({len(shows)})", expanded=False):
+        st.caption("Renewed or still in production, but no air date has been announced yet — "
+                   "so they can't appear in the agenda above.")
+        for r in sorted(shows, key=lambda x: (x.get("title") or "").lower()):
+            tid = r["tmdb_id"]
+            c = st.columns([1, 5])
+            with c[0]:
+                clickable_poster(tid, r.get("poster_path"))
+            with c[1]:
+                clickable_title(r["title"], r)
+                _meta = tv_details(tid) or {}
+                _last = (_meta.get("last_episode_to_air") or {}).get("air_date")
+                _seasons = _meta.get("number_of_seasons")
+                bits = []
+                if _seasons:
+                    bits.append(f"{_seasons} season{'s' if _seasons != 1 else ''} so far")
+                if _last:
+                    bits.append(f"last episode {_last}")
+                st.caption("⏳ No date announced" + (" · " + " · ".join(bits) if bits else ""))
+                _render_service_logo(r)
+
+
 def render_upcoming(rows, as_tab=False):
     """Date-driven view of FUTURE episodes across the watchlist: a week-by-week agenda
     (default) or a month grid, with per-episode calendar export (Google link + .ics +
@@ -1727,7 +1802,14 @@ def render_upcoming(rows, as_tab=False):
             if d is not None:
                 days = (d - today).days
                 when = "🔴 TODAY" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
-                st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
+                # A premiere/finale gets its own headline line — the whole point is that
+                # it should NOT read like just another weekly episode.
+                _ms = get_milestone(tid) if (tid or 0) > 0 else None
+                if _ms:
+                    st.markdown(f"{_ms['badge']} **{_ms['tag']}**")
+                    st.caption(f"📅 {d.isoformat()} · {when}")
+                else:
+                    st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
             elif ep:
                 st.caption(f"⏳ next: {ep}")
             else:
@@ -2007,6 +2089,7 @@ def render_upcoming(rows, as_tab=False):
         if not up and not pinned_ids:
             st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Discover tab "
                     "to see what's coming up.")
+            render_coming_eventually(rows, set(up_by_id))
             return
         # Top controls: bulk calendar export + agenda/month toggle
         all_events = [_episode_event(r, d) for d, r in up]
@@ -2029,6 +2112,7 @@ def render_upcoming(rows, as_tab=False):
             _grid()
         else:
             _agenda()
+        render_coming_eventually(rows, set(up_by_id))
     else:
         if not up:
             return
@@ -3060,7 +3144,6 @@ def format_status(on_provider:bool, next_air_date:Optional[str], provider_name:s
     return badge
 
 # --------------- STREAMLIT UI ---------------
-st.set_page_config(page_title="StreamGenie - Streaming Tracker", page_icon="🍿", layout="wide")
 
 # Strip any leftover #anchor fragment from the URL on every run. Streamlit heading
 # anchors leave a #slug (e.g. ?show=66732#the-great-war) that our query-param nav never
@@ -3844,6 +3927,114 @@ def _exclude_genre(genre_key):
     genre_prefs.exclude(client, get_user_id(), genre_key)
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def _cached_recs(_client, user_id, wl_sig, dis_sig, genre_sig, limit):
+    """6-hour cache. The signature args aren't used inside — they exist so the cache
+    invalidates when the watchlist, dismissals, or hidden genres change. Without the
+    cache every rerun would fire ~12 TMDB calls and Discover would feel broken."""
+    return recs.for_user(_client, user_id, limit=limit,
+                         genre_keys_fn=genre_prefs.show_genre_keys,
+                         excluded_genres=set(genre_sig))
+
+
+def render_for_you():
+    """Taste-based recommendations: shows like the ones you actually watch.
+
+    Replaces the old "For You", which was a popularity sort of returning shows on your
+    providers and ignored watch history. Seeds come from your most-watched shows, so
+    every pick can say which of your shows produced it — see recs.py.
+    """
+    uid = get_user_id()
+    if st.button(f"{ICONS['refresh']} Refresh picks", key="fy_refresh",
+                 help="Rebuild recommendations from your latest viewing"):
+        _cached_recs.clear()
+        st.rerun()
+
+    with st.spinner("Finding shows like the ones you watch…"):
+        res = _cached_recs(client, uid,
+                           tuple(sorted(int(i) for i in _wl_ids if i is not None)),
+                           tuple(sorted(int(i) for i in _dismissed_ids if i is not None)),
+                           tuple(sorted(genre_prefs.get_excluded(client, uid))),
+                           6)
+
+    picks = res.get("picks") or []
+    if not picks:
+        st.info("Add a few shows and mark some episodes watched — recommendations are "
+                "built from what you actually watch.")
+        return
+
+    seeds = [s for s in (res.get("seed_titles") or []) if s]
+    if seeds:
+        st.caption("Based on your most-watched shows: **" + "**, **".join(seeds[:4]) + "**"
+                   + (f" · {res['pool_size']} candidates considered" if res.get("pool_size") else ""))
+
+    _genie_ranked = res.get("ranked_by") == "genie"
+    for p in picks:
+        tmdb_id, title = p["tmdb_id"], p["title"]
+        cols = st.columns([2, 4, 2, 2])
+
+        with cols[0]:
+            clickable_poster(tmdb_id, p.get("poster_path"))
+
+        with cols[1]:
+            clickable_title(title, {"tmdb_id": tmdb_id, "title": title,
+                                    "poster_path": p.get("poster_path"),
+                                    "overview": p.get("overview", "")})
+            if p.get("vote"):
+                st.caption(f"{ICONS['star']} {p['vote']:.1f}/10")
+            # The attribution is the trust lever — the seed show is already known, so
+            # saying WHY costs nothing and makes the pick legible.
+            if _genie_ranked and p.get("blurb"):
+                st.markdown(f"🧞 *{p['blurb']}*")
+                st.caption(p.get("why", ""))
+            else:
+                st.caption(f"**{p.get('why', '')}**")
+            _provs = get_stream_providers(tmdb_id, region)
+            render_provider_chips(_provs)
+
+        with cols[2]:
+            st.markdown(f"**{p.get('year', '—')}**")
+            st.caption("✨ For You")
+
+        with cols[3]:
+            if st.button(f"{ICONS['add']}", key=f"fy_add_{tmdb_id}", use_container_width=True,
+                         type="primary", help="Add to watchlist"):
+                try:
+                    upsert_show(client, tmdb_id, title, region, False, None,
+                                p.get("overview", ""), p.get("poster_path"),
+                                (_provs[0] if _provs else "Multiple Providers"))
+                    st.success("Added!")
+                    _cached_recs.clear()
+                    st.rerun()
+                except Exception:
+                    st.error("Error")
+            # In-app 👍/👎 — until now the taste loop could only be voted from the
+            # weekly email's links. Same rec_feedback table Genie ranks against.
+            v = st.columns(2)
+            with v[0]:
+                if st.button("👍", key=f"fy_up_{tmdb_id}", use_container_width=True,
+                             help="More like this"):
+                    _vote_rec(tmdb_id, title, "up")
+            with v[1]:
+                if st.button("👎", key=f"fy_down_{tmdb_id}", use_container_width=True,
+                             help="Less like this"):
+                    _vote_rec(tmdb_id, title, "down")
+
+
+def _vote_rec(tmdb_id, title, verdict):
+    """Record a 👍/👎 into rec_feedback and drop the cache so the next build reflects it."""
+    try:
+        client.table("rec_feedback").upsert(
+            {"user_id": get_user_id(), "tmdb_id": tmdb_id, "title": title,
+             "verdict": verdict}, on_conflict="user_id,title").execute()
+        st.toast(("👍 Noted — more like " if verdict == "up" else "👎 Got it — less like ")
+                 + f"**{title}**. Genie will remember.", icon="🧞")
+        _cached_recs.clear()
+    except Exception:
+        st.toast("Couldn't record that vote (the rec_feedback table may need its migration).")
+    st.rerun()
+
+
 def render_sports_follow():
     """Follow your sports teams/series — lives in the top-level 'Sports' tab."""
     st.caption("Follow your sports teams — games show up in **Upcoming** like episodes, with TV "
@@ -4390,14 +4581,18 @@ with _disc_browse:
 with _disc_browse:
     st.divider()
     st.subheader("✨ For You")
-    dtab1, dtab2 = st.tabs([
-        "🔎 New & Returning on Your Services", "📥 Import Netflix History"])
-    with dtab1:
+    st.caption("Shows like the ones you actually watch — seeded from your viewing history, "
+               "not from what's popular.")
+    render_for_you()
+
+    # The provider sweep and the Netflix import are secondary to real recommendations,
+    # so they collapse below For You instead of sitting in sub-tabs beside it.
+    with st.expander("🔎 New & returning on your services"):
         discover.render_discover_section(region, _wl_ids, _add_discovered,
                                          _dismissed_ids, _dismiss_discovered,
                                          genre_prefs.get_excluded(client, get_user_id()),
                                          _exclude_genre)
-    with dtab2:
+    with st.expander("📥 Import Netflix history"):
         discover.render_netflix_import(_wl_ids, _add_discovered)
 
     # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
