@@ -270,9 +270,9 @@ def for_user(client, user_id: str, *, limit: int = 6,
     """
     try:
         if watchlist_rows is None:
-            watchlist_rows = (client.table("shows")
-                              .select("tmdb_id,title,provider_name,next_air_date")
-                              .eq("user_id", user_id).execute().data or [])
+            import movies
+            watchlist_rows = movies.fetch_tv_rows(
+                client, user_id, "tmdb_id,title,provider_name,next_air_date")
         if dismissed_ids is None:
             try:
                 dismissed_ids = {x["tmdb_id"] for x in

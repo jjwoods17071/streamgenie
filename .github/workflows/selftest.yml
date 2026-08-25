@@ -1,0 +1,49 @@
+name: StreamGenie self-test
+
+# There is only ONE environment — local scripts, the hosted Streamlit app and the cron
+# all share the same Supabase project — so a bad push to main is immediately live.
+# This runs the engine checks against real data on every push, as the safety net that
+# replaces a staging environment.
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      genie:
+        description: 'Also exercise the model ranking (costs a few cents)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: streamgenie-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyflakes
+
+      - name: Run self-test
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python selftest.py ${{ (github.event.inputs.genie == 'true') && '--genie' || '' }}

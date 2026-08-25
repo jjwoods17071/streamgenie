@@ -27,6 +27,7 @@ import mailer
 import preferences
 import leaving_soon as leaving_mod
 import milestones
+import movies as movies_mod
 import recs
 import sports
 
@@ -49,9 +50,9 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
     week_end = today + dt.timedelta(days=7)
     t_iso, w_iso = today.isoformat(), week_end.isoformat()
 
-    rows = client.table("shows")\
-        .select("tmdb_id,title,provider_name,next_air_date")\
-        .eq("user_id", user_id).execute().data or []
+    # movies excluded — they have no episodes, so every newsletter section (this week,
+    # premieres, coming-eventually) is meaningless for them
+    rows = movies_mod.fetch_tv_rows(client, user_id, "tmdb_id,title,provider_name,next_air_date")
     tv = [r for r in rows if (r.get("tmdb_id") or 0) > 0]
     sports_rows = [r for r in rows if (r.get("tmdb_id") or 0) < 0]
     wl_ids = {r["tmdb_id"] for r in tv}

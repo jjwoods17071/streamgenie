@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import json
+import logging
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -20,6 +21,7 @@ import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
 import recs  # shared like-for-like recommendation engine (app + newsletter)
 import milestones  # season premiere / finale classification (app + newsletter)
+import movies  # movie watchlist + TMDB /movie endpoints
 import dismissed  # "Not interested" dismissals for discovery carousels
 import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
 import calendar_ics  # Episode → ICS / Google Calendar export
@@ -27,6 +29,8 @@ import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
 # Load environment variables
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="StreamGenie - Streaming Tracker", page_icon="🍿", layout="wide")
 
@@ -298,14 +302,30 @@ def delete_show(client: Client, tmdb_id:int, region:str, provider_name:str):
         .eq("provider_name", provider_name)\
         .execute()
 
+_SHOW_COLS = ("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, "
+              "poster_path, production_status, status_message, status_confidence, "
+              "in_production, created_at, show_status")
+
+
 def list_shows(client: Client) -> List[Dict[str, Any]]:
-    """Get all shows from the user's watchlist"""
-    result = client.table("shows")\
-        .select("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, poster_path, production_status, status_message, status_confidence, in_production, created_at, show_status")\
-        .eq("user_id", get_user_id())\
-        .order("title")\
-        .execute()
-    return result.data
+    """The user's TV + sports watchlist. MOVIES ARE EXCLUDED HERE ON PURPOSE.
+
+    This is the single choke point every TV view loads rows through, so filtering movies
+    out once keeps them from leaking into Watch Next, Catch Up, the upcoming agenda and
+    the milestone lookups — all of which would fetch a movie id as /tv/{id} and 404.
+    Movies have their own view (movies.list_movies).
+
+    Falls back to the pre-migration column set so the app keeps working before
+    migrations/2026-08-24_media_type.sql has been run.
+    """
+    q = client.table("shows")
+    try:
+        result = q.select(_SHOW_COLS + ", media_type")\
+            .eq("user_id", get_user_id()).order("title").execute()
+    except Exception:
+        result = client.table("shows").select(_SHOW_COLS)\
+            .eq("user_id", get_user_id()).order("title").execute()
+    return [r for r in (result.data or []) if (r.get("media_type") or "tv") != "movie"]
 
 # --------------- TMDB API ---------------
 def tmdb_get(path:str, params:Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
@@ -4201,6 +4221,135 @@ def render_ask_genie():
         st.rerun()
 
 
+def render_movies():
+    """🎬 Movies — a watchlist for films, kept deliberately separate from the TV views.
+
+    Movies have no episodes, so Watch Next / Catch Up / the upcoming agenda and the
+    premiere-milestone logic simply don't apply to them; giving them their own view is
+    cheaper and clearer than teaching every TV surface to special-case them.
+    """
+    uid = get_user_id()
+
+    if not movies.media_type_available(client):
+        st.subheader("🎬 Movies")
+        st.warning("Movies need a one-time database migration before they can be saved.")
+        st.markdown("Run **`migrations/2026-08-24_media_type.sql`** in the "
+                    "[Supabase SQL editor](https://supabase.com/dashboard/project/"
+                    "mqiulsjmizygkaompypu/sql/new), then reload this page.")
+        with st.expander("Why a migration is needed"):
+            st.markdown(
+                "TMDB reuses ids across media types — movie `550` is *Fight Club*, "
+                "tv `550` is something else — so a row's identity has to be "
+                "`(tmdb_id, media_type)`. Sports follows dodge this with negative ids, "
+                "but ~20 places in the app read `tmdb_id > 0` as *\"this is a TV show\"*, "
+                "so the same trick would break all of them."
+            )
+        return
+
+    st.subheader("🎬 Movies")
+    st.caption("A separate watchlist for films — no episodes, no air dates to track.")
+
+    q = st.text_input("Search movies", key="movie_q", placeholder="Michael Clayton, Sicario…")
+    if q:
+        results = movies.search(q, limit=8)
+        if not results:
+            st.info("No movies found.")
+        owned = {m["tmdb_id"] for m in movies.list_movies(client, uid)}
+        for m in results:
+            with st.container(border=True):
+                c = st.columns([1, 5, 2])
+                with c[0]:
+                    if m.get("poster_path"):
+                        st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
+                                 use_container_width=True)
+                with c[1]:
+                    st.markdown(f"**{m['title']}** ({m['year']})")
+                    if m.get("vote"):
+                        st.caption(f"{ICONS['star']} {m['vote']:.1f}/10")
+                    if m.get("overview"):
+                        st.caption(m["overview"][:220] + ("…" if len(m["overview"]) > 220 else ""))
+                with c[2]:
+                    if m["tmdb_id"] in owned:
+                        st.caption("✓ On your list")
+                    elif st.button(f"{ICONS['add']} Add", key=f"mv_add_{m['tmdb_id']}",
+                                   use_container_width=True, type="primary"):
+                        provs = movies.providers(m["tmdb_id"], region)
+                        if movies.add(client, uid, m, region,
+                                      provs[0] if provs else "Multiple Providers"):
+                            st.success(f"Added {m['title']}")
+                            st.rerun()
+                        else:
+                            st.error("Couldn't add that one.")
+        st.divider()
+
+    mine = movies.list_movies(client, uid)
+    st.markdown(f"### Your movies ({len(mine)})")
+    if not mine:
+        st.info("No movies yet — search above to add one.")
+        return
+
+    for m in mine:
+        with st.container(border=True):
+            c = st.columns([1, 5, 2])
+            with c[0]:
+                if m.get("poster_path"):
+                    st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
+                             use_container_width=True)
+            with c[1]:
+                yr = (m.get("next_air_date") or "")[:4]
+                st.markdown(f"**{m['title']}**" + (f" ({yr})" if yr else ""))
+                _d = movies.details(m["tmdb_id"])
+                bits = [b for b in (movies.runtime_label(_d.get("runtime")),
+                                    m.get("provider_name") or "") if b]
+                if bits:
+                    st.caption(" · ".join(bits))
+                if m.get("overview"):
+                    st.caption(m["overview"][:200] + ("…" if len(m["overview"]) > 200 else ""))
+            with c[2]:
+                if st.button("🗑 Remove", key=f"mv_rm_{m['tmdb_id']}", use_container_width=True):
+                    movies.remove(client, uid, m["tmdb_id"])
+                    st.rerun()
+
+    # Recommendations seeded from the movies already on the list — same shape as the TV
+    # engine (seed -> pool -> attribution), using TMDB's /movie endpoints.
+    st.divider()
+    st.markdown("### ✨ Because you saved these")
+    owned_ids = {m["tmdb_id"] for m in mine}
+    pool = {}
+    for seed in mine[:5]:
+        for cand in movies.recommendations(seed["tmdb_id"], 8) + movies.similar(seed["tmdb_id"], 6):
+            cid = cand["tmdb_id"]
+            if cid in owned_ids or (cand.get("votes") or 0) < 50:
+                continue
+            if cid in pool:
+                if seed["title"] not in pool[cid]["seeds"]:
+                    pool[cid]["seeds"].append(seed["title"])
+            else:
+                pool[cid] = {**cand, "seeds": [seed["title"]]}
+    ranked = sorted(pool.values(), key=lambda c: -(len(c["seeds"]) * 3 + c["vote"]))[:6]
+    if not ranked:
+        st.caption("Add a couple of movies and recommendations will appear here.")
+        return
+    for m in ranked:
+        c = st.columns([1, 5, 2])
+        with c[0]:
+            if m.get("poster_path"):
+                st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
+                         use_container_width=True)
+        with c[1]:
+            st.markdown(f"**{m['title']}** ({m['year']})")
+            st.caption(f"{ICONS['star']} {m['vote']:.1f}/10")
+            names = m["seeds"]
+            why = names[0] if len(names) == 1 else f"{names[0]} and {names[1]}" if len(names) == 2 \
+                else f"{names[0]}, {names[1]} and {len(names) - 2} more"
+            st.caption(f"**Because you saved {why}**")
+        with c[2]:
+            if st.button(f"{ICONS['add']}", key=f"mv_rec_{m['tmdb_id']}",
+                         use_container_width=True, type="primary", help="Add to your movies"):
+                movies.add(client, uid, m, region)
+                st.rerun()
+
+
 # ── Navigation: one view at a time, driven from the left margin ──────────────
 # Replaces the old nested top tabs (My Shows > Watch Next|All Shows, Discover >
 # Browse|Search). Beyond being flatter, st.tabs RENDERS EVERY TAB BODY on every rerun —
@@ -4209,6 +4358,7 @@ def render_ask_genie():
 VIEWS = {
     "📺 Watch Next": "watchnext",
     "🗂️ All Shows": "allshows",
+    "🎬 Movies": "movies",
     "✨ Discover": "discover",
     "🔎 Search": "search",
     "🏈 Sports": "sports",
@@ -4279,6 +4429,9 @@ def apply_provider_facet(rows):
 
 
 _view = render_sidebar_nav()
+
+if _view == "movies":
+    render_movies()
 
 if _view == "sports":
     render_sports_follow()
