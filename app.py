@@ -4201,41 +4201,102 @@ def render_ask_genie():
         st.rerun()
 
 
-(_main_shows, _main_sports, _main_genie, _main_discover) = st.tabs([
-    ":material/tv: My Shows", ":material/sports_football: Sports",
-    ":material/auto_awesome: Ask Genie", ":material/explore: Discover",
-])
+# ── Navigation: one view at a time, driven from the left margin ──────────────
+# Replaces the old nested top tabs (My Shows > Watch Next|All Shows, Discover >
+# Browse|Search). Beyond being flatter, st.tabs RENDERS EVERY TAB BODY on every rerun —
+# so the old shape paid for For You's TMDB calls and the Coming-eventually watchlist walk
+# even when you were looking at Sports. Sidebar nav runs only the selected view.
+VIEWS = {
+    "📺 Watch Next": "watchnext",
+    "🗂️ All Shows": "allshows",
+    "✨ Discover": "discover",
+    "🔎 Search": "search",
+    "🏈 Sports": "sports",
+    "🧞 Ask Genie": "genie",
+}
 
-# My Shows: one "Watch Next" view (catch-up backlog + upcoming agenda merged — answers
-# "what do I watch?" in one place) plus the All Shows management grid.
-with _main_shows:
-    (_main_watchnext, _main_watch) = st.tabs([
-        ":material/play_circle: Watch Next", ":material/tv: All Shows",
-    ])
 
-# Discover: one scrollable Browse feed (New / Trending / Top Rated / For You stacked
-# as sections) + Search. Collapsed from 5 sub-tabs so browsing is one scroll, not 4 clicks.
-with _main_discover:
-    (_disc_browse, _disc_search) = st.tabs([
-        ":material/explore: Browse", ":material/search: Search",
-    ])
+def render_sidebar_nav():
+    """Nav + contextual facets in the left margin, under the login info. Returns the
+    selected view key and stashes facet selections in session_state."""
+    with st.sidebar:
+        st.markdown("---")
+        st.caption("BROWSE")
+        label = st.radio("Go to", list(VIEWS), key="nav_view", label_visibility="collapsed")
+        view = VIEWS[label]
 
-with _main_sports:
+        st.markdown("---")
+        st.caption("FILTERS")
+
+        if view in ("watchnext", "allshows"):
+            # Only offer services this user actually tracks — a full provider list would
+            # be mostly dead options.
+            provs = sorted({normalize_provider_name(r.get("provider_name") or "")
+                            for r in list_shows(client)
+                            if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name")}
+                           - {""})
+            picked = st.multiselect("Service", provs, key="facet_provider",
+                                    placeholder="All services",
+                                    help="Filter your shows by where you watch them. "
+                                         "Sports follows are never filtered out.")
+            st.session_state["_facet_provider"] = set(picked)
+            if picked:
+                st.caption(f"Filtering to {len(picked)} service{'s' if len(picked) != 1 else ''}")
+        else:
+            st.session_state["_facet_provider"] = set()
+
+        if view == "discover":
+            # Surfaces the per-user genre hides that were previously buried inside a
+            # Discover sub-tab. Same genre_prefs storage, just reachable.
+            cur = genre_prefs.get_excluded(client, get_user_id())
+            new = set()
+            st.caption("Hide genres")
+            for key, (lbl, _ids, _ja) in genre_prefs.EXCLUDABLE_GENRES.items():
+                if st.checkbox(lbl, value=(key in cur), key=f"facet_genre_{key}"):
+                    new.add(key)
+            if new != cur:
+                genre_prefs.set_excluded(client, get_user_id(), new)
+                st.rerun()
+
+        if view in ("watchnext", "discover"):
+            st.markdown("---")
+            if st.button("♻️ Rebuild caches", use_container_width=True,
+                         help="Force fresh TMDB + recommendation data"):
+                st.cache_data.clear()
+                st.rerun()
+    return view
+
+
+def apply_provider_facet(rows):
+    """Filter TV rows to the selected services. Sports follows (negative tmdb_id) always
+    pass through — they aren't watched on a streaming service in the same sense."""
+    picked = st.session_state.get("_facet_provider") or set()
+    if not picked:
+        return rows
+    return [r for r in rows
+            if (r.get("tmdb_id") or 0) < 0
+            or normalize_provider_name(r.get("provider_name") or "") in picked]
+
+
+_view = render_sidebar_nav()
+
+if _view == "sports":
     render_sports_follow()
 
-with _main_genie:
+if _view == "genie":
     render_ask_genie()
 
-with _main_watchnext:
+if _view == "watchnext":
     # Unified "what should I watch?" view: what's ready to catch up right now (most
     # actionable) first, then the upcoming-episode agenda. Merges the old Up Next + Catch Up.
     _wn_rows = refresh_stale_air_dates(client, list_shows(client))
     _wn_rows = refresh_sports_air_dates(client, _wn_rows)
+    _wn_rows = apply_provider_facet(_wn_rows)
     render_catch_up(_wn_rows)
     st.divider()
     render_upcoming(_wn_rows, as_tab=True)
 
-with _disc_search:
+if _view == "search":
     # Vertical layout: Search on top, watchlist below
     search_header = st.columns([8, 1])
     with search_header[0]:
@@ -4415,7 +4476,7 @@ with _disc_search:
                 st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 
-with _disc_browse:
+if _view == "discover":
     st.subheader("🆕 New This Month")
     st.caption("Shows that premiered in the last 30 days")
     new_shows = [s for s in get_new_shows(region, limit=12) if s.get("id") not in _dismissed_ids][:5]
@@ -4468,7 +4529,7 @@ with _disc_browse:
         st.info("No new shows in the last 30 days")
 
 
-with _disc_browse:
+if _view == "discover":
     st.divider()
     st.subheader("🔥 Trending This Week")
     st.caption("Most popular and talked-about shows this week")
@@ -4523,7 +4584,7 @@ with _disc_browse:
         st.info("No trending shows available")
 
 
-with _disc_browse:
+if _view == "discover":
     st.divider()
     st.subheader("⭐ Top Rated")
     st.caption("All-time highest rated shows on TMDB")
@@ -4578,7 +4639,7 @@ with _disc_browse:
         st.info("No top rated shows available")
 
 
-with _disc_browse:
+if _view == "discover":
     st.divider()
     st.subheader("✨ For You")
     st.caption("Shows like the ones you actually watch — seeded from your viewing history, "
@@ -4602,7 +4663,7 @@ with _disc_browse:
         pass
 
 
-with _main_watch:
+if _view == "allshows":
     # Watchlist section below search
     st.write("---")
 
@@ -4630,6 +4691,7 @@ with _main_watch:
     export_csv = st.session_state.get('show_export', False)
 
     rows = list_shows(client)
+    rows = apply_provider_facet(rows)
 
     # Auto-update production status for shows that don't have it
     if rows:
@@ -4647,6 +4709,7 @@ with _main_watch:
                     pass  # Silently fail, don't interrupt display
         # Refresh rows after updates
         rows = list_shows(client)
+        rows = apply_provider_facet(rows)
 
     # Auto-refresh stale air dates (past dates get updated with next upcoming episode)
     if rows:
