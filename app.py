@@ -355,7 +355,7 @@ def get_show_seasons(tv_id:int) -> Dict[str, Any]:
         d = tv_details(tv_id)
         return {
             "status": d.get("status"),
-            "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
+            "seasons": milestones.real_seasons(d),
         }
     except Exception:
         return {}
@@ -419,7 +419,7 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
             "type": d.get("type"),
             "next_episode_to_air": d.get("next_episode_to_air"),
             "last_episode_to_air": d.get("last_episode_to_air"),
-            "seasons": [s for s in (d.get("seasons") or []) if s.get("season_number")],
+            "seasons": milestones.real_seasons(d),
         }
     except Exception:
         return {}
@@ -515,7 +515,7 @@ def _availability_line(d: Dict[str, Any]) -> str:
     """One-line availability/status summary from show metadata (markdown)."""
     today = local_today()
     status = d.get("status") or ""
-    nseasons = d.get("number_of_seasons") or 0
+    nseasons = milestones.real_season_count(d)
     neps = d.get("number_of_episodes") or 0
     first = d.get("first_air_date") or ""
     nxt = d.get("next_episode_to_air")
@@ -1750,7 +1750,7 @@ def render_coming_eventually(rows, shown_ids):
                 clickable_title(r["title"], r)
                 _meta = tv_details(tid) or {}
                 _last = (_meta.get("last_episode_to_air") or {}).get("air_date")
-                _seasons = _meta.get("number_of_seasons")
+                _seasons = milestones.real_season_count(_meta)
                 bits = []
                 if _seasons:
                     bits.append(f"{_seasons} season{'s' if _seasons != 1 else ''} so far")

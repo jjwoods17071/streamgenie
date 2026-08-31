@@ -93,3 +93,24 @@ def is_returning_undated(meta: Dict[str, Any]) -> bool:
     if status in ENDED_STATUSES:
         return False
     return status in RETURNING_STATUSES or bool(meta.get("in_production"))
+
+
+def real_seasons(details: Dict[str, Any]) -> list:
+    """Seasons that actually exist: specials dropped, empty placeholders dropped.
+
+    TMDB adds a Season N+1 with episode_count 0 and no air_date as soon as a show is
+    renewed, and counts it in number_of_seasons — so a show with one aired season reads
+    as "2 seasons". A season with no episodes is an announcement, not a season.
+    """
+    return [s for s in ((details or {}).get("seasons") or [])
+            if s.get("season_number") and (s.get("episode_count") or 0) > 0]
+
+
+def real_season_count(details: Dict[str, Any]) -> int:
+    """number_of_seasons with the renewal placeholder excluded.
+
+    Falls back to the raw count when the seasons array is absent (some cached/partial
+    payloads carry the count but not the list).
+    """
+    n = len(real_seasons(details))
+    return n if n else ((details or {}).get("number_of_seasons") or 0)

@@ -199,6 +199,34 @@ def main():
                                     "episode_number": 7}) is None, "plain episode flagged"
         assert milestones.classify(None) is None
 
+    @check("renewal placeholders don't inflate the season count")
+    def _():
+        # TMDB adds an empty Season N+1 the moment a show is renewed and counts it, so
+        # "Stuart Fails to Save the Universe" (one aired season) reported "2 seasons".
+        renewed = {"number_of_seasons": 2, "seasons": [
+            {"season_number": 1, "episode_count": 10, "air_date": "2026-07-23"},
+            {"season_number": 2, "episode_count": 0, "air_date": None}]}
+        assert milestones.real_season_count(renewed) == 1, "placeholder still counted"
+        assert [s["season_number"] for s in milestones.real_seasons(renewed)] == [1]
+
+        specials = {"number_of_seasons": 5, "seasons": [
+            {"season_number": 0, "episode_count": 4, "air_date": "2010-01-01"},
+            {"season_number": 1, "episode_count": 7, "air_date": "2010-02-01"}]}
+        assert milestones.real_season_count(specials) == 1, "specials counted as a season"
+
+        # a payload with the count but no seasons array must not collapse to zero
+        assert milestones.real_season_count({"number_of_seasons": 5}) == 5
+        assert milestones.real_season_count({}) == 0
+
+    @check("season count is unchanged for established shows")
+    def _():
+        import requests as _rq
+        for tid, want in ((1396, 5), (60059, 6)):        # Breaking Bad, Better Call Saul
+            d = _rq.get(f"https://api.themoviedb.org/3/tv/{tid}",
+                        params={"api_key": os.getenv("TMDB_API_KEY")}, timeout=15).json()
+            got = milestones.real_season_count(d)
+            assert got == want, f"tv/{tid}: got {got}, wanted {want}"
+
     @check("recs seeds from most-watched shows")
     def _():
         rows = client.table("shows").select("tmdb_id,title,next_air_date").eq("user_id", UID).execute().data
