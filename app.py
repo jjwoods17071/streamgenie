@@ -1512,7 +1512,7 @@ def show_status_chip(r) -> str:
     return ":green-background[📺 Active]"
 
 
-def render_grid_gallery(rows, client, wcounts, per_row=3):
+def render_grid_gallery(rows, client, wcounts, per_row=7):
     """True poster-tile gallery for the grid view (vs. the detailed list rows).
     Each card's title is a button that opens the full show-detail page (PDP)."""
     today = local_today()
@@ -1614,11 +1614,17 @@ def _episode_event(r, d):
 
 
 def _overview_text(r, limit=220) -> str:
-    """Full series description for list/grid rows ('' for sports / sparse rows)."""
+    """Series description, trimmed. Used by the DETAIL panel, not by browse rows.
+
+    It previously ignored `limit` and returned the whole synopsis into every list row —
+    median 153 chars, p90 369 — which is most of why so few shows fit on screen.
+    """
     if (r.get("tmdb_id") or 0) < 0:
         return ""
     ov = (r.get("overview") or "").strip()
-    return ov if len(ov) >= 20 else ""
+    if len(ov) < 20:
+        return ""
+    return _trim(ov, limit)
 
 
 def _service_label(r) -> str:
@@ -1827,23 +1833,16 @@ def render_upcoming(rows, as_tab=False):
                 _ms = get_milestone(tid) if (tid or 0) > 0 else None
                 if _ms:
                     st.markdown(f"{_ms['badge']} **{_ms['tag']}**")
-                    st.caption(f"📅 {d.isoformat()} · {when}")
-                else:
-                    st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
+                _bits = [when] + ([ep] if ep and not _ms else [])
             elif ep:
-                st.caption(f"⏳ next: {ep}")
+                _bits = [f"next: {ep}"]
             else:
-                st.caption("⏳ no episode scheduled yet")
-            _render_service_logo(r)
-            _sc = _sports_context(r)
-            if _sc:
-                st.caption(_sc)
-            _bc = _broadcast_info(r)
-            if _bc:
-                st.caption(_bc)
-            _ov = _overview_text(r)
-            if _ov:
-                st.caption(_ov)
+                _bits = ["no episode scheduled"]
+            # One metadata line instead of four stacked captions.
+            for _extra in (_service_label(r), _sports_context(r), _broadcast_info(r)):
+                if _extra:
+                    _bits.append(_extra)
+            st.caption(" · ".join(b for b in _bits if b))
         if show_pin:
             with c[2]:
                 if d is not None:
@@ -1864,50 +1863,43 @@ def render_upcoming(rows, as_tab=False):
         if not ordered:
             st.caption("No upcoming episodes scheduled for your watchlist right now.")
             return
-        per = 3
+        per = 6
         for i in range(0, len(ordered), per):
             cols = st.columns(per)
             for j, (d, r) in enumerate(ordered[i:i + per]):
                 with cols[j]:
-                    with st.container(border=True):
-                        st.markdown('<span class="sg-tile"></span>', unsafe_allow_html=True)
-                        tid = r.get("tmdb_id")
-                        _hero = False
-                        if (tid or 0) < 0:
-                            _hero = _render_sports_hero(r)
-                            if not _hero:
-                                clickable_poster(tid, r.get("poster_path"))
-                        else:
-                            clickable_poster(tid, r.get("poster_path"))
-                        clickable_title(r['title'], r)
-                        ne = get_next_episode(tid) if (tid or 0) > 0 else None
-                        ep = (f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season")
-                              else (_sports_matchup(r) if (tid or 0) < 0 else ""))
-                        if d is not None:
-                            days = (d - today).days
-                            when = "🔴 TODAY" if days == 0 else f"in {days}d"
-                            st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
-                        elif ep:
-                            st.caption(f"⏳ {ep}")
-                        if not _hero:   # the hero card already carries service/records/win-prob
-                            _render_service_logo(r)
-                            _sc = _sports_context(r)
-                            if _sc:
-                                st.caption(_sc)
+                    st.markdown('<span class="sg-tile"></span>', unsafe_allow_html=True)
+                    tid = r.get("tmdb_id")
+                    _hero = False
+                    if (tid or 0) < 0:
+                        _hero = _render_sports_hero(r)
                         if not _hero:
-                            # Clamped 4-line overview that RESERVES its space even when
-                            # short/empty — the main source of ragged tile heights.
-                            _ov = (_overview_text(r, 300)
-                                   .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-                            st.markdown(f'<div class="sg-ov">{_ov}</div>', unsafe_allow_html=True)
-                        ac = st.columns(3)
-                        with ac[0]:
-                            if d is not None:
-                                _cal_popover(r, d, "g")
-                        with ac[1]:
-                            _pin_button(r, "g")
-                        with ac[2]:
-                            _remove_button(r, "g")
+                            clickable_poster(tid, r.get("poster_path"))
+                    else:
+                        clickable_poster(tid, r.get("poster_path"))
+                    clickable_title(r['title'], r)
+                    ne = get_next_episode(tid) if (tid or 0) > 0 else None
+                    ep = (f"S{ne['season']}E{ne['episode']}" if ne and ne.get("season")
+                          else (_sports_matchup(r) if (tid or 0) < 0 else ""))
+                    if d is not None:
+                        days = (d - today).days
+                        when = "🔴 TODAY" if days == 0 else f"in {days}d"
+                        st.caption(f"📅 {d.isoformat()} · {when}" + (f" · {ep}" if ep else ""))
+                    elif ep:
+                        st.caption(f"⏳ {ep}")
+                    if not _hero:   # the hero card already carries service/records/win-prob
+                        _render_service_logo(r)
+                        _sc = _sports_context(r)
+                        if _sc:
+                            st.caption(_sc)
+                    ac = st.columns(3)
+                    with ac[0]:
+                        if d is not None:
+                            _cal_popover(r, d, "g")
+                    with ac[1]:
+                        _pin_button(r, "g")
+                    with ac[2]:
+                        _remove_button(r, "g")
 
     def _agenda():
         # 📌 Pinned — actively-watched shows kept at the very top (even with no air date)
@@ -2186,20 +2178,16 @@ def render_catch_up(rows):
                         r.get('provider_name') or DEFAULT_PROVIDER))
 
     if cu_view == "▦ Grid":
-        per = 3
+        per = 6
         for i in range(0, len(avail), per):
             cols = st.columns(per)
             for j, (n, r) in enumerate(avail[i:i + per]):
                 with cols[j]:
-                    with st.container(border=True):
-                        clickable_poster(r['tmdb_id'], r.get("poster_path"))
-                        clickable_title(r['title'], r)
-                        st.caption(f":blue[**{n} to watch**]")
-                        _render_service_logo(r)
-                        _ov = _overview_text(r, 170)
-                        if _ov:
-                            st.caption(_ov)
-                        _cu_remove(r, i + j)
+                    clickable_poster(r['tmdb_id'], r.get("poster_path"))
+                    clickable_title(r['title'], r)
+                    st.caption(f":blue[**{n} to watch**]")
+                    _render_service_logo(r)
+                    _cu_remove(r, i + j)
     else:
         for idx, (n, r) in enumerate(avail):
             c = st.columns([1, 4, 1])
@@ -2209,9 +2197,6 @@ def render_catch_up(rows):
                 clickable_title(r['title'], r)
                 st.caption(f":blue[**{n} to watch**]")
                 _render_service_logo(r)
-                _ov = _overview_text(r)
-                if _ov:
-                    st.caption(_ov)
             with c[2]:
                 _cu_remove(r, idx)
 
@@ -2731,7 +2716,8 @@ def _render_sports_hero(r) -> bool:
                         f'padding:1px 7px">📡 {net}</span></div>')
 
     st.markdown(
-        f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;'
+        f'<div style="background:#16161d;border:1px solid rgba(255,255,255,.10);'
+        f'border-radius:10px;overflow:hidden;'
         f'min-height:430px;display:flex;flex-direction:column">'
         f'{hero_band}'
         f'<div style="padding:10px 10px 14px;display:flex;flex-direction:column;flex:1;gap:6px">'
@@ -3420,7 +3406,6 @@ if show_settings:
         st.markdown("""
         <style>
         [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
-            background-color: #f8f9fa;
             padding: 20px;
             border-radius: 10px;
         }

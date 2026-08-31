@@ -1,0 +1,13 @@
+# Dark by default. On a white ground every gap between poster tiles reads as empty
+# space and the artwork fights the background; on dark the posters carry the page —
+# which is what Netflix and Apple TV are both doing. Purely presentational: no layout
+# or behaviour depends on it.
+[theme]
+base = "dark"
+primaryColor = "#e50914"
+backgroundColor = "#0b0b0f"
+secondaryBackgroundColor = "#16161d"
+textColor = "#f2f2f2"
+
+[server]
+headless = true
