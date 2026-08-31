@@ -4545,9 +4545,8 @@ def _render_wildcard():
 # so the old shape paid for For You's TMDB calls and the Coming-eventually watchlist walk
 # even when you were looking at Sports. Sidebar nav runs only the selected view.
 VIEWS = {
-    "📺 Watch Next": "watchnext",
+    "📺 Watch": "watch",
     "🗂️ All Shows": "allshows",
-    "🎬 Movies": "movies",
     "✨ Discover": "discover",
     "🔎 Search": "search",
     "🏈 Sports": "sports",
@@ -4567,7 +4566,7 @@ def render_sidebar_nav():
         st.markdown("---")
         st.caption("FILTERS")
 
-        if view in ("watchnext", "allshows"):
+        if view in ("watch", "allshows"):
             # Only offer services this user actually tracks — a full provider list would
             # be mostly dead options.
             provs = sorted({normalize_provider_name(r.get("provider_name") or "")
@@ -4597,7 +4596,7 @@ def render_sidebar_nav():
                 genre_prefs.set_excluded(client, get_user_id(), new)
                 st.rerun()
 
-        if view in ("watchnext", "discover"):
+        if view in ("watch", "discover"):
             st.markdown("---")
             if st.button("♻️ Rebuild caches", use_container_width=True,
                          help="Force fresh TMDB + recommendation data"):
@@ -4620,24 +4619,29 @@ def apply_provider_facet(rows):
 _view = render_sidebar_nav()
 _find_active = render_find_bar()
 
-if _view == "movies" and not _find_active:
-    render_movies()
-
 if _view == "sports" and not _find_active:
     render_sports_follow()
 
 if _view == "genie" and not _find_active:
     render_ask_genie()
 
-if _view == "watchnext" and not _find_active:
-    # Unified "what should I watch?" view: what's ready to catch up right now (most
-    # actionable) first, then the upcoming-episode agenda. Merges the old Up Next + Catch Up.
-    _wn_rows = refresh_stale_air_dates(client, list_shows(client))
-    _wn_rows = refresh_sports_air_dates(client, _wn_rows)
-    _wn_rows = apply_provider_facet(_wn_rows)
-    render_catch_up(_wn_rows)
-    st.divider()
-    render_upcoming(_wn_rows, as_tab=True)
+if _view == "watch" and not _find_active:
+    # Media type is a FILTER, not a destination. Movies used to be its own nav entry,
+    # which forced "where do I look for this?" to be answered before you could look for
+    # anything — and split one question ("what do I watch tonight?") across two places.
+    _media = st.radio("Media", ["📺 TV", "🎬 Movies"], horizontal=True,
+                      key="watch_media", label_visibility="collapsed")
+    if _media == "🎬 Movies":
+        render_movies()
+    else:
+        # What's ready to catch up right now (most actionable) first, then the
+        # upcoming-episode agenda, then renewed-but-undated.
+        _wn_rows = refresh_stale_air_dates(client, list_shows(client))
+        _wn_rows = refresh_sports_air_dates(client, _wn_rows)
+        _wn_rows = apply_provider_facet(_wn_rows)
+        render_catch_up(_wn_rows)
+        st.divider()
+        render_upcoming(_wn_rows, as_tab=True)
 
 if _view == "search" and not _find_active:
     # Vertical layout: Search on top, watchlist below
