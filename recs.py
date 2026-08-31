@@ -25,6 +25,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set
 
 import requests
 
+import tmdb
+
 TMDB_BASE = "https://api.themoviedb.org/3"
 
 # A candidate needs at least this many TMDB votes before we trust its rating —
@@ -41,28 +43,8 @@ def _noop(*_a, **_k) -> None:
 
 
 def _tmdb(path: str, **params) -> Dict[str, Any]:
-    """TMDB GET with a short retry on transient failures.
-
-    TMDB rate-limits bursts, and callers here swallow exceptions into empty lists — so
-    without this a blip surfaces to the user as "nothing found" rather than as an error.
-    Only 429/5xx and timeouts are retried; a 404 is a real answer.
-    """
-    params.update(api_key=os.getenv("TMDB_API_KEY", "").strip(), language="en-US")
-    last = None
-    for attempt in range(3):
-        try:
-            r = requests.get(f"{TMDB_BASE}{path}", params=params, timeout=15)
-            if r.status_code == 429 or r.status_code >= 500:
-                wait = float(r.headers.get("Retry-After") or (0.5 * (attempt + 1)))
-                last = requests.HTTPError(f"HTTP {r.status_code}")
-                time.sleep(min(wait, 5))
-                continue
-            r.raise_for_status()
-            return r.json()
-        except requests.Timeout as e:
-            last = e
-            time.sleep(0.5 * (attempt + 1))
-    raise last if last else RuntimeError("TMDB request failed")
+    """Delegates to the shared TMDB client — see tmdb.py."""
+    return tmdb.get(path, **params)
 
 
 def fetch_watched_counts(client, user_id: str) -> Dict[int, int]:
@@ -140,26 +122,32 @@ def build_pool(seeds: Sequence[Dict[str, Any]], per_seed: int = 10,
     seed list rather than the first one winning.
     """
     pool: Dict[int, Dict[str, Any]] = {}
-    for seed in seeds:
+    # Fetch every (seed, endpoint) pair concurrently, then merge in the original job order
+    # so attribution and the overlap scoring stay deterministic.
+    jobs = [(seed, source, path)
+            for seed in seeds
+            for source, path in (("rec", "recommendations"), ("similar", "similar"))]
+    fetched = tmdb.parallel_map(
+        lambda j: _tmdb(f"/tv/{j[0].get('tmdb_id')}/{j[2]}").get("results", [])[:per_seed],
+        jobs)
+
+    for (seed, source, path), results in zip(jobs, fetched):
+        if results is None:
+            log(f"recs: {path} failed for {seed.get('title')}")
+            continue
         sid = seed.get("tmdb_id")
-        for source, path in (("rec", "recommendations"), ("similar", "similar")):
-            try:
-                results = _tmdb(f"/tv/{sid}/{path}").get("results", [])[:per_seed]
-            except Exception as e:
-                log(f"recs: {path} failed for {seed.get('title')}: {e}")
+        for c in results:
+            cid = c.get("id")
+            if not cid:
                 continue
-            for c in results:
-                cid = c.get("id")
-                if not cid:
-                    continue
-                if cid in pool:
-                    existing = pool[cid]
-                    if seed.get("title") not in existing["seeds"]:
-                        existing["seeds"].append(seed.get("title"))
-                        existing["seed_ids"].append(sid)
-                    existing["sources"].add(source)
-                else:
-                    pool[cid] = _normalize(c, seed, source)
+            if cid in pool:
+                existing = pool[cid]
+                if seed.get("title") not in existing["seeds"]:
+                    existing["seeds"].append(seed.get("title"))
+                    existing["seed_ids"].append(sid)
+                existing["sources"].add(source)
+            else:
+                pool[cid] = _normalize(c, seed, source)
     return list(pool.values())
 
 

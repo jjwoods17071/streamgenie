@@ -30,16 +30,15 @@ import milestones
 import movies as movies_mod
 import recs
 import sports
+import tmdb
 
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_BASE = "https://api.themoviedb.org/3"
 
 
 def _tmdb(path: str, **params) -> Dict[str, Any]:
-    params.update(api_key=TMDB_API_KEY, language="en-US")
-    r = requests.get(f"{TMDB_BASE}{path}", params=params, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    """Delegates to the shared client (retry + one implementation) — see tmdb.py."""
+    return tmdb.get(path, **params)
 
 
 # ---------------- section builders ----------------
@@ -64,29 +63,40 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
 
     # --- Premieres & finales (TMDB next_episode_to_air on this week's shows) ---
     highlights = []
-    for r in airing[:15]:
-        try:
-            d = _tmdb(f"/tv/{r['tmdb_id']}")
-            ep = d.get("next_episode_to_air") or {}
-            if str(ep.get("air_date")) != r["next_air_date"]:
-                continue
-            ms = milestones.classify(ep, d.get("status"))
-            if ms:
-                highlights.append({"title": r["title"], "date": r["next_air_date"],
-                                   "tag": ms["tag"], "badge": ms["badge"],
-                                   "provider": r.get("provider_name") or ""})
-        except Exception:
+    _hs = airing[:15]
+    for r, d in zip(_hs, tmdb.parallel_map(lambda x: _tmdb(f"/tv/{x['tmdb_id']}"), _hs)):
+        if not d:
             continue
+        ep = d.get("next_episode_to_air") or {}
+        if str(ep.get("air_date")) != r["next_air_date"]:
+            continue
+        ms = milestones.classify(ep, d.get("status"))
+        if ms:
+            highlights.append({"title": r["title"], "date": r["next_air_date"],
+                               "tag": ms["tag"], "badge": ms["badge"],
+                               "provider": r.get("provider_name") or ""})
 
     # --- Sports this week (followed teams; whole-series follows use the calendar) ---
     games, seen_events = [], set()
-    for r in sports_rows:
+
+    def _fetch_sched(r):
+        league, team_id = sports.decode_id(r["tmdb_id"])
+        if not league:
+            return None
+        try:
+            return (sports.get_event_schedule(league) if team_id == "0"
+                    else sports.get_team_schedule(league, team_id))
+        except Exception:
+            return None
+
+    _scheds = tmdb.parallel_map(_fetch_sched, sports_rows)
+    for r, _sched in zip(sports_rows, _scheds):
         league, team_id = sports.decode_id(r["tmdb_id"])
         if not league:
             continue
         try:
             if team_id == "0":  # whole-series follow (F1, golf, UFC, ...)
-                cal = sports.get_event_schedule(league) or {}
+                cal = _sched or {}
                 for ev in cal.get("events", []):
                     if (ev.get("start") or "") <= w_iso and (ev.get("end") or "") >= t_iso:
                         key = (league, ev.get("label"))
@@ -98,7 +108,7 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
                                       "network": "", "team": r["title"],
                                       "league": sports.league_label(league)})
                 continue
-            for g in sports.get_team_schedule(league, team_id):
+            for g in (_sched or []):
                 gd = g.get("date") or ""
                 if not (t_iso <= gd <= w_iso) or g.get("completed"):
                     continue
@@ -145,13 +155,11 @@ def build_sections(client, user_id: str) -> Dict[str, Any]:
     _wc = recs.fetch_watched_counts(client, user_id)
     _undated = sorted([x for x in tv if x["tmdb_id"] not in _dated and not x.get("next_air_date")],
                       key=lambda x: -_wc.get(x["tmdb_id"], 0))
-    for r in _undated[:40]:
-        try:
-            if milestones.is_returning_undated(_tmdb(f"/tv/{r['tmdb_id']}")):
-                coming.append({"title": r["title"], "provider": r.get("provider_name") or "",
-                               "watched": _wc.get(r["tmdb_id"], 0)})
-        except Exception:
-            continue
+    _cs = _undated[:40]
+    for r, d in zip(_cs, tmdb.parallel_map(lambda x: _tmdb(f"/tv/{x['tmdb_id']}"), _cs)):
+        if d and milestones.is_returning_undated(d):
+            coming.append({"title": r["title"], "provider": r.get("provider_name") or "",
+                           "watched": _wc.get(r["tmdb_id"], 0)})
     coming = coming[:5]
 
     return {"week_start": t_iso, "week_end": w_iso, "airing": airing, "coming": coming,
