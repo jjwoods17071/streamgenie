@@ -99,6 +99,52 @@ def main():
         bad = [m.group(0) for m in re.finditer(r"^st\.[a-z_]+\(", before, re.M)]
         assert not bad, f"Streamlit call(s) before set_page_config: {bad}"
 
+    @check("every Streamlit call matches the installed API")
+    def _():
+        """The runtime checks below never render, so a wrong keyword for the PINNED
+        streamlit version sails through them and crashes in the browser. That is exactly
+        how `st.image(use_container_width=...)` shipped: valid in newer Streamlit, absent
+        in the 1.39.0 this app pins, and every pre-existing call used use_column_width.
+        """
+        import ast as _ast, inspect
+        import streamlit as _st
+
+        def resolve(node):
+            """st.image -> the function; st.sidebar.radio -> the function; else None."""
+            parts = []
+            while isinstance(node, _ast.Attribute):
+                parts.append(node.attr)
+                node = node.value
+            if not isinstance(node, _ast.Name) or node.id != "st":
+                return None
+            obj = _st
+            for p in reversed(parts):
+                obj = getattr(obj, p, None)
+                if obj is None:
+                    return None
+            return obj if callable(obj) else None
+
+        problems = []
+        for path in ("app.py",):
+            tree = _ast.parse(open(path).read())
+            for n in _ast.walk(tree):
+                if not isinstance(n, _ast.Call) or not n.keywords:
+                    continue
+                fn = resolve(n.func)
+                if fn is None:
+                    continue
+                try:
+                    params = inspect.signature(fn).parameters
+                except (ValueError, TypeError):
+                    continue
+                if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                    continue
+                for kw in n.keywords:
+                    if kw.arg and kw.arg not in params:
+                        problems.append(f"{path}:{n.lineno} {getattr(fn,'__name__',fn)}"
+                                        f"() has no keyword '{kw.arg}'")
+        assert not problems, "\n        " + "\n        ".join(problems[:12])
+
     # ---------------- config ----------------
     print("\n\033[1mConfig\033[0m")
 

@@ -4269,7 +4269,7 @@ def render_movies():
                 with c[0]:
                     if m.get("poster_path"):
                         st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
-                                 use_container_width=True)
+                                 use_column_width=True)
                 with c[1]:
                     st.markdown(f"**{m['title']}** ({m['year']})")
                     if m.get("vote"):
@@ -4316,7 +4316,7 @@ def render_movies():
                 with c[0]:
                     if m.get("poster_path"):
                         st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
-                                 use_container_width=True)
+                                 use_column_width=True)
                 with c[1]:
                     st.markdown(f"**{m['title']}**")
                     st.caption(movies.status_label(m["info"]))
@@ -4353,7 +4353,7 @@ def render_movies():
         with c[0]:
             if m.get("poster_path"):
                 st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
-                         use_container_width=True)
+                         use_column_width=True)
         with c[1]:
             st.markdown(f"**{m['title']}** ({m['year']})")
             st.caption(f"{ICONS['star']} {m['vote']:.1f}/10")
@@ -4458,7 +4458,7 @@ def _find_row(item, owned):
         with c[0]:
             if item.get("poster_path"):
                 st.image(f"https://image.tmdb.org/t/p/w185{item['poster_path']}",
-                         use_container_width=True)
+                         use_column_width=True)
         with c[1]:
             st.markdown(f"**{item['title']}** ({item.get('year', '—')})")
             if item.get("vote"):
@@ -4514,7 +4514,7 @@ def _render_wildcard():
     with c[0]:
         if pick.get("poster_path"):
             st.image(f"https://image.tmdb.org/t/p/w342{pick['poster_path']}",
-                     use_container_width=True)
+                     use_column_width=True)
     with c[1]:
         st.markdown(f"## {pick['title']} ({pick.get('year', '—')})")
         if pick.get("vote"):
