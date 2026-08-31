@@ -523,3 +523,45 @@ def rank_recommendations(candidates, taste, limit: int = 6, log=print):
     except Exception as e:
         log(f"genie: Gemini rec ranking failed: {e}")
         return None
+
+
+SEARCH_SYSTEM_PROMPT = """You are Genie, the TV-and-film assistant inside StreamGenie. \
+A user typed a natural-language search. In ONE short sentence, tell them what you think \
+they're looking for and what to look for in the results below.
+
+Rules:
+- One sentence, under 25 words. No preamble, no "It sounds like you're looking for".
+- Never invent specific titles, air dates, or availability — results come from a real
+  search you cannot see. Describe the KIND of thing, not named examples.
+- NO SPOILERS. Tone, genre, and reputation only.
+- If the query is just a title, say nothing useful is needed — reply with an empty string.
+- You are an AI assistant and never claim to be human."""
+
+
+def interpret_search(query: str, log=print) -> Optional[str]:
+    """One-line framing of a natural-language search, or None.
+
+    Deliberately cheap and optional: the search results stand on their own, so any
+    failure here (no key, API error, empty reply) just means no framing line rather
+    than a broken search.
+    """
+    q = (query or "").strip()
+    if len(q.split()) < 4:
+        return None
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+        r = anthropic.Anthropic(api_key=api_key).messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=80,
+            system=[{"type": "text", "text": SEARCH_SYSTEM_PROMPT,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": f"Search query: {q}"}],
+        )
+        text = "".join(b.text for b in r.content if b.type == "text").strip()
+        return text or None
+    except Exception as e:
+        log(f"genie: search interpretation failed: {e}")
+        return None

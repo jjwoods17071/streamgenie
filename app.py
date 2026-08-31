@@ -4368,6 +4368,177 @@ def render_movies():
                 st.rerun()
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _find_results(query: str, region: str):
+    """TV + movie hits for one query. Cached so reruns (every button press on the page)
+    don't re-hit TMDB for a search the user already ran."""
+    tv = []
+    try:
+        for s in search_tv(query)[:6]:
+            fa = s.get("first_air_date") or ""
+            tv.append({"kind": "tv", "tmdb_id": s.get("id"), "title": s.get("name") or "Unknown",
+                       "year": fa[:4] if fa else "—", "poster_path": s.get("poster_path"),
+                       "overview": s.get("overview") or "", "vote": s.get("vote_average") or 0})
+    except Exception:
+        pass
+    mv = [{**m, "kind": "movie"} for m in movies.search(query, limit=6)]
+    return tv, mv
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _genie_read(query: str):
+    """One-line framing of a natural-language query. Only fires for queries that actually
+    read like a question — a bare title lookup doesn't need a model call."""
+    if len((query or "").split()) < 4:
+        return None
+    try:
+        import genie
+        return genie.interpret_search(query)
+    except Exception:
+        return None
+
+
+def render_find_bar():
+    """Universal Find — a search bar on EVERY view, not a destination you navigate to.
+
+    Returns True when it has taken over the screen, so the view body is skipped: results
+    replacing the page (rather than stacking above it) is what makes it read like search
+    instead of one more section.
+    """
+    bar = st.columns([7, 1.4, 1.2])
+    with bar[0]:
+        q = st.text_input("Find", key="find_q", label_visibility="collapsed",
+                          placeholder="🔎 Search shows and movies, or ask Genie…")
+    with bar[1]:
+        wild = st.button("🎲 Wildcard", use_container_width=True,
+                         help="One pick you'd probably never search for, based on what you watch")
+    with bar[2]:
+        if st.session_state.get("find_q") or st.session_state.get("_wild_on"):
+            if st.button("✕ Clear", use_container_width=True):
+                st.session_state["find_q"] = ""
+                st.session_state["_wild_on"] = False
+                st.rerun()
+
+    if wild:
+        st.session_state["_wild_on"] = True
+        st.session_state["_wild_roll"] = st.session_state.get("_wild_roll", -1) + 1
+
+    if st.session_state.get("_wild_on") and not q:
+        _render_wildcard()
+        return True
+    if not q:
+        return False
+
+    st.caption(f"Results for **{q}**")
+    read = _genie_read(q)
+    if read:
+        st.markdown(f"🧞 *{read}*")
+
+    tv, mv = _find_results(q, region)
+    if not tv and not mv:
+        st.info("Nothing found. Try fewer words.")
+        return True
+
+    owned = {r.get("tmdb_id") for r in list_shows(client)}
+    if tv:
+        st.markdown("#### 📺 Shows")
+        for s in tv:
+            _find_row(s, s["tmdb_id"] in owned)
+    if mv:
+        st.markdown("#### 🎬 Movies")
+        for m in mv:
+            _find_row(m, False)
+    return True
+
+
+def _find_row(item, owned):
+    """One result row — same shape for shows and movies so the list reads as one thing."""
+    with st.container(border=True):
+        c = st.columns([1, 5, 2])
+        with c[0]:
+            if item.get("poster_path"):
+                st.image(f"https://image.tmdb.org/t/p/w185{item['poster_path']}",
+                         use_container_width=True)
+        with c[1]:
+            st.markdown(f"**{item['title']}** ({item.get('year', '—')})")
+            if item.get("vote"):
+                st.caption(f"{ICONS['star']} {item['vote']:.1f}/10")
+            if item["kind"] == "movie":
+                st.caption(movies.status_label(movies.release_info(item["tmdb_id"], region)))
+            if item.get("overview"):
+                st.caption(item["overview"][:180] + ("…" if len(item["overview"]) > 180 else ""))
+        with c[2]:
+            if owned:
+                st.caption("✓ On your list")
+            elif st.button(f"{ICONS['add']} Add", key=f"find_add_{item['kind']}_{item['tmdb_id']}",
+                           use_container_width=True, type="primary"):
+                if item["kind"] == "movie":
+                    if not movies.media_type_available(client):
+                        st.warning("Movies need the media_type migration first — see the Movies view.")
+                        return
+                    info = movies.release_info(item["tmdb_id"], region)
+                    provs = info.get("providers") or []
+                    movies.add(client, get_user_id(), {**item, "streaming_date": info.get("streaming")},
+                               region, provs[0] if provs else "Multiple Providers")
+                else:
+                    upsert_show(client, item["tmdb_id"], item["title"], region, False, None,
+                                item.get("overview", ""), item.get("poster_path"),
+                                "Multiple Providers")
+                st.success(f"Added {item['title']}")
+                st.rerun()
+
+
+def _render_wildcard():
+    """🎲 One hero suggestion drawn from the taste engine — the "I'm feeling lucky" of a
+    watchlist. Rolling again walks further down the ranked pool rather than reshuffling,
+    so you never get the same three titles back."""
+    st.markdown("### 🎲 Wildcard")
+    st.caption("One thing you probably wouldn't have searched for, picked from what you watch.")
+    uid = get_user_id()
+    with st.spinner("Rummaging…"):
+        res = _cached_recs(client, uid,
+                           tuple(sorted(int(i) for i in _wl_ids if i is not None)),
+                           tuple(sorted(int(i) for i in _dismissed_ids if i is not None)),
+                           tuple(sorted(genre_prefs.get_excluded(client, uid))),
+                           20)
+    pool = res.get("picks") or []
+    if not pool:
+        st.info("Add a few shows and mark some episodes watched — the wildcard draws on your history.")
+        return
+    pick = recs.wildcard(pool, roll=st.session_state.get("_wild_roll", 0))
+    if not pick:
+        st.info("Nothing left to suggest right now.")
+        return
+
+    c = st.columns([1.2, 4])
+    with c[0]:
+        if pick.get("poster_path"):
+            st.image(f"https://image.tmdb.org/t/p/w342{pick['poster_path']}",
+                     use_container_width=True)
+    with c[1]:
+        st.markdown(f"## {pick['title']} ({pick.get('year', '—')})")
+        if pick.get("vote"):
+            st.caption(f"{ICONS['star']} {pick['vote']:.1f}/10")
+        if pick.get("blurb"):
+            st.markdown(f"🧞 *{pick['blurb']}*")
+        st.markdown(f"**{pick.get('why', '')}**")
+        if pick.get("overview"):
+            st.caption(pick["overview"][:300])
+        b = st.columns(2)
+        with b[0]:
+            if st.button(f"{ICONS['add']} Add to watchlist", key=f"wild_add_{pick['tmdb_id']}",
+                         use_container_width=True, type="primary"):
+                upsert_show(client, pick["tmdb_id"], pick["title"], region, False, None,
+                            pick.get("overview", ""), pick.get("poster_path"), "Multiple Providers")
+                _cached_recs.clear()
+                st.success(f"Added {pick['title']}")
+                st.rerun()
+        with b[1]:
+            if st.button("🎲 Roll again", key="wild_again", use_container_width=True):
+                st.session_state["_wild_roll"] = st.session_state.get("_wild_roll", 0) + 1
+                st.rerun()
+
+
 # ── Navigation: one view at a time, driven from the left margin ──────────────
 # Replaces the old nested top tabs (My Shows > Watch Next|All Shows, Discover >
 # Browse|Search). Beyond being flatter, st.tabs RENDERS EVERY TAB BODY on every rerun —
@@ -4447,17 +4618,18 @@ def apply_provider_facet(rows):
 
 
 _view = render_sidebar_nav()
+_find_active = render_find_bar()
 
-if _view == "movies":
+if _view == "movies" and not _find_active:
     render_movies()
 
-if _view == "sports":
+if _view == "sports" and not _find_active:
     render_sports_follow()
 
-if _view == "genie":
+if _view == "genie" and not _find_active:
     render_ask_genie()
 
-if _view == "watchnext":
+if _view == "watchnext" and not _find_active:
     # Unified "what should I watch?" view: what's ready to catch up right now (most
     # actionable) first, then the upcoming-episode agenda. Merges the old Up Next + Catch Up.
     _wn_rows = refresh_stale_air_dates(client, list_shows(client))
@@ -4467,7 +4639,7 @@ if _view == "watchnext":
     st.divider()
     render_upcoming(_wn_rows, as_tab=True)
 
-if _view == "search":
+if _view == "search" and not _find_active:
     # Vertical layout: Search on top, watchlist below
     search_header = st.columns([8, 1])
     with search_header[0]:
@@ -4647,7 +4819,7 @@ if _view == "search":
                 st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 
-if _view == "discover":
+if _view == "discover" and not _find_active:
     st.subheader("🆕 New This Month")
     st.caption("Shows that premiered in the last 30 days")
     new_shows = [s for s in get_new_shows(region, limit=12) if s.get("id") not in _dismissed_ids][:5]
@@ -4700,7 +4872,7 @@ if _view == "discover":
         st.info("No new shows in the last 30 days")
 
 
-if _view == "discover":
+if _view == "discover" and not _find_active:
     st.divider()
     st.subheader("🔥 Trending This Week")
     st.caption("Most popular and talked-about shows this week")
@@ -4755,7 +4927,7 @@ if _view == "discover":
         st.info("No trending shows available")
 
 
-if _view == "discover":
+if _view == "discover" and not _find_active:
     st.divider()
     st.subheader("⭐ Top Rated")
     st.caption("All-time highest rated shows on TMDB")
@@ -4810,7 +4982,7 @@ if _view == "discover":
         st.info("No top rated shows available")
 
 
-if _view == "discover":
+if _view == "discover" and not _find_active:
     st.divider()
     st.subheader("✨ For You")
     st.caption("Shows like the ones you actually watch — seeded from your viewing history, "
@@ -4834,7 +5006,7 @@ if _view == "discover":
         pass
 
 
-if _view == "allshows":
+if _view == "allshows" and not _find_active:
     # Watchlist section below search
     st.write("---")
 

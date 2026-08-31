@@ -198,6 +198,34 @@ def main():
         for p in out["picks"]:
             assert p.get("blurb"), f"{p['title']} has no blurb"
 
+    @check("wildcard walks the pool instead of repeating")
+    def _():
+        pool = [{"tmdb_id": i, "title": f"T{i}", "seeds": ["s"], "vote": 9 - i * 0.1,
+                 "sources": {"rec"}} for i in range(5)]
+        rolls = [recs.wildcard(pool, roll=r)["title"] for r in range(5)]
+        assert len(set(rolls)) == 5, f"repeats within one cycle: {rolls}"
+        assert recs.wildcard(pool, roll=5)["title"] == rolls[0], "should cycle back round"
+
+    @check("wildcard skips what was already shown")
+    def _():
+        pool = [{"tmdb_id": i, "title": f"T{i}", "seeds": ["s"], "vote": 9 - i * 0.1,
+                 "sources": {"rec"}} for i in range(5)]
+        pick = recs.wildcard(pool, shown_ids=[0, 1, 2])
+        assert pick["tmdb_id"] not in (0, 1, 2), pick
+
+    @check("wildcard degrades on an empty pool")
+    def _():
+        assert recs.wildcard([]) is None
+        # everything already shown -> recycle rather than return nothing
+        pool = [{"tmdb_id": 1, "title": "T", "seeds": ["s"], "vote": 8, "sources": {"rec"}}]
+        assert recs.wildcard(pool, shown_ids=[1]) is not None
+
+    @check("search interpretation skips short queries (no wasted model call)")
+    def _():
+        import genie
+        assert genie.interpret_search("Sicario") is None
+        assert genie.interpret_search("") is None
+
     # ---------------- movies ----------------
     print("\n\033[1mMovies\033[0m")
     import movies

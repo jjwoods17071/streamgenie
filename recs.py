@@ -304,3 +304,23 @@ def for_user(client, user_id: str, *, limit: int = 6,
     except Exception as e:
         log(f"recs: for_user failed: {e}")
         return {"picks": [], "pool_size": 0, "seed_titles": [], "ranked_by": "error"}
+
+
+def wildcard(pool: Sequence[Dict[str, Any]], shown_ids: Iterable[int] = (),
+             roll: int = 0) -> Optional[Dict[str, Any]]:
+    """One surprise pick from the pool — the "I'm feeling lucky" of a watchlist.
+
+    Deliberately NOT the top-ranked candidate: that's what For You already shows. It
+    walks further down the ranked pool as you keep rolling, so repeat clicks surface
+    genuinely different things instead of recycling the same three titles. `roll` drives
+    the walk (a session counter, not randomness) so a Streamlit rerun re-renders the same
+    pick rather than silently reshuffling under the user.
+    """
+    seen = {int(i) for i in shown_ids if i is not None}
+    fresh = [c for c in pool if int(c.get("tmdb_id") or 0) not in seen]
+    if not fresh:
+        fresh = list(pool)          # everything's been shown — start the cycle over
+    if not fresh:
+        return None
+    ranked = sorted(fresh, key=lambda c: -score(c))
+    return ranked[roll % len(ranked)]
