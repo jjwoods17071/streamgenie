@@ -59,6 +59,14 @@ def main():
 
     UID = args.user
 
+    _memo = {}
+
+    def once(key, fn):
+        """Compute an expensive fixture once per run and share it across checks."""
+        if key not in _memo:
+            _memo[key] = fn()
+        return _memo[key]
+
     # ---------------- static ----------------
     print("\n\033[1mStatic\033[0m")
 
@@ -157,7 +165,7 @@ def main():
 
     @check("recs produces attributed picks (deterministic path)")
     def _():
-        out = recs.for_user(client, UID, limit=5, use_genie=False)
+        out = once("recs", lambda: recs.for_user(client, UID, limit=8, use_genie=False))
         picks = out["picks"]
         assert picks, "no picks"
         assert out["pool_size"] > 0
@@ -170,7 +178,7 @@ def main():
     def _():
         owned = {r["tmdb_id"] for r in
                  client.table("shows").select("tmdb_id").eq("user_id", UID).execute().data}
-        out = recs.for_user(client, UID, limit=8, use_genie=False)
+        out = once("recs", lambda: recs.for_user(client, UID, limit=8, use_genie=False))
         dupes = [p["title"] for p in out["picks"] if p["tmdb_id"] in owned]
         assert not dupes, f"already on watchlist: {dupes}"
 
@@ -234,12 +242,45 @@ def main():
         overlap = tv_ids & mv_ids
         assert isinstance(overlap, set), "unreachable"
 
+    @check("release_info classifies streaming availability")
+    def _():
+        # Superman 2025: theatrical Jul, PVOD Aug 15, HBO Max Sep 19 — the named-service
+        # entry is the one that matters, and it must not be confused with the PVOD date.
+        i = movies.release_info(1061474)
+        assert i["theatrical"], "no theatrical date"
+        assert i["digital"], "no digital date"
+        assert i["streaming_service"], "named streaming service not picked up"
+        assert i["streaming"] != i["digital"], \
+            "streaming date collapsed onto the PVOD date"
+        assert i["status"] in ("streaming", "coming"), i["status"]
+
+    @check("an old film is not reported as in theaters")
+    def _():
+        # Michael Clayton (2007) has no digital entries; without a recency window it
+        # claimed to be in cinemas forever.
+        i = movies.release_info(4566)
+        assert i["status"] != "theaters", "old film still reads as in theaters"
+
+    @check("status_label covers every status")
+    def _():
+        for s in movies.STATUS_ORDER:
+            lbl = movies.status_label({"status": s, "streaming": "2026-01-01", "providers": []})
+            assert lbl and not lbl.startswith("None"), f"no label for {s}"
+
+    @check("group_by_status keeps every movie and drops empty groups")
+    def _():
+        fake = [{"title": t, "info": {"status": s, "streaming": None}}
+                for t, s in [("A", "streaming"), ("B", "coming"), ("C", "streaming")]]
+        groups = movies.group_by_status(fake)
+        assert [g[0] for g in groups] == ["streaming", "coming"], groups
+        assert sum(len(g[2]) for g in groups) == 3
+
     # ---------------- newsletter ----------------
     print("\n\033[1mNewsletter\033[0m")
 
     @check("build_sections returns the full contract")
     def _():
-        s = newsletter.build_sections(client, UID)
+        s = once("sections", lambda: newsletter.build_sections(client, UID))
         for k in ("week_start", "week_end", "airing", "highlights", "games", "leaving",
                   "coming", "rec_candidates", "recs", "rec_feedback", "watchlist_titles"):
             assert k in s, f"missing section {k}"
@@ -248,7 +289,7 @@ def main():
 
     @check("render_html produces a complete email")
     def _():
-        s = newsletter.build_sections(client, UID)
+        s = once("sections", lambda: newsletter.build_sections(client, UID))
         html = newsletter.render_html(s)
         assert html.startswith("\n    <html>") or "<html>" in html
         assert "</html>" in html, "unterminated html"
@@ -258,7 +299,7 @@ def main():
 
     @check("coming-eventually is ranked by engagement, not alphabetically")
     def _():
-        s = newsletter.build_sections(client, UID)
+        s = once("sections", lambda: newsletter.build_sections(client, UID))
         if len(s["coming"]) < 2:
             return "fewer than 2 undated shows to compare"
         counts = [c.get("watched", 0) for c in s["coming"]]

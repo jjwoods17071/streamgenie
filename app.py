@@ -4221,6 +4221,14 @@ def render_ask_genie():
         st.rerun()
 
 
+@st.cache_data(ttl=10800, show_spinner=False)
+def _cached_movie_status(_client, user_id, region, id_sig):
+    """3h cache. `id_sig` isn't read — it exists so adding or removing a movie
+    invalidates the cache. release_info is 2 TMDB calls per movie, so without this the
+    view would re-fetch the whole list on every interaction."""
+    return movies.enrich(_client, user_id, region)
+
+
 def render_movies():
     """🎬 Movies — a watchlist for films, kept deliberately separate from the TV views.
 
@@ -4268,13 +4276,16 @@ def render_movies():
                         st.caption(f"{ICONS['star']} {m['vote']:.1f}/10")
                     if m.get("overview"):
                         st.caption(m["overview"][:220] + ("…" if len(m["overview"]) > 220 else ""))
+                    _info = movies.release_info(m["tmdb_id"], region)
+                    st.caption(movies.status_label(_info))
                 with c[2]:
                     if m["tmdb_id"] in owned:
                         st.caption("✓ On your list")
                     elif st.button(f"{ICONS['add']} Add", key=f"mv_add_{m['tmdb_id']}",
                                    use_container_width=True, type="primary"):
-                        provs = movies.providers(m["tmdb_id"], region)
-                        if movies.add(client, uid, m, region,
+                        provs = _info.get("providers") or []
+                        if movies.add(client, uid,
+                                      {**m, "streaming_date": _info.get("streaming")}, region,
                                       provs[0] if provs else "Multiple Providers"):
                             st.success(f"Added {m['title']}")
                             st.rerun()
@@ -4282,41 +4293,48 @@ def render_movies():
                             st.error("Couldn't add that one.")
         st.divider()
 
-    mine = movies.list_movies(client, uid)
-    st.markdown(f"### Your movies ({len(mine)})")
-    if not mine:
+    with st.spinner("Checking streaming availability…"):
+        enriched = _cached_movie_status(client, uid, region,
+                                        tuple(sorted(m["tmdb_id"] for m in movies.list_movies(client, uid))))
+    st.markdown(f"### Your movies ({len(enriched)})")
+    if not enriched:
         st.info("No movies yet — search above to add one.")
         return
 
-    for m in mine:
-        with st.container(border=True):
-            c = st.columns([1, 5, 2])
-            with c[0]:
-                if m.get("poster_path"):
-                    st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
-                             use_container_width=True)
-            with c[1]:
-                yr = (m.get("next_air_date") or "")[:4]
-                st.markdown(f"**{m['title']}**" + (f" ({yr})" if yr else ""))
-                _d = movies.details(m["tmdb_id"])
-                bits = [b for b in (movies.runtime_label(_d.get("runtime")),
-                                    m.get("provider_name") or "") if b]
-                if bits:
-                    st.caption(" · ".join(bits))
-                if m.get("overview"):
-                    st.caption(m["overview"][:200] + ("…" if len(m["overview"]) > 200 else ""))
-            with c[2]:
-                if st.button("🗑 Remove", key=f"mv_rm_{m['tmdb_id']}", use_container_width=True):
-                    movies.remove(client, uid, m["tmdb_id"])
-                    st.rerun()
+    just_landed = movies.newly_streaming(enriched)
+    if just_landed:
+        st.success("🍿 Just landed on streaming: **"
+                   + "**, **".join(m["title"] for m in just_landed[:4]) + "**")
+
+    # Grouped by availability — "what can I watch tonight" is the question a movie
+    # watchlist exists to answer, and a flat alphabetical list never answers it.
+    for _status, heading, group in movies.group_by_status(enriched):
+        st.markdown(f"#### {heading} ({len(group)})")
+        for m in group:
+            with st.container(border=True):
+                c = st.columns([1, 5, 2])
+                with c[0]:
+                    if m.get("poster_path"):
+                        st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
+                                 use_container_width=True)
+                with c[1]:
+                    st.markdown(f"**{m['title']}**")
+                    st.caption(movies.status_label(m["info"]))
+                    if m.get("overview"):
+                        st.caption(m["overview"][:180] + ("…" if len(m["overview"]) > 180 else ""))
+                with c[2]:
+                    if st.button("🗑 Remove", key=f"mv_rm_{m['tmdb_id']}", use_container_width=True):
+                        movies.remove(client, uid, m["tmdb_id"])
+                        _cached_movie_status.clear()
+                        st.rerun()
 
     # Recommendations seeded from the movies already on the list — same shape as the TV
     # engine (seed -> pool -> attribution), using TMDB's /movie endpoints.
     st.divider()
     st.markdown("### ✨ Because you saved these")
-    owned_ids = {m["tmdb_id"] for m in mine}
+    owned_ids = {m["tmdb_id"] for m in enriched}
     pool = {}
-    for seed in mine[:5]:
+    for seed in enriched[:5]:
         for cand in movies.recommendations(seed["tmdb_id"], 8) + movies.similar(seed["tmdb_id"], 6):
             cid = cand["tmdb_id"]
             if cid in owned_ids or (cand.get("votes") or 0) < 50:
