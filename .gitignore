@@ -54,3 +54,6 @@ Thumbs.db
 *.tmp
 *.bak
 *.backup
+
+# Screenshots dropped in the repo root while iterating on UI
+*.png
