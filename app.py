@@ -1385,9 +1385,9 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 if _plogo:
                     st.markdown(
                         f'✓ On your watchlist &nbsp;·&nbsp; Watch on<br>'
-                        f'<img src="{_plogo}" title="{_pname}" '
-                        f'style="height:110px;border-radius:14px;vertical-align:middle;margin:6px 8px 0 0"> '
-                        f'<b style="font-size:1.1rem">{_pname}</b>', unsafe_allow_html=True)
+                        f'<img src="{_plogo}" title="{_pname}" alt="{_pname}" '
+                        f'style="height:110px;border-radius:14px;vertical-align:middle;'
+                        f'margin:6px 8px 0 0">', unsafe_allow_html=True)
                 else:
                     st.markdown(f"✓ On your watchlist  ·  Watch on **{_pname}**")
             def _pdp_remove():
@@ -2210,12 +2210,16 @@ def get_stream_providers(tv_id:int, region:str = "US") -> List[str]:
     """Streaming services a show is available on (subscription/flatrate first), US region."""
     try:
         block = (tv_watch_providers(tv_id).get("results") or {}).get(region.upper()) or {}
-        names = []
+        raw = []
         for key in ("flatrate", "ads", "free"):
             for it in (block.get(key) or []):
                 n = it.get("provider_name")
-                if n and n not in names:
-                    names.append(normalize_provider_name(n))
+                if n and n not in raw:
+                    raw.append(n)
+        # Base services ahead of resold "<service> Amazon Channel" listings, so the first
+        # entry — which callers store as THE provider — is never a storefront.
+        raw.sort(key=lambda n: (is_bundle_listing(n), is_reseller_listing(n)))
+        names = [normalize_provider_name(n) for n in raw]
         # de-dup after normalization, keep order
         seen, out = set(), []
         for n in names:
@@ -2986,9 +2990,53 @@ def get_provider_logo_url(provider_name: str) -> Optional[str]:
 
     return None  # No logo available
 
+# TMDB lists resold add-ons as "<service> Amazon Channel", "<service> Apple TV Channel",
+# etc. Those are the SERVICE's content, merely billed through the reseller — so the
+# reseller name must be stripped before matching, or a generic "amazon" test claims them.
+_RESELLER_SUFFIX = re.compile(
+    r"\s+(amazon channel|apple tv channel|prime video channel|roku premium channel)$",
+    re.IGNORECASE)
+
+
+# Live-TV bundles and cable storefronts carry lots of shows without being where anyone
+# thinks of a show as living. TMDB lists them in flatrate alongside real subscriptions,
+# and picking one produced "House of the Dragon — Spectrum On Demand".
+_BUNDLE_PROVIDERS = {
+    "fubotv", "spectrum on demand", "directv", "directv stream", "philo", "sling tv",
+    "xfinity", "youtube tv", "hulu live", "dish", "optimum", "verizon fios",
+    "amazon prime video with ads",
+}
+
+
+def is_bundle_listing(provider_name: str) -> bool:
+    """True for live-TV / cable storefronts that shouldn't be called a show's home."""
+    return (provider_name or "").strip().lower() in _BUNDLE_PROVIDERS
+
+
+def base_service_name(provider_name: str) -> str:
+    """'HBO Max Amazon Channel' -> 'HBO Max'. Leaves Amazon's own services alone."""
+    out = prev = (provider_name or "").strip()
+    while True:
+        out = _RESELLER_SUFFIX.sub("", out).strip()
+        if out == prev:
+            break
+        prev = out
+    return out or (provider_name or "").strip()
+
+
+def is_reseller_listing(provider_name: str) -> bool:
+    """True for '<service> Amazon Channel' style entries — real but not the base service."""
+    return base_service_name(provider_name).lower() != (provider_name or "").strip().lower()
+
+
 def normalize_provider_name(provider_name: str) -> str:
-    """Normalize provider names to consolidated versions."""
-    provider_lower = provider_name.lower()
+    """Normalize provider names to consolidated versions.
+
+    Strips the reseller suffix FIRST. Without that, "HBO Max Amazon Channel" hit the
+    generic `"amazon" in name` test below and came back as "Prime Video" — the show was
+    labelled with the storefront instead of the service it actually streams on.
+    """
+    provider_lower = base_service_name(provider_name).lower()
 
     # Consolidate Paramount variations
     if "paramount" in provider_lower:
@@ -3044,8 +3092,9 @@ def normalize_provider_name(provider_name: str) -> str:
     if "microsoft" in provider_lower:
         return "Microsoft Store"
 
-    # Return original if no consolidation needed
-    return provider_name
+    # No consolidation rule matched — return the base service, not the raw listing, so
+    # "Starz Apple TV Channel" still reads as "Starz".
+    return base_service_name(provider_name)
 
 # --------------- EMAIL REMINDERS ---------------
 def send_email_reminder(user_email: str, show_title: str, provider_name: str, next_air_date: str, poster_path: Optional[str] = None):
@@ -4230,8 +4279,12 @@ def _cached_movie_status(_client, user_id, region, id_sig):
     return movies.enrich(_client, user_id, region)
 
 
-def render_movies():
-    """🎬 Movies — a watchlist for films, kept deliberately separate from the TV views.
+def render_movies(embed=False):
+    """🎬 Movies — the film half of the watchlist.
+
+    `embed` renders it inside Watch alongside the TV sections: no search box (the Find
+    bar covers that) and no page heading, so it reads as another group in one list
+    rather than a separate screen.
 
     Movies have no episodes, so Watch Next / Catch Up / the upcoming agenda and the
     premiere-milestone logic simply don't apply to them; giving them their own view is
@@ -4240,6 +4293,8 @@ def render_movies():
     uid = get_user_id()
 
     if not movies.media_type_available(client):
+        if embed:
+            return
         st.subheader("🎬 Movies")
         st.warning("Movies need a one-time database migration before they can be saved.")
         st.markdown("Run **`migrations/2026-08-24_media_type.sql`** in the "
@@ -4255,10 +4310,12 @@ def render_movies():
             )
         return
 
-    st.subheader("🎬 Movies")
-    st.caption("A separate watchlist for films — no episodes, no air dates to track.")
+    if not embed:
+        st.subheader("🎬 Movies")
+        st.caption("Films on your list, grouped by whether you can watch them yet.")
 
-    q = st.text_input("Search movies", key="movie_q", placeholder="Michael Clayton, Sicario…")
+    q = "" if embed else st.text_input("Search movies", key="movie_q",
+                                       placeholder="Michael Clayton, Sicario…")
     if q:
         results = movies.search(q, limit=8)
         if not results:
@@ -4297,10 +4354,12 @@ def render_movies():
     with st.spinner("Checking streaming availability…"):
         enriched = _cached_movie_status(client, uid, region,
                                         tuple(sorted(m["tmdb_id"] for m in movies.list_movies(client, uid))))
-    st.markdown(f"### Your movies ({len(enriched)})")
     if not enriched:
-        st.info("No movies yet — search above to add one.")
-        return
+        if not embed:
+            st.info("No movies yet — search above to add one.")
+        return          # embedded: stay silent rather than pad Watch with an empty block
+    st.markdown(f"### 🎬 Movies ({len(enriched)})" if embed
+                else f"### Your movies ({len(enriched)})")
 
     just_landed = movies.newly_streaming(enriched)
     if just_landed:
@@ -4331,8 +4390,19 @@ def render_movies():
 
     # Recommendations seeded from the movies already on the list — same shape as the TV
     # engine (seed -> pool -> attribution), using TMDB's /movie endpoints.
-    st.divider()
-    st.markdown("### ✨ Because you saved these")
+    return
+
+
+def render_movie_recs():
+    """🎬 film recommendations, seeded from the movies already saved — the movie twin of
+    For You. Lives on Discover because that's the "what should I add" surface."""
+    uid = get_user_id()
+    if not movies.media_type_available(client):
+        return
+    enriched = [{**m, "info": {}} for m in movies.list_movies(client, uid)]
+    if not enriched:
+        return
+    st.markdown("### 🎬 Because you saved these")
     owned_ids = {m["tmdb_id"] for m in enriched}
     pool = {}
     for seed in enriched[:5]:
@@ -4680,26 +4750,22 @@ if _view == "sports" and not _find_active:
 
 
 if _view == "watch" and not _find_active:
-    # Media type is a FILTER, not a destination. Movies used to be its own nav entry,
-    # which forced "where do I look for this?" to be answered before you could look for
-    # anything — and split one question ("what do I watch tonight?") across two places.
-    _media = st.radio("Media", ["📺 TV", "🎬 Movies"], horizontal=True,
-                      key="watch_media", label_visibility="collapsed")
-    if _media == "🎬 Movies":
-        render_movies()
-    else:
-        _main, _rail = st.columns([2.4, 1])
-        with _main:
-            # What's ready to catch up right now (most actionable) first, then the
-            # upcoming-episode agenda, then renewed-but-undated.
-            _wn_rows = refresh_stale_air_dates(client, list_shows(client))
-            _wn_rows = refresh_sports_air_dates(client, _wn_rows)
-            _wn_rows = apply_provider_facet(_wn_rows)
-            render_catch_up(_wn_rows)
-            st.divider()
-            render_upcoming(_wn_rows, as_tab=True)
-        with _rail:
-            render_for_you(limit=3, compact=True)
+    # ONE list, both media types. A toggle made you choose which half of your watchlist
+    # to look at before answering the only question the view exists for — what do I watch
+    # tonight? Grouping is by readiness, not by media type.
+    _main, _rail = st.columns([2.4, 1])
+    with _main:
+        _wn_rows = refresh_stale_air_dates(client, list_shows(client))
+        _wn_rows = refresh_sports_air_dates(client, _wn_rows)
+        _wn_rows = apply_provider_facet(_wn_rows)
+        # Ready right now: episodes you're behind on, then films already streaming.
+        render_catch_up(_wn_rows)
+        render_movies(embed=True)
+        st.divider()
+        # Then what's scheduled, then what's renewed but undated.
+        render_upcoming(_wn_rows, as_tab=True)
+    with _rail:
+        render_for_you(limit=3, compact=True)
 
 if _view == "discover" and not _find_active:
     st.subheader("🆕 New This Month")
@@ -4863,6 +4929,9 @@ if _view == "discover" and not _find_active:
     else:
         st.info("No top rated shows available")
 
+
+if _view == "discover" and not _find_active:
+    render_movie_recs()
 
 if _view == "discover" and not _find_active:
     st.divider()
