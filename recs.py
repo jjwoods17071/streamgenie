@@ -20,6 +20,7 @@ Runtime-agnostic on purpose: no streamlit import, so cron_runner/newsletter can 
 it headlessly. Caching belongs to the caller (the app wraps it in st.cache_data).
 """
 import os
+import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set
 
 import requests
@@ -40,10 +41,28 @@ def _noop(*_a, **_k) -> None:
 
 
 def _tmdb(path: str, **params) -> Dict[str, Any]:
+    """TMDB GET with a short retry on transient failures.
+
+    TMDB rate-limits bursts, and callers here swallow exceptions into empty lists — so
+    without this a blip surfaces to the user as "nothing found" rather than as an error.
+    Only 429/5xx and timeouts are retried; a 404 is a real answer.
+    """
     params.update(api_key=os.getenv("TMDB_API_KEY", "").strip(), language="en-US")
-    r = requests.get(f"{TMDB_BASE}{path}", params=params, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{TMDB_BASE}{path}", params=params, timeout=15)
+            if r.status_code == 429 or r.status_code >= 500:
+                wait = float(r.headers.get("Retry-After") or (0.5 * (attempt + 1)))
+                last = requests.HTTPError(f"HTTP {r.status_code}")
+                time.sleep(min(wait, 5))
+                continue
+            r.raise_for_status()
+            return r.json()
+        except requests.Timeout as e:
+            last = e
+            time.sleep(0.5 * (attempt + 1))
+    raise last if last else RuntimeError("TMDB request failed")
 
 
 def fetch_watched_counts(client, user_id: str) -> Dict[int, int]:

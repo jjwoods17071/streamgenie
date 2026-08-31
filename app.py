@@ -3226,6 +3226,10 @@ if not auth.is_authenticated():
     st.stop()  # Stop execution until user logs in
 
 # User is authenticated - show user menu and continue with app
+with st.sidebar:
+    st.markdown("### 🎬 StreamGenie")
+    st.caption("Shows, movies and teams — all in one list.")
+
 auth.render_user_menu(client)
 auth.flush_pending_session()  # write the post-login cookie now that rendering is stable
 
@@ -3397,28 +3401,18 @@ st.markdown("""
 }
 </style>
 
-<div class="hero-banner">
-    <div class="hero-content">
-        <div class="hero-title">🎬 StreamGenie</div>
-        <div class="hero-subtitle">Your personal TV show tracker • Never miss an episode again</div>
-    </div>
-</div>
 """, unsafe_allow_html=True)
 
-# Notification bell + settings toggle (top right corner)
-col_spacer, col_bell, col_gear = st.columns([8, 1, 1])
-with col_spacer:
-    st.write("")  # Spacing
-with col_bell:
+# Account-level controls belong beside Logout, not in a full-width header row. This also
+# frees the top of the page: content now starts near the top of the viewport instead of
+# below ~350px of banner + spacer.
+with st.sidebar:
     _bell_uid = get_user_id()
     _unread = notifications.get_unread_count(client, _bell_uid)
-    _bell_label = f"🔔 {_unread}" if _unread else "🔔"
-    with st.popover(_bell_label, use_container_width=True,
-                    help=f"{_unread} unread notification(s)" if _unread else "Notifications"):
+    with st.popover(f"🔔 Notifications ({_unread})" if _unread else "🔔 Notifications",
+                    use_container_width=True):
         notifications.render_notifications_panel(client, _bell_uid, key_prefix="hdr_")
-with col_gear:
-    st.write("")  # Spacing
-    show_settings = st.toggle(ICONS['settings'], value=False, help="Show/hide settings")
+    show_settings = st.toggle("⚙️ Settings", value=False, help="Show app settings")
 
 # Collapsible settings section
 if show_settings:
@@ -3957,16 +3951,21 @@ def _cached_recs(_client, user_id, wl_sig, dis_sig, genre_sig, limit):
                          excluded_genres=set(genre_sig))
 
 
-def render_for_you():
+def render_for_you(limit=6, compact=False):
     """Taste-based recommendations: shows like the ones you actually watch.
+
+    `compact` renders the narrow rail version shown beside Watch — poster, title and the
+    attribution line only, since the rail has no room for blurbs or a button row.
 
     Replaces the old "For You", which was a popularity sort of returning shows on your
     providers and ignored watch history. Seeds come from your most-watched shows, so
     every pick can say which of your shows produced it — see recs.py.
     """
     uid = get_user_id()
-    if st.button(f"{ICONS['refresh']} Refresh picks", key="fy_refresh",
-                 help="Rebuild recommendations from your latest viewing"):
+    if compact:
+        st.markdown("#### ✨ For You")
+    elif st.button(f"{ICONS['refresh']} Refresh picks", key="fy_refresh",
+                   help="Rebuild recommendations from your latest viewing"):
         _cached_recs.clear()
         st.rerun()
 
@@ -3975,12 +3974,28 @@ def render_for_you():
                            tuple(sorted(int(i) for i in _wl_ids if i is not None)),
                            tuple(sorted(int(i) for i in _dismissed_ids if i is not None)),
                            tuple(sorted(genre_prefs.get_excluded(client, uid))),
-                           6)
+                           limit)
 
     picks = res.get("picks") or []
     if not picks:
         st.info("Add a few shows and mark some episodes watched — recommendations are "
                 "built from what you actually watch.")
+        return
+
+    if compact:
+        for p in picks:
+            with st.container(border=True):
+                if p.get("poster_path"):
+                    st.image(f"https://image.tmdb.org/t/p/w185{p['poster_path']}",
+                             use_column_width=True)
+                st.markdown(f"**{p['title']}**")
+                st.caption(p.get("why", ""))
+                if st.button(f"{ICONS['add']} Add", key=f"rail_add_{p['tmdb_id']}",
+                             use_container_width=True):
+                    upsert_show(client, p["tmdb_id"], p["title"], region, False, None,
+                                p.get("overview", ""), p.get("poster_path"), "Multiple Providers")
+                    _cached_recs.clear()
+                    st.rerun()
         return
 
     seeds = [s for s in (res.get("seed_titles") or []) if s]
@@ -4041,7 +4056,7 @@ def render_for_you():
                     _vote_rec(tmdb_id, title, "down")
 
 
-def _vote_rec(tmdb_id, title, verdict):
+def _vote_rec(tmdb_id, title, verdict, rerun=True):
     """Record a 👍/👎 into rec_feedback and drop the cache so the next build reflects it."""
     try:
         client.table("rec_feedback").upsert(
@@ -4052,7 +4067,8 @@ def _vote_rec(tmdb_id, title, verdict):
         _cached_recs.clear()
     except Exception:
         st.toast("Couldn't record that vote (the rec_feedback table may need its migration).")
-    st.rerun()
+    if rerun:
+        st.rerun()
 
 
 def render_sports_follow():
@@ -4275,7 +4291,7 @@ def render_movies():
                     if m.get("vote"):
                         st.caption(f"{ICONS['star']} {m['vote']:.1f}/10")
                     if m.get("overview"):
-                        st.caption(m["overview"][:220] + ("…" if len(m["overview"]) > 220 else ""))
+                        st.caption(_trim(m["overview"], 220))
                     _info = movies.release_info(m["tmdb_id"], region)
                     st.caption(movies.status_label(_info))
                 with c[2]:
@@ -4321,7 +4337,7 @@ def render_movies():
                     st.markdown(f"**{m['title']}**")
                     st.caption(movies.status_label(m["info"]))
                     if m.get("overview"):
-                        st.caption(m["overview"][:180] + ("…" if len(m["overview"]) > 180 else ""))
+                        st.caption(_trim(m["overview"], 180))
                 with c[2]:
                     if st.button("🗑 Remove", key=f"mv_rm_{m['tmdb_id']}", use_container_width=True):
                         movies.remove(client, uid, m["tmdb_id"])
@@ -4405,7 +4421,7 @@ def render_find_bar():
     replacing the page (rather than stacking above it) is what makes it read like search
     instead of one more section.
     """
-    bar = st.columns([7, 1.4, 1.2])
+    bar = st.columns([6.4, 1.3, 1.2, 1.1])
     with bar[0]:
         q = st.text_input("Find", key="find_q", label_visibility="collapsed",
                           placeholder="🔎 Search shows and movies, or ask Genie…")
@@ -4413,19 +4429,34 @@ def render_find_bar():
         wild = st.button("🎲 Wildcard", use_container_width=True,
                          help="One pick you'd probably never search for, based on what you watch")
     with bar[2]:
-        if st.session_state.get("find_q") or st.session_state.get("_wild_on"):
+        if st.button("🧞 Genie", use_container_width=True, help="Chat with Genie"):
+            st.session_state["_genie_on"] = not st.session_state.get("_genie_on", False)
+            st.rerun()
+    with bar[3]:
+        if (st.session_state.get("find_q") or st.session_state.get("_wild_on")
+                or st.session_state.get("_genie_on")):
             if st.button("✕ Clear", use_container_width=True):
                 st.session_state["find_q"] = ""
                 st.session_state["_wild_on"] = False
+                st.session_state["_genie_on"] = False
                 st.rerun()
+
+    # Genie chat keeps its own screen — a conversation needs the width, and it is the one
+    # thing here the Find bar's one-line interpretation genuinely can't replace.
+    if st.session_state.get("_genie_on"):
+        render_ask_genie()
+        return True
 
     if wild:
         st.session_state["_wild_on"] = True
         st.session_state["_wild_roll"] = st.session_state.get("_wild_roll", -1) + 1
 
     if st.session_state.get("_wild_on") and not q:
+        # Renders ABOVE the current view rather than replacing it: a roll shouldn't cost
+        # you your place in the list you were reading.
         _render_wildcard()
-        return True
+        st.divider()
+        return False
     if not q:
         return False
 
@@ -4451,6 +4482,17 @@ def render_find_bar():
     return True
 
 
+def _trim(text, n):
+    """Cut to a word boundary and mark it — a hard slice ends mid-word ('consists of Pop')
+    and reads like a rendering bug rather than a summary."""
+    t = (text or "").strip()
+    if len(t) <= n:
+        return t
+    cut = t[:n]
+    sp = cut.rfind(" ")
+    return (cut[:sp] if sp > n * 0.6 else cut).rstrip(".,;: ") + "…"
+
+
 def _find_row(item, owned):
     """One result row — same shape for shows and movies so the list reads as one thing."""
     with st.container(border=True):
@@ -4466,7 +4508,7 @@ def _find_row(item, owned):
             if item["kind"] == "movie":
                 st.caption(movies.status_label(movies.release_info(item["tmdb_id"], region)))
             if item.get("overview"):
-                st.caption(item["overview"][:180] + ("…" if len(item["overview"]) > 180 else ""))
+                st.caption(_trim(item["overview"], 180))
         with c[2]:
             if owned:
                 st.caption("✓ On your list")
@@ -4492,7 +4534,13 @@ def _render_wildcard():
     """🎲 One hero suggestion drawn from the taste engine — the "I'm feeling lucky" of a
     watchlist. Rolling again walks further down the ranked pool rather than reshuffling,
     so you never get the same three titles back."""
-    st.markdown("### 🎲 Wildcard")
+    _wh = st.columns([6, 1])
+    with _wh[0]:
+        st.markdown("### 🎲 Wildcard")
+    with _wh[1]:
+        if st.button("✕", key="wild_close", use_container_width=True, help="Hide the wildcard"):
+            st.session_state["_wild_on"] = False
+            st.rerun()
     st.caption("One thing you probably wouldn't have searched for, picked from what you watch.")
     uid = get_user_id()
     with st.spinner("Rummaging…"):
@@ -4523,8 +4571,8 @@ def _render_wildcard():
             st.markdown(f"🧞 *{pick['blurb']}*")
         st.markdown(f"**{pick.get('why', '')}**")
         if pick.get("overview"):
-            st.caption(pick["overview"][:300])
-        b = st.columns(2)
+            st.caption(_trim(pick["overview"], 300))
+        b = st.columns(3)
         with b[0]:
             if st.button(f"{ICONS['add']} Add to watchlist", key=f"wild_add_{pick['tmdb_id']}",
                          use_container_width=True, type="primary"):
@@ -4534,6 +4582,13 @@ def _render_wildcard():
                 st.success(f"Added {pick['title']}")
                 st.rerun()
         with b[1]:
+            if st.button("👎 Not for me", key=f"wild_no_{pick['tmdb_id']}",
+                         use_container_width=True, help="Teaches Genie and rolls on"):
+                _vote_rec(pick["tmdb_id"], pick["title"], "down", rerun=False)
+                dismissed.dismiss(client, get_user_id(), pick["tmdb_id"])
+                st.session_state["_wild_roll"] = st.session_state.get("_wild_roll", 0) + 1
+                st.rerun()
+        with b[2]:
             if st.button("🎲 Roll again", key="wild_again", use_container_width=True):
                 st.session_state["_wild_roll"] = st.session_state.get("_wild_roll", 0) + 1
                 st.rerun()
@@ -4548,9 +4603,7 @@ VIEWS = {
     "📺 Watch": "watch",
     "🗂️ All Shows": "allshows",
     "✨ Discover": "discover",
-    "🔎 Search": "search",
     "🏈 Sports": "sports",
-    "🧞 Ask Genie": "genie",
 }
 
 
@@ -4596,6 +4649,23 @@ def render_sidebar_nav():
                 genre_prefs.set_excluded(client, get_user_id(), new)
                 st.rerun()
 
+        st.markdown("---")
+        st.caption("AT A GLANCE")
+        _rows = list_shows(client)
+        _tv = [r for r in _rows if (r.get("tmdb_id") or 0) > 0]
+        _today = local_today().isoformat()
+        _wk = (local_today() + dt.timedelta(days=7)).isoformat()
+        _soon = [r for r in _tv if r.get("next_air_date") and _today <= r["next_air_date"] <= _wk]
+        st.markdown(f"**{len(_soon)}** airing in the next 7 days")
+        st.caption(f"{len(_tv)} shows · {len(_rows) - len(_tv)} teams tracked")
+        try:
+            if movies.media_type_available(client):
+                _mv = movies.list_movies(client, get_user_id())
+                if _mv:
+                    st.caption(f"🎬 {len(_mv)} movies on your list")
+        except Exception:
+            pass
+
         if view in ("watch", "discover"):
             st.markdown("---")
             if st.button("♻️ Rebuild caches", use_container_width=True,
@@ -4622,8 +4692,7 @@ _find_active = render_find_bar()
 if _view == "sports" and not _find_active:
     render_sports_follow()
 
-if _view == "genie" and not _find_active:
-    render_ask_genie()
+
 
 if _view == "watch" and not _find_active:
     # Media type is a FILTER, not a destination. Movies used to be its own nav entry,
@@ -4634,194 +4703,18 @@ if _view == "watch" and not _find_active:
     if _media == "🎬 Movies":
         render_movies()
     else:
-        # What's ready to catch up right now (most actionable) first, then the
-        # upcoming-episode agenda, then renewed-but-undated.
-        _wn_rows = refresh_stale_air_dates(client, list_shows(client))
-        _wn_rows = refresh_sports_air_dates(client, _wn_rows)
-        _wn_rows = apply_provider_facet(_wn_rows)
-        render_catch_up(_wn_rows)
-        st.divider()
-        render_upcoming(_wn_rows, as_tab=True)
-
-if _view == "search" and not _find_active:
-    # Vertical layout: Search on top, watchlist below
-    search_header = st.columns([8, 1])
-    with search_header[0]:
-        st.subheader(f"{ICONS['search']} Search TV Shows")
-    with search_header[1]:
-        if st.button(f"{ICONS['home']} Reset", help="Clear search and return to top", use_container_width=True):
-            st.session_state.clear_search = True
-            st.rerun()
-
-    st.caption(f"Searching in region: **{region}** — Shows availability for all streaming services")
-
-    # Use session state to track when to clear search
-    if 'clear_search' not in st.session_state:
-        st.session_state.clear_search = False
-
-    # Clear the search if flag is set
-    if st.session_state.clear_search:
-        st.session_state.clear_search = False
-        st.rerun()
-
-    q = st.text_input("Search for a TV show", "", placeholder="Wednesday, Stranger Things, Squid Game...", key="search_input")
-    if q:
-        try:
-            results = search_tv(q)
-        except Exception as e:
-            st.error(f"TMDB error: {e}")
-            results = []
-
-        if not results:
-            st.info("No results. Try a different title.")
-        else:
-            # Add filters
-            with st.expander(f"{ICONS['filter']} Filter Results", expanded=False):
-                # Mobile-friendly: Stack filters vertically instead of side-by-side
-
-                # Genre filter
-                all_genres = set()
-                for r in results:
-                    genre_ids = r.get("genre_ids", [])
-                    all_genres.update(genre_ids)
-
-                # TMDB genre mapping
-                genre_map = {
-                    10759: "Action & Adventure", 16: "Animation", 35: "Comedy",
-                    80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
-                    10762: "Kids", 9648: "Mystery", 10763: "News", 10764: "Reality",
-                    10765: "Sci-Fi & Fantasy", 10766: "Soap", 10767: "Talk",
-                    10768: "War & Politics", 37: "Western"
-                }
-
-                available_genres = sorted([genre_map.get(gid, f"Genre {gid}") for gid in all_genres])
-                selected_genres = st.multiselect(
-                    "Filter by Genre",
-                    available_genres,
-                    default=[],
-                    help="Select one or more genres to filter"
-                )
-
-                # Year filter
-                years = [r.get("first_air_date", "")[:4] for r in results if r.get("first_air_date")]
-                years = [int(y) for y in years if y.isdigit()]
-
-                if years and len(set(years)) > 1:  # Only show slider if there's a range
-                    min_year = min(years)
-                    max_year = max(years)
-                    year_range = st.slider(
-                        "Filter by Year",
-                        min_value=min_year,
-                        max_value=max_year,
-                        value=(min_year, max_year),
-                        help="Adjust the range to filter by premiere year"
-                    )
-                elif years:
-                    # All shows from same year
-                    year_range = (min(years), max(years))
-                    st.caption(f"All results from {min(years)}")
-                else:
-                    year_range = None
-
-            # Apply filters
-            filtered_results = results
-
-            if selected_genres:
-                # Get genre IDs from selected genre names
-                reverse_genre_map = {v: k for k, v in genre_map.items()}
-                selected_genre_ids = [reverse_genre_map[g] for g in selected_genres if g in reverse_genre_map]
-
-                filtered_results = [
-                    r for r in filtered_results
-                    if any(gid in r.get("genre_ids", []) for gid in selected_genre_ids)
-                ]
-
-            if year_range:
-                filtered_results = [
-                    r for r in filtered_results
-                    if r.get("first_air_date") and r.get("first_air_date")[:4].isdigit()
-                    and year_range[0] <= int(r.get("first_air_date")[:4]) <= year_range[1]
-                ]
-
-            # Show result count
-            if filtered_results != results:
-                st.caption(f"Showing {len(filtered_results)} of {len(results)} results")
-
-            # Which (show, service) pairs are already on the watchlist (for "in your list")
-            _wl_now = list_shows(client)
-            owned_pairs = {(rr.get("tmdb_id"), normalize_provider_name(rr.get("provider_name") or ""))
-                           for rr in _wl_now}
-
-            for r in filtered_results[:20]:
-                # Add padding above each result
-                st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
-
-                cols = st.columns([2, 5, 3])
-                poster_path = r.get("poster_path")
-                title = r.get("name") or r.get("original_name") or "Untitled"
-                tmdb_id = r.get("id")
-                overview = (r.get("overview") or "").strip()
-
-                with cols[0]:
-                    clickable_poster(tmdb_id, poster_path)
-
-                # Provider + next-air lookup (shared by the center + right columns)
-                next_air = None
-                prov = None
-                available_provider_names = []
-                try:
-                    det = tv_details(tmdb_id)
-                    prov = tv_watch_providers(tmdb_id)
-                    next_air = discover_next_air_date(det)
-                    all_providers = get_all_providers_in_region(prov, region)
-                    _uniq = {}
-                    for _plist in all_providers.values():
-                        for _p in _plist:
-                            _uniq.setdefault(normalize_provider_name(_p), _p)
-                    available_provider_names = sorted(_uniq.keys())
-                except Exception:
-                    pass
-
-                # CENTER column: title + next-episode date + description
-                with cols[1]:
-                    clickable_title(title, {"tmdb_id": tmdb_id, "title": title, "poster_path": poster_path, "overview": overview})
-                    if next_air:
-                        try:
-                            _d = dt.date.fromisoformat(next_air)
-                            _days = (_d - local_today()).days
-                            _when = "today" if _days == 0 else (f"in {_days} days" if _days > 0 else f"{abs(_days)} days ago")
-                            st.caption(f"📅 Next episode: {next_air} ({_when})")
-                        except Exception:
-                            st.caption(f"📅 Next episode: {next_air}")
-                    st.write((overview[:400] + "…") if len(overview) > 400 else (overview or "_No synopsis available._"))
-
-                # RIGHT column: streaming-service buttons (or ":blue[in your list]")
-                with cols[2]:
-                    if available_provider_names:
-                        st.markdown("**Add on:**")
-                        for provider in available_provider_names:
-                            np_ = normalize_provider_name(provider)
-                            if (tmdb_id, np_) in owned_pairs:
-                                st.markdown(f":blue[✓ {np_} — in your list]")
-                            else:
-                                _onp = is_on_provider_in_region(prov, provider, region) if prov else False
-                                st.button(f"➕ {np_}", key=f"add_{tmdb_id}_{provider.replace(' ', '_')}",
-                                          use_container_width=True, on_click=_wl_add,
-                                          args=(client, tmdb_id, title, region, _onp, next_air, overview, poster_path, np_))
-                    else:
-                        st.caption("📺 Streaming info not listed yet (common for brand-new shows) — pick the app to track it on:")
-                        for provider in ["Netflix", "Prime Video", "Hulu", "Disney+", "Max", "Paramount+",
-                                         "Apple TV+", "Peacock", "ESPN", "ABC", "NBC", "CBS", "Fox", "Broadcast TV"]:
-                            if (tmdb_id, normalize_provider_name(provider)) in owned_pairs:
-                                st.markdown(f":blue[✓ {provider} — in your list]")
-                            else:
-                                st.button(f"➕ {provider}", key=f"add_manual_{tmdb_id}_{provider.replace(' ', '_')}",
-                                          use_container_width=True, on_click=_wl_add,
-                                          args=(client, tmdb_id, title, region, False, next_air, overview, poster_path, provider))
-
-                # Add padding below each result
-                st.markdown("<div style='padding-bottom: 10px;'></div>", unsafe_allow_html=True)
-
+        _main, _rail = st.columns([2.4, 1])
+        with _main:
+            # What's ready to catch up right now (most actionable) first, then the
+            # upcoming-episode agenda, then renewed-but-undated.
+            _wn_rows = refresh_stale_air_dates(client, list_shows(client))
+            _wn_rows = refresh_sports_air_dates(client, _wn_rows)
+            _wn_rows = apply_provider_facet(_wn_rows)
+            render_catch_up(_wn_rows)
+            st.divider()
+            render_upcoming(_wn_rows, as_tab=True)
+        with _rail:
+            render_for_you(limit=3, compact=True)
 
 if _view == "discover" and not _find_active:
     st.subheader("🆕 New This Month")
