@@ -89,3 +89,31 @@ def watched_counts(client, user_id: str) -> Dict[int, int]:
         return dict(counts)
     except Exception:
         return {}
+
+
+def last_watched(client, user_id: str) -> Dict[int, Tuple[int, int]]:
+    """tmdb_id -> the furthest (season, episode) marked watched.
+
+    "Last watched S2E10" is the cheapest way to tell someone where they left off, and it
+    needs the MAX episode per show rather than a count. One paginated pass, same as
+    watched_counts — a per-show query would be one round-trip per row of the list.
+    """
+    try:
+        furthest: Dict[int, Tuple[int, int]] = {}
+        start, page = 0, 1000
+        while True:
+            batch = (client.table("watched_episodes")
+                     .select("tmdb_id,season_number,episode_number")
+                     .eq("user_id", user_id)
+                     .range(start, start + page - 1).execute().data or [])
+            for x in batch:
+                tid = x["tmdb_id"]
+                se = (x["season_number"], x["episode_number"])
+                if tid not in furthest or se > furthest[tid]:
+                    furthest[tid] = se
+            if len(batch) < page:
+                break
+            start += page
+        return furthest
+    except Exception:
+        return {}

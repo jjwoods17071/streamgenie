@@ -2139,6 +2139,13 @@ def render_catch_up(rows):
     st.caption("Shows you've started watching and have fallen behind on — released episodes "
                "you haven't marked watched yet.")
     wcounts = watched.watched_counts(client, get_user_id())
+    _lastw = watched.last_watched(client, get_user_id())
+
+    def _progress(tid, n):
+        se = _lastw.get(tid)
+        where = f" · last watched S{se[0]}E{se[1]}" if se else ""
+        return f":blue[**{n} to watch**]{where}"
+
     avail = []
     for r in rows:
         tid = r.get("tmdb_id")
@@ -2185,7 +2192,7 @@ def render_catch_up(rows):
                 with cols[j]:
                     clickable_poster(r['tmdb_id'], r.get("poster_path"))
                     clickable_title(r['title'], r)
-                    st.caption(f":blue[**{n} to watch**]")
+                    st.caption(_progress(r["tmdb_id"], n))
                     _render_service_logo(r)
                     _cu_remove(r, i + j)
     else:
@@ -2195,7 +2202,7 @@ def render_catch_up(rows):
                 clickable_poster(r['tmdb_id'], r.get("poster_path"))
             with c[1]:
                 clickable_title(r['title'], r)
-                st.caption(f":blue[**{n} to watch**]")
+                st.caption(_progress(r["tmdb_id"], n))
                 _render_service_logo(r)
             with c[2]:
                 _cu_remove(r, idx)
@@ -3077,6 +3084,12 @@ def normalize_provider_name(provider_name: str) -> str:
         return "Fandango At Home"
     if "vudu" in provider_lower:
         return "Fandango At Home"
+
+    # TMDB uses both spellings for these
+    if "mgm" in provider_lower:
+        return "MGM+"
+    if "curiosity" in provider_lower:
+        return "Curiosity Stream"
 
     # Consolidate Max variations
     if "hbo" in provider_lower and "max" in provider_lower:
@@ -4279,6 +4292,51 @@ def _cached_movie_status(_client, user_id, region, id_sig):
     return movies.enrich(_client, user_id, region)
 
 
+def render_watch_summary(rows):
+    """The one-line answer to "is there anything for me right now?", plus an honest
+    account of what the page is hiding.
+
+    The list defaults to things you can act on. A show you're caught up on with no
+    announced date has nothing to offer, so it stays out of the way — but silently
+    dropping a third of someone's watchlist is how people stop trusting a list, so the
+    count is always stated and one click brings it back.
+    """
+    uid = get_user_id()
+    wcounts = watched.watched_counts(client, uid)
+    today = local_today()
+
+    ready = scheduled = waiting = 0
+    for r in rows:
+        tid = r.get("tmdb_id") or 0
+        if tid < 0:
+            continue
+        nad = r.get("next_air_date")
+        dated = False
+        if nad:
+            try:
+                dated = dt.date.fromisoformat(nad) >= today
+            except Exception:
+                dated = False
+        w = wcounts.get(tid, 0)
+        behind = available_now_count(tid, w) if w > 0 else 0
+        if behind > 0:
+            ready += 1
+        elif dated:
+            scheduled += 1
+        else:
+            waiting += 1
+
+    bits = []
+    if ready:
+        bits.append(f"**{ready}** ready to watch")
+    if scheduled:
+        bits.append(f"**{scheduled}** with a date")
+    st.markdown(" · ".join(bits) if bits else "**Nothing waiting** — you're caught up.")
+    if waiting:
+        st.caption(f"{waiting} caught up with no announced date — hidden below. "
+                   "Renewed shows appear in *Coming eventually*.")
+
+
 def render_movies(embed=False):
     """🎬 Movies — the film half of the watchlist.
 
@@ -4758,6 +4816,8 @@ if _view == "watch" and not _find_active:
         _wn_rows = refresh_stale_air_dates(client, list_shows(client))
         _wn_rows = refresh_sports_air_dates(client, _wn_rows)
         _wn_rows = apply_provider_facet(_wn_rows)
+        render_watch_summary(_wn_rows)
+        st.divider()
         # Ready right now: episodes you're behind on, then films already streaming.
         render_catch_up(_wn_rows)
         render_movies(embed=True)
