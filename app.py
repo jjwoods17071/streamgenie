@@ -4417,7 +4417,7 @@ def render_movies(embed=False):
                         st.caption(f"{ICONS['star']} {m['vote']:.1f}/10")
                     if m.get("overview"):
                         st.caption(_trim(m["overview"], 220))
-                    _info = movies.release_info(m["tmdb_id"], region)
+                    _info = cached_release_info(m["tmdb_id"], region)
                     st.caption(movies.status_label(_info))
                 with c[2]:
                     if m["tmdb_id"] in owned:
@@ -4609,15 +4609,48 @@ def render_find_bar():
         return True
 
     owned = {r.get("tmdb_id") for r in list_shows(client)}
-    if tv:
-        st.markdown("#### 📺 Shows")
-        for s in tv:
-            _find_row(s, s["tmdb_id"] in owned)
-    if mv:
-        st.markdown("#### 🎬 Movies")
-        for m in mv:
-            _find_row(m, False)
+    # ONE result set, not a shows section and a movies section — you searched for a title,
+    # not for a media type. Each tile carries its own badge instead.
+    _find_grid(tv + mv, owned)
     return True
+
+
+@st.cache_data(ttl=10800, show_spinner=False)
+def cached_release_info(tmdb_id: int, region: str):
+    """3h cache around movies.release_info — 2 TMDB calls each, hit once per movie tile
+    on every rerun without this."""
+    return movies.release_info(tmdb_id, region)
+
+
+def _find_grid(items, owned, per_row=6):
+    """Search results as poster tiles, matching every other browse surface.
+
+    These were bordered one-per-row cards with a synopsis while the rest of the app had
+    moved to poster grids, so search looked like a different application.
+    """
+    st.caption(f"{len(items)} result{'s' if len(items) != 1 else ''}")
+    for i in range(0, len(items), per_row):
+        cols = st.columns(per_row)
+        for col, item in zip(cols, items[i:i + per_row]):
+            with col:
+                badge = "🎬" if item["kind"] == "movie" else "📺"
+                if item.get("poster_path"):
+                    st.image(f"https://image.tmdb.org/t/p/w185{item['poster_path']}",
+                             use_column_width=True)
+                else:
+                    st.markdown('<div class="sgph">🎞️</div>', unsafe_allow_html=True)
+                st.markdown(f"**{badge} {item['title']}**")
+                meta = [str(item.get("year") or "—")]
+                if item.get("vote"):
+                    meta.append(f"{item['vote']:.1f}★")
+                st.caption(" · ".join(meta))
+                if item["kind"] == "movie":
+                    st.caption(movies.status_label(cached_release_info(item["tmdb_id"], region)))
+                if item["tmdb_id"] in owned:
+                    st.caption("✓ On your list")
+                elif st.button(f"{ICONS['add']}", key=f"find_add_{item['kind']}_{item['tmdb_id']}",
+                               use_container_width=True, help=f"Add {item['title']}"):
+                    _find_add(item)
 
 
 def _trim(text, n):
@@ -4631,41 +4664,21 @@ def _trim(text, n):
     return (cut[:sp] if sp > n * 0.6 else cut).rstrip(".,;: ") + "…"
 
 
-def _find_row(item, owned):
-    """One result row — same shape for shows and movies so the list reads as one thing."""
-    with st.container(border=True):
-        c = st.columns([1, 5, 2])
-        with c[0]:
-            if item.get("poster_path"):
-                st.image(f"https://image.tmdb.org/t/p/w185{item['poster_path']}",
-                         use_column_width=True)
-        with c[1]:
-            st.markdown(f"**{item['title']}** ({item.get('year', '—')})")
-            if item.get("vote"):
-                st.caption(f"{ICONS['star']} {item['vote']:.1f}/10")
-            if item["kind"] == "movie":
-                st.caption(movies.status_label(movies.release_info(item["tmdb_id"], region)))
-            if item.get("overview"):
-                st.caption(_trim(item["overview"], 180))
-        with c[2]:
-            if owned:
-                st.caption("✓ On your list")
-            elif st.button(f"{ICONS['add']} Add", key=f"find_add_{item['kind']}_{item['tmdb_id']}",
-                           use_container_width=True, type="primary"):
-                if item["kind"] == "movie":
-                    if not movies.media_type_available(client):
-                        st.warning("Movies need the media_type migration first — see the Movies view.")
-                        return
-                    info = movies.release_info(item["tmdb_id"], region)
-                    provs = info.get("providers") or []
-                    movies.add(client, get_user_id(), {**item, "streaming_date": info.get("streaming")},
-                               region, provs[0] if provs else "Multiple Providers")
-                else:
-                    upsert_show(client, item["tmdb_id"], item["title"], region, False, None,
-                                item.get("overview", ""), item.get("poster_path"),
-                                "Multiple Providers")
-                st.success(f"Added {item['title']}")
-                st.rerun()
+def _find_add(item):
+    """Add a search result — either media type, from the same grid."""
+    if item["kind"] == "movie":
+        if not movies.media_type_available(client):
+            st.warning("Movies need the media_type migration first.")
+            return
+        info = cached_release_info(item["tmdb_id"], region)
+        provs = info.get("providers") or []
+        movies.add(client, get_user_id(), {**item, "streaming_date": info.get("streaming")},
+                   region, provs[0] if provs else "Multiple Providers")
+    else:
+        upsert_show(client, item["tmdb_id"], item["title"], region, False, None,
+                    item.get("overview", ""), item.get("poster_path"), "Multiple Providers")
+    st.success(f"Added {item['title']}")
+    st.rerun()
 
 
 def _render_wildcard():
