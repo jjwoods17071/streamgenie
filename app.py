@@ -428,9 +428,24 @@ def _shape_meta(d: Dict[str, Any]) -> Dict[str, Any]:
 def get_show_meta(tv_id:int) -> Dict[str, Any]:
     """Cached high-level show metadata for the detail panel (6h TTL)."""
     try:
-        return _shape_meta(tv_details(tv_id))
+        return fetch_show_records([tv_id]).get(tv_id, {})
     except Exception:
         return {}
+
+
+def fetch_show_records(tv_ids) -> Dict[int, Dict[str, Any]]:
+    """THE source of shaped show records. Every caller goes through here.
+
+    Today this is TMDB. The intended next step is a shared `show_cache` table read first
+    with TMDB as the miss path — see SCALING.md for the measured numbers behind that
+    design. It exists as its own function so that swap touches ONE place instead of every
+    caller, which is the whole reason it's split out now rather than later.
+    """
+    ids = list(tv_ids)
+    if not ids:
+        return {}
+    return {tid: _shape_meta(d)
+            for tid, d in zip(ids, tmdb.parallel_map(tv_details, ids)) if d}
 
 
 def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
@@ -448,9 +463,7 @@ def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
     store = st.session_state.setdefault("_meta_store", {})
     missing = [t for t in tv_ids if t not in store]
     if missing:
-        for tid, d in zip(missing, tmdb.parallel_map(tv_details, missing)):
-            if d:
-                store[tid] = _shape_meta(d)
+        store.update(fetch_show_records(missing))
     return {t: store[t] for t in tv_ids if t in store}
 
 
