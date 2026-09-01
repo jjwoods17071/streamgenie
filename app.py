@@ -21,6 +21,7 @@ import watched  # Watched-episode tracking
 import discover  # Provider discovery + Netflix history import
 import recs  # shared like-for-like recommendation engine (app + newsletter)
 import milestones  # season premiere / finale classification (app + newsletter)
+import tmdb  # shared TMDB client (retry + parallel fan-out)
 import movies  # movie watchlist + TMDB /movie endpoints
 import dismissed  # "Not interested" dismissals for discovery carousels
 import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
@@ -401,28 +402,45 @@ def get_milestone(tv_id:int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _shape_meta(d: Dict[str, Any]) -> Dict[str, Any]:
+    """The subset of TMDB show details the app actually uses."""
+    return {
+        "name": d.get("name"),
+        "poster_path": d.get("poster_path"),
+        "backdrop_path": d.get("backdrop_path"),
+        "overview": d.get("overview"),
+        "status": d.get("status"),
+        "number_of_seasons": d.get("number_of_seasons"),
+        "number_of_episodes": d.get("number_of_episodes"),
+        "first_air_date": d.get("first_air_date"),
+        "in_production": d.get("in_production"),
+        "type": d.get("type"),
+        "next_episode_to_air": d.get("next_episode_to_air"),
+        "last_episode_to_air": d.get("last_episode_to_air"),
+        "seasons": milestones.real_seasons(d),
+    }
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_show_meta(tv_id:int) -> Dict[str, Any]:
     """Cached high-level show metadata for the detail panel (6h TTL)."""
     try:
-        d = tv_details(tv_id)
-        return {
-            "name": d.get("name"),
-            "poster_path": d.get("poster_path"),
-            "backdrop_path": d.get("backdrop_path"),
-            "overview": d.get("overview"),
-            "status": d.get("status"),
-            "number_of_seasons": d.get("number_of_seasons"),
-            "number_of_episodes": d.get("number_of_episodes"),
-            "first_air_date": d.get("first_air_date"),
-            "in_production": d.get("in_production"),
-            "type": d.get("type"),
-            "next_episode_to_air": d.get("next_episode_to_air"),
-            "last_episode_to_air": d.get("last_episode_to_air"),
-            "seasons": milestones.real_seasons(d),
-        }
+        return _shape_meta(tv_details(tv_id))
     except Exception:
         return {}
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
+    """Metadata for a whole watchlist in ONE parallel pass.
+
+    Watch needs this for every show: the summary counts what you're behind on and
+    catch-up recomputes the same thing. One TMDB call each, run serially, was ~16s of
+    cold load for 82 shows — fanned out it's under 2s.
+    """
+    ids = list(tv_ids)
+    metas = tmdb.parallel_map(tv_details, ids)
+    return {tid: _shape_meta(d) for tid, d in zip(ids, metas) if d}
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -1591,10 +1609,14 @@ def aired_episode_count(meta: dict) -> int:
     return total + (le or 0)
 
 
-def available_now_count(tmdb_id, watched_n: int) -> int:
-    """How many already-released episodes the user hasn't watched yet."""
+def available_now_count(tmdb_id, watched_n: int, meta=None) -> int:
+    """How many already-released episodes the user hasn't watched yet.
+
+    `meta` lets a caller that already holds the whole watchlist's metadata (see
+    get_show_meta_many) skip the per-show lookup entirely.
+    """
     try:
-        meta = get_show_meta(tmdb_id)
+        meta = meta if meta is not None else get_show_meta(tmdb_id)
     except Exception:
         return 0
     aired = aired_episode_count(meta)
@@ -2132,7 +2154,7 @@ def render_upcoming(rows, as_tab=False):
             _agenda()
 
 
-def render_catch_up(rows):
+def render_catch_up(rows, metas=None):
     """📥 Catch Up — released-but-unwatched episodes, ONLY for shows you've started
     (≥1 watched episode), so the count means 'you're N behind' rather than 'everything'."""
     st.subheader("📥 Catch Up")
@@ -2154,7 +2176,7 @@ def render_catch_up(rows):
         w = wcounts.get(tid, 0)
         if w <= 0:                       # only shows you've STARTED
             continue
-        n = available_now_count(tid, w)
+        n = available_now_count(tid, w, (metas or {}).get(tid))
         if n > 0:
             avail.append((n, r))
     if not avail:
@@ -4292,7 +4314,7 @@ def _cached_movie_status(_client, user_id, region, id_sig):
     return movies.enrich(_client, user_id, region)
 
 
-def render_watch_summary(rows):
+def render_watch_summary(rows, metas=None):
     """The one-line answer to "is there anything for me right now?", plus an honest
     account of what the page is hiding.
 
@@ -4318,7 +4340,7 @@ def render_watch_summary(rows):
             except Exception:
                 dated = False
         w = wcounts.get(tid, 0)
-        behind = available_now_count(tid, w) if w > 0 else 0
+        behind = available_now_count(tid, w, (metas or {}).get(tid)) if w > 0 else 0
         if behind > 0:
             ready += 1
         elif dated:
@@ -4816,10 +4838,16 @@ if _view == "watch" and not _find_active:
         _wn_rows = refresh_stale_air_dates(client, list_shows(client))
         _wn_rows = refresh_sports_air_dates(client, _wn_rows)
         _wn_rows = apply_provider_facet(_wn_rows)
-        render_watch_summary(_wn_rows)
+        # One parallel metadata pass for the whole list. The summary and catch-up both
+        # need "how far behind am I" for every show; fetched per-show and serially that
+        # was ~16s of cold load.
+        with st.spinner("Checking your shows…"):
+            _metas = get_show_meta_many(
+                tuple(sorted(r["tmdb_id"] for r in _wn_rows if (r.get("tmdb_id") or 0) > 0)))
+        render_watch_summary(_wn_rows, _metas)
         st.divider()
         # Ready right now: episodes you're behind on, then films already streaming.
-        render_catch_up(_wn_rows)
+        render_catch_up(_wn_rows, _metas)
         render_movies(embed=True)
         st.divider()
         # Then what's scheduled, then what's renewed but undated.
