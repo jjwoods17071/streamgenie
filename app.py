@@ -330,17 +330,11 @@ def list_shows(client: Client) -> List[Dict[str, Any]]:
 
 # --------------- TMDB API ---------------
 def tmdb_get(path:str, params:Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
+    """Delegates to the shared client — the FOURTH copy of this fetch had no retry, and a
+    single TMDB read timeout took a whole page down. See tmdb.py."""
     if not TMDB_API_KEY:
         raise RuntimeError("TMDB_API_KEY is not set. Get one free at themoviedb.org and set the environment variable.")
-    headers = {"Authorization": f"Bearer {TMDB_API_KEY}"} if len(TMDB_API_KEY) > 40 else {}
-    # Support either v3 key (api_key=) or v4 bearer token
-    p = dict(params or {})
-    if not headers:
-        p["api_key"] = TMDB_API_KEY
-    url = f"{TMDB_BASE}{path}"
-    r = requests.get(url, params=p, headers=headers, timeout=20)
-    r.raise_for_status()
-    return r.json()
+    return tmdb.get(path, **(params or {}))
 
 def search_tv(query:str) -> List[Dict[str, Any]]:
     data = tmdb_get("/search/tv", {"query": query, "include_adult": "false", "language": "en-US", "page": 1})
@@ -4582,6 +4576,13 @@ def _genie_read(query: str):
         return None
 
 
+def _clear_find():
+    """Reset the Find bar. Runs as a callback so writing find_q is legal."""
+    st.session_state["find_q"] = ""
+    st.session_state["_wild_on"] = False
+    st.session_state["_genie_on"] = False
+
+
 def render_find_bar():
     """Universal Find — a search bar on EVERY view, not a destination you navigate to.
 
@@ -4597,17 +4598,17 @@ def render_find_bar():
         wild = st.button("🎲 Wildcard", use_container_width=True,
                          help="One pick you'd probably never search for, based on what you watch")
     with bar[2]:
-        if st.button("🧞 Genie", use_container_width=True, help="Chat with Genie"):
-            st.session_state["_genie_on"] = not st.session_state.get("_genie_on", False)
-            st.rerun()
+        st.button("🧞 Genie", use_container_width=True, help="Chat with Genie",
+                  on_click=lambda: st.session_state.update(
+                      _genie_on=not st.session_state.get("_genie_on", False)))
     with bar[3]:
         if (st.session_state.get("find_q") or st.session_state.get("_wild_on")
                 or st.session_state.get("_genie_on")):
-            if st.button("✕ Clear", use_container_width=True):
-                st.session_state["find_q"] = ""
-                st.session_state["_wild_on"] = False
-                st.session_state["_genie_on"] = False
-                st.rerun()
+            # MUST be an on_click callback. Streamlit forbids assigning a widget's own
+            # session_state key after that widget has been instantiated in the same run,
+            # and find_q is the text_input above — doing it inline raised
+            # StreamlitAPIException. Callbacks run before the next run's widgets exist.
+            st.button("✕ Clear", use_container_width=True, on_click=_clear_find)
 
     # Genie chat keeps its own screen — a conversation needs the width, and it is the one
     # thing here the Find bar's one-line interpretation genuinely can't replace.
@@ -4674,8 +4675,28 @@ def _find_grid(items, owned, per_row=6):
                 if item.get("vote"):
                     meta.append(f"{item['vote']:.1f}★")
                 st.caption(" · ".join(meta))
-                if item["kind"] == "movie":
-                    st.caption(movies.status_label(cached_release_info(item["tmdb_id"], region)))
+                info = cached_release_info(item["tmdb_id"], region) if item["kind"] == "movie" else None
+                if info:
+                    st.caption(movies.status_label(info))
+                # Details on demand. Browse tiles can stay bare because you already know
+                # your own shows, but a search result is an unfamiliar title you're
+                # deciding about — and a FILM has no detail page to open (?show= is the
+                # TV PDP), so without this the synopsis was unreachable anywhere.
+                with st.popover("ℹ️ Details", use_container_width=True):
+                    st.markdown(f"**{item['title']}** ({item.get('year') or '—'})")
+                    if item.get("vote"):
+                        st.caption(f"{ICONS['star']} {item['vote']:.1f}/10")
+                    if info:
+                        st.caption(movies.status_label(info))
+                        for lbl, key in (("In theaters", "theatrical"),
+                                         ("Digital / rental", "digital"),
+                                         ("Streaming", "streaming")):
+                            if info.get(key):
+                                svc = info.get("streaming_service") if key == "streaming" else None
+                                st.caption(f"{lbl}: {info[key]}" + (f" · {svc}" if svc else ""))
+                        if info.get("providers"):
+                            st.caption("On: " + ", ".join(info["providers"][:4]))
+                    st.write(item.get("overview") or "_No description available._")
                 if item["tmdb_id"] in owned:
                     st.caption("✓ On your list")
                 elif st.button(f"{ICONS['add']}", key=f"find_add_{item['kind']}_{item['tmdb_id']}",

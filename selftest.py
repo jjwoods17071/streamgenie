@@ -451,6 +451,17 @@ def main():
         at = _render(nav_view="📺 Watch", _wild_on=False, find_q="Sicario")
         assert not at.exception, str(at.exception[0].value)[:300]
 
+    @check("clearing Find doesn't write a live widget's state")
+    def _():
+        # Assigning st.session_state["find_q"] inline after the text_input exists raises
+        # StreamlitAPIException. The Clear button must go through an on_click callback.
+        at = _render(nav_view="📺 Watch", find_q="Sicario")
+        clear = [b for b in at.button if "Clear" in (b.label or "")]
+        assert clear, "Clear button not rendered while a query is active"
+        clear[0].click().run()
+        assert not at.exception, str(at.exception[0].value)[:300]
+        assert not at.session_state["find_q"], "query not cleared"
+
     # ---------------- summary ----------------
     print("\n" + "=" * 62)
     print(f"\033[1m{len(PASSES)} passed, {len(FAILURES)} failed, {len(SKIPS)} skipped\033[0m")

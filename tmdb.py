@@ -29,11 +29,16 @@ def get(path: str, **params) -> Dict[str, Any]:
     without the retry a blip reaches the user as "nothing found" rather than an error.
     Only 429/5xx and timeouts are retried — a 404 is a real answer.
     """
-    params.update(api_key=os.getenv("TMDB_API_KEY", "").strip(), language="en-US")
+    key = os.getenv("TMDB_API_KEY", "").strip()
+    # A v4 token goes in the Authorization header; a v3 key goes in the query string.
+    headers = {"Authorization": f"Bearer {key}"} if len(key) > 40 else {}
+    params.setdefault("language", "en-US")
+    if not headers:
+        params["api_key"] = key
     last: Optional[Exception] = None
     for attempt in range(3):
         try:
-            r = requests.get(f"{BASE}{path}", params=params, timeout=15)
+            r = requests.get(f"{BASE}{path}", params=params, headers=headers, timeout=20)
             if r.status_code == 429 or r.status_code >= 500:
                 wait = float(r.headers.get("Retry-After") or (0.5 * (attempt + 1)))
                 last = requests.HTTPError(f"HTTP {r.status_code} for {path}")
