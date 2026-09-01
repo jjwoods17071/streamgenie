@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import datetime as dt
 import re
 from zoneinfo import ZoneInfo
@@ -232,7 +231,6 @@ STREAMING_PROVIDERS = [
     "Criterion Channel",
 ]
 
-DB_PATH = os.getenv("DB_PATH", "shows.db")
 
 # --------------- DB LAYER (Supabase) ---------------
 @st.cache_resource
@@ -3523,7 +3521,6 @@ if show_settings:
         with col2:
             st.write("")
             st.caption(f"TMDB API: {ICONS['check'] if bool(TMDB_API_KEY) else ICONS['error']} {'Connected' if bool(TMDB_API_KEY) else 'Not set'}")
-            st.caption(f"Database: {DB_PATH}")
 
         # Tabs for settings sections
         # Check if user is admin to show Maintenance tab
@@ -4013,6 +4010,17 @@ if "show" in st.query_params:
     if _pdp_open_sid is None:
         st.query_params.clear()
 
+# Films need their own param: ?show= resolves through /tv/{id}, and TMDB reuses ids across
+# media types, so opening a movie there would load an unrelated series or 404.
+_pdp_open_mid = None
+if "movie" in st.query_params:
+    try:
+        _pdp_open_mid = int(st.query_params["movie"])
+    except Exception:
+        _pdp_open_mid = None
+    if _pdp_open_mid is None:
+        st.query_params.clear()
+
 # ── Main page: tabbed layout (Search / discovery / watchlist) ──
 _dismissed_ids = dismissed.get_dismissed(client, get_user_id())
 _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
@@ -4482,7 +4490,9 @@ def render_movies(embed=False):
                         st.image(f"https://image.tmdb.org/t/p/w185{m['poster_path']}",
                                  use_column_width=True)
                 with c[1]:
-                    st.markdown(f"**{m['title']}**")
+                    st.button(m["title"], key=f"mopen_{m['tmdb_id']}", use_container_width=True,
+                              help="Open film details", on_click=open_movie_page,
+                              args=(m["tmdb_id"],))
                     st.caption(movies.status_label(m["info"]))
                     if m.get("overview"):
                         st.caption(_trim(m["overview"], 180))
@@ -4495,6 +4505,80 @@ def render_movies(embed=False):
     # Recommendations seeded from the movies already on the list — same shape as the TV
     # engine (seed -> pool -> attribution), using TMDB's /movie endpoints.
     return
+
+
+def open_movie_page(tmdb_id) -> None:
+    """Open a film's detail panel (?movie=<id>)."""
+    st.query_params["movie"] = str(int(tmdb_id))
+    st.session_state.pop("_pdp_scrolled", None)
+
+
+def render_movie_page(tmdb_id: int):
+    """Detail panel for a film.
+
+    Films had none: ?show= is the TV PDP, so a movie's synopsis, runtime and availability
+    were reachable only from the Find results popover — and not at all once it was on your
+    list. No episode guide here, because a film has no episodes; the equivalent question
+    is "can I watch it yet, and where", which is what release_info answers.
+    """
+    uid = get_user_id()
+    d = movies.details(tmdb_id) or {}
+    if not d:
+        st.warning("Couldn't load that film just now.")
+        return
+    info = cached_release_info(tmdb_id, region)
+    owned = {m["tmdb_id"] for m in movies.list_movies(client, uid)}
+
+    c = st.columns([1.1, 4])
+    with c[0]:
+        if d.get("poster_path"):
+            st.image(f"https://image.tmdb.org/t/p/w342{d['poster_path']}", use_column_width=True)
+    with c[1]:
+        yr = (d.get("release_date") or "")[:4]
+        st.markdown(f"## 🎬 {d.get('title')}" + (f" ({yr})" if yr else ""))
+        meta = []
+        if d.get("vote_average"):
+            meta.append(f"{ICONS['star']} {d['vote_average']:.1f}/10")
+        if d.get("runtime"):
+            meta.append(movies.runtime_label(d["runtime"]))
+        if d.get("genres"):
+            meta.append(", ".join(g["name"] for g in d["genres"][:3]))
+        if meta:
+            st.caption(" · ".join(meta))
+        st.markdown(f"**{movies.status_label(info)}**")
+
+        for lbl, key in (("In theaters", "theatrical"), ("Digital / rental", "digital"),
+                         ("Streaming", "streaming")):
+            if info.get(key):
+                svc = info.get("streaming_service") if key == "streaming" else None
+                st.caption(f"{lbl}: {info[key]}" + (f" · {svc}" if svc else ""))
+        if info.get("providers"):
+            render_provider_chips(info["providers"])
+
+        if d.get("overview"):
+            st.write(d["overview"])
+
+        b = st.columns(3)
+        with b[0]:
+            if tmdb_id in owned:
+                st.caption("✓ On your list")
+            elif st.button(f"{ICONS['add']} Add to watchlist", key=f"mpdp_add_{tmdb_id}",
+                           use_container_width=True, type="primary"):
+                provs = info.get("providers") or []
+                movies.add(client, uid, {**movies.normalize(d),
+                                         "streaming_date": info.get("streaming")},
+                           region, provs[0] if provs else "Multiple Providers")
+                _cached_movie_status.clear()
+                st.rerun()
+        with b[1]:
+            if tmdb_id in owned and st.button("🗑 Remove", key=f"mpdp_rm_{tmdb_id}",
+                                              use_container_width=True):
+                movies.remove(client, uid, tmdb_id)
+                _cached_movie_status.clear()
+                st.rerun()
+        with b[2]:
+            st.button("✕ Close", key=f"mpdp_close_{tmdb_id}", use_container_width=True,
+                      on_click=lambda: st.query_params.clear())
 
 
 def render_movie_recs():
@@ -4667,7 +4751,12 @@ def _find_grid(items, owned, per_row=6):
                              use_column_width=True)
                 else:
                     st.markdown('<div class="sgph">🎞️</div>', unsafe_allow_html=True)
-                st.markdown(f"**{badge} {item['title']}**")
+                if item["kind"] == "movie":
+                    st.button(f"{badge} {item['title']}", key=f"fopen_{item['tmdb_id']}",
+                              use_container_width=True, help="Open film details",
+                              on_click=open_movie_page, args=(item["tmdb_id"],))
+                else:
+                    st.markdown(f"**{badge} {item['title']}**")
                 meta = [str(item.get("year") or "—")]
                 if item.get("vote"):
                     meta.append(f"{item['vote']:.1f}★")
@@ -5284,30 +5373,37 @@ if _view == "allshows" and not _find_active:
         #                        ended years ago — e.g. mid-rewatch Battlestar Galactica)
         #   ✅ Watched History — the series is over AND you've watched every episode
         def _viewer_group(rr):
+            """Which bucket a row belongs in, from the VIEWER's position in it.
+
+            "Still Watching" used to hold both — shows with episodes waiting AND shows
+            never opened. On this watchlist that was 12 vs 51, so the tab was 81% backlog
+            and filtered nothing. They're different intentions and now different buckets.
+            """
             tid = rr.get("tmdb_id") or 0
             if tid < 0:
-                return "watching"   # sports follows never "finish"
+                return "teams"          # sports follows never "finish"
             w = _wcounts.get(tid, 0)
-            # Nothing left to watch right now — every aired episode is watched.
-            if w > 0 and available_now_count(tid, w) == 0:
-                # Series done for good → Watched History. Merely between seasons (still
-                # returning) → Caught Up; it rejoins Still Watching the moment a new
-                # episode airs (available_now_count goes > 0 again).
+            if w <= 0:
+                return "notstarted"     # on the list, never opened
+            # Nothing left right now — every aired episode is watched.
+            if available_now_count(tid, w) == 0:
+                # Over for good → Finished. Merely between seasons → Caught up; it rejoins
+                # Behind the moment a new episode airs (available_now_count goes > 0).
                 if _status_group(rr) in ("ended", "canceled"):
                     return "history"
                 return "caught_up"
-            return "watching"
+            return "behind"
 
-        _groups = {"watching": [], "caught_up": [], "history": []}
+        _groups = {"behind": [], "notstarted": [], "caught_up": [], "history": [], "teams": []}
         for r in rows:
             _groups[_viewer_group(r)].append(r)
 
-        _filter_opts = {
-            f"All ({len(rows)})": "all",
-            f"▶️ Still Watching ({len(_groups['watching'])})": "watching",
-            f"✅ Caught Up ({len(_groups['caught_up'])})": "caught_up",
-            f"✅ Watched History ({len(_groups['history'])})": "history",
-        }
+        _filter_opts = {f"All ({len(rows)})": "all"}
+        for _lbl, _key in ((f"▶️ Behind", "behind"), ("🆕 Not started", "notstarted"),
+                           ("⏳ Between seasons", "caught_up"), ("✅ Finished", "history"),
+                           ("🏈 Teams", "teams")):
+            if _groups[_key]:      # don't show a tab that filters to nothing
+                _filter_opts[f"{_lbl} ({len(_groups[_key])})"] = _key
         with sc[1]:
             _fl = st.radio("Status", list(_filter_opts.keys()), horizontal=True,
                            key="wl_viewer_filter", label_visibility="collapsed")
@@ -5326,6 +5422,12 @@ if _view == "allshows" and not _find_active:
 # ── Show-detail panel — rendered BELOW the tab bar so the menu stays at the top.
 #    An anchor at the panel top is scrolled into view (once, on a NEW show) so focus
 #    lands on the show — not down in the Related-shows section. ──
+if _pdp_open_mid is not None:
+    st.divider()
+    st.markdown('<div id="pdp-anchor"></div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        render_movie_page(_pdp_open_mid)
+
 if _pdp_open_sid is not None:
     st.divider()
     st.markdown('<div id="pdp-anchor"></div>', unsafe_allow_html=True)

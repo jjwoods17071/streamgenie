@@ -74,8 +74,6 @@ def main():
     def _():
         import ast, glob
         for f in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "*.py")):
-            if os.path.basename(f).startswith("app_sqlite_backup"):
-                continue
             ast.parse(open(f).read(), filename=f)
 
     @check("no undefined names introduced")
@@ -473,6 +471,16 @@ def main():
         # go_home clears four keys; asserting one of them is not testing the function
         assert not at.session_state["_wild_on"], "wildcard survived going home"
         assert not at.session_state["_genie_on"], "genie chat survived going home"
+
+    @check("renders: film detail page")
+    def _():
+        # Films had no detail page at all — ?show= is the TV PDP, and TMDB reuses ids
+        # across media types, so opening a movie there loaded an unrelated series.
+        at = _render(nav_view="📺 Watch", find_q="", _wild_on=False)
+        at.query_params["movie"] = "4566"        # Michael Clayton
+        at.run()
+        assert not at.exception, str(at.exception[0].value)[:300]
+        at.query_params.clear()
 
     @check("clearing Find doesn't write a live widget's state")
     def _():
