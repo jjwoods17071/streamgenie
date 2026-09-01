@@ -15,6 +15,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import requests
 
+import milestones
+
 BASE = "https://api.themoviedb.org/3"
 
 # TMDB tolerates ~50 req/s; 8 keeps us far below that while still collapsing a 40-call
@@ -76,3 +78,41 @@ def parallel_map(fn: Callable, items: Iterable, workers: int = MAX_WORKERS) -> L
 
     with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
         return list(pool.map(safe, items))
+
+
+# ---------------- show records ----------------
+
+def shape_show(d: Dict[str, Any]) -> Dict[str, Any]:
+    """The subset of a TMDB show record the app actually uses (~1.7KB vs ~3.1KB raw)."""
+    return {
+        "name": d.get("name"),
+        "poster_path": d.get("poster_path"),
+        "backdrop_path": d.get("backdrop_path"),
+        "overview": d.get("overview"),
+        "status": d.get("status"),
+        "number_of_seasons": d.get("number_of_seasons"),
+        "number_of_episodes": d.get("number_of_episodes"),
+        "first_air_date": d.get("first_air_date"),
+        "in_production": d.get("in_production"),
+        "type": d.get("type"),
+        "next_episode_to_air": d.get("next_episode_to_air"),
+        "last_episode_to_air": d.get("last_episode_to_air"),
+        "seasons": milestones.real_seasons(d),
+    }
+
+
+def fetch_shows(tv_ids) -> Dict[int, Dict[str, Any]]:
+    """THE source of shaped show records. Every caller goes through here.
+
+    Today this is TMDB. The intended next step is a shared `show_cache` table read first
+    with TMDB as the miss path — see SCALING.md. It lives HERE rather than in app.py so a
+    native client can use it: business logic outside the Streamlit layer is the whole
+    reason the modules are import-safe.
+
+    Fetches concurrently and skips ids that fail, so one bad id never loses the batch.
+    """
+    ids = list(tv_ids)
+    if not ids:
+        return {}
+    records = parallel_map(lambda t: get(f"/tv/{t}"), ids)
+    return {tid: shape_show(d) for tid, d in zip(ids, records) if d}

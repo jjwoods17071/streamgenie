@@ -300,6 +300,16 @@ def main():
         assert genie.interpret_search("Sicario") is None
         assert genie.interpret_search("") is None
 
+    @check("fetch_shows shapes records and survives bad ids")
+    def _():
+        import tmdb as _t
+        assert _t.fetch_shows([]) == {}, "empty input should be empty output"
+        got = _t.fetch_shows([1396, -1])          # Breaking Bad + a nonexistent id
+        assert 1396 in got and -1 not in got, f"bad id lost the batch: {sorted(got)}"
+        rec = got[1396]
+        for k in ("name", "status", "seasons", "next_episode_to_air"):
+            assert k in rec, f"shaped record missing {k}"
+
     # ---------------- movies ----------------
     print("\n\033[1mMovies\033[0m")
     import movies
@@ -459,7 +469,10 @@ def main():
         home[0].click().run()
         assert not at.exception, str(at.exception[0].value)[:300]
         assert at.session_state["nav_view"] == "📺 Watch", at.session_state["nav_view"]
-        assert not at.session_state["find_q"], "Find state survived going home"
+        assert not at.session_state["find_q"], "query survived going home"
+        # go_home clears four keys; asserting one of them is not testing the function
+        assert not at.session_state["_wild_on"], "wildcard survived going home"
+        assert not at.session_state["_genie_on"], "genie chat survived going home"
 
     @check("clearing Find doesn't write a live widget's state")
     def _():

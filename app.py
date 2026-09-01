@@ -405,47 +405,13 @@ def get_milestone(tv_id:int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _shape_meta(d: Dict[str, Any]) -> Dict[str, Any]:
-    """The subset of TMDB show details the app actually uses."""
-    return {
-        "name": d.get("name"),
-        "poster_path": d.get("poster_path"),
-        "backdrop_path": d.get("backdrop_path"),
-        "overview": d.get("overview"),
-        "status": d.get("status"),
-        "number_of_seasons": d.get("number_of_seasons"),
-        "number_of_episodes": d.get("number_of_episodes"),
-        "first_air_date": d.get("first_air_date"),
-        "in_production": d.get("in_production"),
-        "type": d.get("type"),
-        "next_episode_to_air": d.get("next_episode_to_air"),
-        "last_episode_to_air": d.get("last_episode_to_air"),
-        "seasons": milestones.real_seasons(d),
-    }
-
-
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_show_meta(tv_id:int) -> Dict[str, Any]:
     """Cached high-level show metadata for the detail panel (6h TTL)."""
     try:
-        return fetch_show_records([tv_id]).get(tv_id, {})
+        return tmdb.fetch_shows([tv_id]).get(tv_id, {})
     except Exception:
         return {}
-
-
-def fetch_show_records(tv_ids) -> Dict[int, Dict[str, Any]]:
-    """THE source of shaped show records. Every caller goes through here.
-
-    Today this is TMDB. The intended next step is a shared `show_cache` table read first
-    with TMDB as the miss path — see SCALING.md for the measured numbers behind that
-    design. It exists as its own function so that swap touches ONE place instead of every
-    caller, which is the whole reason it's split out now rather than later.
-    """
-    ids = list(tv_ids)
-    if not ids:
-        return {}
-    return {tid: _shape_meta(d)
-            for tid, d in zip(ids, tmdb.parallel_map(tv_details, ids)) if d}
 
 
 def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
@@ -463,7 +429,7 @@ def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
     store = st.session_state.setdefault("_meta_store", {})
     missing = [t for t in tv_ids if t not in store]
     if missing:
-        store.update(fetch_show_records(missing))
+        store.update(tmdb.fetch_shows(missing))
     return {t: store[t] for t in tv_ids if t in store}
 
 
@@ -4877,6 +4843,18 @@ def render_sidebar_account():
             st.cache_data.clear()
             st.session_state.pop("_meta_store", None)
             st.rerun()
+
+        # REQUIRED by the TMDB API terms — logo plus this exact disclaimer — even for
+        # non-commercial use, which is what we are (see PRODUCT.md). Don't remove it.
+        st.markdown("---")
+        st.markdown(
+            '<a href="https://www.themoviedb.org/" target="_blank" rel="noopener">'
+            '<img src="https://www.themoviedb.org/assets/2/v4/logos/v2/'
+            'blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg" '
+            'alt="The Movie Database" style="width:110px;opacity:.85"></a>',
+            unsafe_allow_html=True)
+        st.caption("This product uses the TMDB API but is not endorsed or certified by TMDB. "
+                   "Sports data from ESPN.")
 
 
 def render_top_nav():
