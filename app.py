@@ -4052,8 +4052,11 @@ def render_for_you(limit=6, compact=False):
         return
 
     if compact:
-        for p in picks:
-            with st.container(border=True):
+        # A shelf, not a rail: one row of poster tiles. Deliberately flat — nothing here
+        # opens another column, so this can sit inside a view that already uses them.
+        cols = st.columns(len(picks))
+        for col, p in zip(cols, picks):
+            with col:
                 if p.get("poster_path"):
                     st.image(f"https://image.tmdb.org/t/p/w185{p['poster_path']}",
                              use_column_width=True)
@@ -4833,27 +4836,29 @@ if _view == "watch" and not _find_active:
     # ONE list, both media types. A toggle made you choose which half of your watchlist
     # to look at before answering the only question the view exists for — what do I watch
     # tonight? Grouping is by readiness, not by media type.
-    _main, _rail = st.columns([2.4, 1])
-    with _main:
-        _wn_rows = refresh_stale_air_dates(client, list_shows(client))
-        _wn_rows = refresh_sports_air_dates(client, _wn_rows)
-        _wn_rows = apply_provider_facet(_wn_rows)
-        # One parallel metadata pass for the whole list. The summary and catch-up both
-        # need "how far behind am I" for every show; fetched per-show and serially that
-        # was ~16s of cold load.
-        with st.spinner("Checking your shows…"):
-            _metas = get_show_meta_many(
-                tuple(sorted(r["tmdb_id"] for r in _wn_rows if (r.get("tmdb_id") or 0) > 0)))
-        render_watch_summary(_wn_rows, _metas)
-        st.divider()
-        # Ready right now: episodes you're behind on, then films already streaming.
-        render_catch_up(_wn_rows, _metas)
-        render_movies(embed=True)
-        st.divider()
-        # Then what's scheduled, then what's renewed but undated.
-        render_upcoming(_wn_rows, as_tab=True)
-    with _rail:
-        render_for_you(limit=3, compact=True)
+    # NOT wrapped in st.columns. Streamlit allows columns inside columns exactly one
+    # level deep, and the poster grids below already nest their own (tile row -> per-tile
+    # action row). A side rail here made that a third level and crashed the whole view.
+    _wn_rows = refresh_stale_air_dates(client, list_shows(client))
+    _wn_rows = refresh_sports_air_dates(client, _wn_rows)
+    _wn_rows = apply_provider_facet(_wn_rows)
+    # One parallel metadata pass for the whole list. The summary and catch-up both need
+    # "how far behind am I" for every show; per-show and serially that was ~16s cold.
+    with st.spinner("Checking your shows…"):
+        _metas = get_show_meta_many(
+            tuple(sorted(r["tmdb_id"] for r in _wn_rows if (r.get("tmdb_id") or 0) > 0)))
+    render_watch_summary(_wn_rows, _metas)
+    st.divider()
+    # Ready right now: episodes you're behind on, then films already streaming.
+    render_catch_up(_wn_rows, _metas)
+    render_movies(embed=True)
+    st.divider()
+    # Then what's scheduled, then what's renewed but undated.
+    render_upcoming(_wn_rows, as_tab=True)
+    # Discovery goes at the BOTTOM as a horizontal shelf: the list above is what you
+    # already have, this is what you might add, and a shelf needs no wrapping column.
+    st.divider()
+    render_for_you(limit=5, compact=True)
 
 if _view == "discover" and not _find_active:
     st.subheader("🆕 New This Month")

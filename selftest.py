@@ -407,6 +407,50 @@ def main():
         counts = [c.get("watched", 0) for c in s["coming"]]
         assert counts == sorted(counts, reverse=True), f"not engagement-ranked: {counts}"
 
+    # ---------------- render ----------------
+    # The engine checks above never draw anything, so layout bugs sail straight through
+    # them and land in the browser — that is exactly how st.image(use_container_width)
+    # and a three-deep column nest both shipped green. These render the real app.
+    print("\n\033[1mRender\033[0m")
+
+    import genie as _genie_mod
+    from streamlit.testing.v1 import AppTest
+
+    # Neutralise the model calls: layout is what's under test, and a render per view
+    # would otherwise cost real tokens on every run.
+    _genie_mod.rank_recommendations = lambda *a, **k: None
+    _genie_mod.interpret_search = lambda *a, **k: None
+
+    # ONE AppTest reused across views — st.cache_data survives between at.run() calls, so
+    # the TMDB work is paid once. Separate instances cost ~150s instead of ~35s.
+    _at = AppTest.from_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"),
+                            default_timeout=180)
+    _at.session_state["user"] = {"id": UID, "email": "selftest@local"}
+
+    def _render(**state):
+        for k, v in state.items():
+            _at.session_state[k] = v
+        _at.run()
+        return _at
+
+    for _label in ("📺 Watch", "🗂️ All Shows", "✨ Discover", "🏈 Sports"):
+        def _make(lbl):
+            @check(f"renders: {lbl}")
+            def _():
+                at = _render(nav_view=lbl, _wild_on=False, find_q="")
+                assert not at.exception, str(at.exception[0].value)[:300]
+        _make(_label)
+
+    @check("renders: Wildcard")
+    def _():
+        at = _render(nav_view="📺 Watch", _wild_on=True)
+        assert not at.exception, str(at.exception[0].value)[:300]
+
+    @check("renders: Find results")
+    def _():
+        at = _render(nav_view="📺 Watch", _wild_on=False, find_q="Sicario")
+        assert not at.exception, str(at.exception[0].value)[:300]
+
     # ---------------- summary ----------------
     print("\n" + "=" * 62)
     print(f"\033[1m{len(PASSES)} passed, {len(FAILURES)} failed, {len(SKIPS)} skipped\033[0m")
