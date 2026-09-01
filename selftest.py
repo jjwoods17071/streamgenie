@@ -87,6 +87,27 @@ def main():
         undef = [l for l in out.splitlines() if "undefined name" in l]
         assert not undef, "undefined names:\n        " + "\n        ".join(undef)
 
+    @check("module contract matches what the modules actually export")
+    def _():
+        """The stale-module guard in app.py only helps if its manifest is true. This keeps
+        the manifest honest — a typo in it would fire the guard on a healthy deploy and
+        tell the user to reboot forever."""
+        import ast as _a, importlib
+        tree = _a.parse(open("app.py").read())
+        contract = None
+        for node in _a.walk(tree):
+            if (isinstance(node, _a.Assign) and node.targets
+                    and getattr(node.targets[0], "id", "") == "_MODULE_CONTRACT"):
+                contract = node.value
+        assert contract is not None, "_MODULE_CONTRACT not found in app.py"
+        missing = []
+        for k, v in zip(contract.keys, contract.values):
+            mod = importlib.import_module(k.id)
+            for elt in v.elts:
+                if not hasattr(mod, elt.value):
+                    missing.append(f"{k.id}.{elt.value}")
+        assert not missing, f"contract names things that don't exist: {missing}"
+
     @check("no session_state dict-methods beyond get/subscript")
     def _():
         """st.session_state.setdefault() raised AttributeError on Streamlit Cloud while

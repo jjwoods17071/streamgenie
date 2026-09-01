@@ -61,7 +61,24 @@ self-test can reach it.
 - Streamlit is **pinned at 1.39.0** — check a widget's signature against the installed
   version, not against current docs.
 
-## 5. Gotchas that have bitten us
+## 5. Deploying
+
+`git push` to main auto-deploys, but **Streamlit Cloud caches imported modules**. `app.py`
+is the script and re-executes every run; `tmdb.py`, `recs.py` and the rest are imports,
+loaded once into `sys.modules` and NOT reloaded when their source changes.
+
+So a commit that adds a function to a module AND calls it from app.py can land as new
+app.py against a stale module, surfacing as
+`AttributeError: module 'tmdb' has no attribute 'fetch_shows'` partway down a page.
+
+**After any deploy that changes a module (not just app.py), reboot the app:**
+Manage app → ⋮ → Reboot app.
+
+A guard at the top of app.py checks `_MODULE_CONTRACT` and shows that instruction instead
+of a raw AttributeError. Add to the contract when a module gains a function app.py depends
+on; the self-test keeps the manifest honest.
+
+## 6. Gotchas that have bitten us
 
 - `set_page_config` must be the FIRST Streamlit call. `st.secrets` *renders* an element
   before it raises, so a try/except around it doesn't stop it claiming that slot.
@@ -78,7 +95,7 @@ self-test can reach it.
   `get_show_seasons` end identically). Prefer line-addressed edits; syntax-check after.
 - Never `git add -A` without reading `git status` — a screenshot got committed that way.
 
-## 6. Reviewing alignment
+## 7. Reviewing alignment
 
 `python review.py` asks a model whether recent changes serve the product objective, and
 what QA is missing. **Advisory only — it never fails a build.** Use it before a batch of

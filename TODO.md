@@ -26,6 +26,10 @@ work on it.
 - [ ] **`render_notifications_panel` lives in `notifications.py`** but is Streamlit
       rendering. Those modules are the future native API and must stay import-safe;
       presentation belongs in app.py. (Flagged by `review.py`.)
+- [ ] **Deploys that change an imported module need a manual reboot** (Manage app → ⋮ →
+      Reboot). Streamlit Cloud caches imports; only app.py re-executes. A guard now
+      detects it and says so, but the reboot is still manual. Worth checking whether the
+      Cloud API can be poked from CI after a push.
 - [ ] **Streamlit Cloud cold start is ~15s** before anything paints. Nothing is broken —
       the container sleeps. The `show_cache` above fixes what happens after boot, not the
       boot itself.

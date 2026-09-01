@@ -45,6 +45,33 @@ try:
 except Exception:
     pass  # no secrets.toml locally — .env covers it
 
+# ── Stale-module guard ───────────────────────────────────────────────────────
+# app.py is the SCRIPT, so Streamlit re-executes it every run and its changes take
+# effect immediately. The modules beside it are IMPORTS — loaded once into sys.modules
+# and NOT reloaded when their source changes. After a deploy that adds a function to a
+# module, Streamlit Cloud can end up running new app.py against a stale module object,
+# which surfaces as a bare "AttributeError: module 'x' has no attribute 'y'" halfway
+# down a page. This turns that into an instruction.
+_MODULE_CONTRACT = {
+    tmdb: ("get", "parallel_map", "fetch_shows", "shape_show"),
+    recs: ("for_user", "wildcard", "fetch_watched_counts", "taste_signals"),
+    milestones: ("classify", "real_seasons", "real_season_count", "is_returning_undated"),
+    movies: ("search", "release_info", "status_label", "media_type_available",
+             "fetch_tv_rows", "list_movies", "enrich"),
+}
+_stale = [f"{m.__name__}.{a}" for m, attrs in _MODULE_CONTRACT.items()
+          for a in attrs if not hasattr(m, a)]
+if _stale:
+    st.error(
+        "**This deploy is running stale code and needs a reboot.**\n\n"
+        f"Missing: `{'`, `'.join(_stale)}`\n\n"
+        "app.py updated but an imported module didn't — Python caches imports for the "
+        "life of the process. Open **Manage app** (bottom right) → **⋮** → "
+        "**Reboot app**. No code change is needed."
+    )
+    st.stop()
+
+
 # --------------- CONFIG ---------------
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_BASE = "https://api.themoviedb.org/3"
