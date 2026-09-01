@@ -430,17 +430,25 @@ def get_show_meta(tv_id:int) -> Dict[str, Any]:
         return {}
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
 def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
-    """Metadata for a whole watchlist in ONE parallel pass.
+    """Metadata for a whole watchlist, fetching only what isn't already held.
 
     Watch needs this for every show: the summary counts what you're behind on and
     catch-up recomputes the same thing. One TMDB call each, run serially, was ~16s of
     cold load for 82 shows — fanned out it's under 2s.
+
+    Deliberately a session_state store rather than @st.cache_data keyed on the id tuple.
+    That key changes the moment you add or remove ONE show, so a single delete invalidated
+    all 82 entries and re-fetched the entire watchlist before the page could redraw —
+    which is what made deleting feel slow. Per-id storage makes a delete cost nothing.
     """
-    ids = list(tv_ids)
-    metas = tmdb.parallel_map(tv_details, ids)
-    return {tid: _shape_meta(d) for tid, d in zip(ids, metas) if d}
+    store = st.session_state.setdefault("_meta_store", {})
+    missing = [t for t in tv_ids if t not in store]
+    if missing:
+        for tid, d in zip(missing, tmdb.parallel_map(tv_details, missing)):
+            if d:
+                store[tid] = _shape_meta(d)
+    return {t: store[t] for t in tv_ids if t in store}
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -870,9 +878,9 @@ def render_show_row(r, view_mode, client, wcounts):
                 else:
                     st.caption("❓ No air date")
         with cols[3]:
-            if st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                st.rerun()
+            st.button(ICONS["delete"], key=f"del_{r['tmdb_id']}_{provider_name}",
+                      help="Remove", use_container_width=True, on_click=delete_show,
+                      args=(client, r["tmdb_id"], r["region"], provider_name))
     else:
         cols = st.columns([1, 4, 2, 2, 1])
         with cols[0]:
@@ -916,9 +924,9 @@ def render_show_row(r, view_mode, client, wcounts):
                 else:
                     st.caption("❓")
         with cols[4]:
-            if st.button(ICONS["delete"], key=f"del_list_{r['tmdb_id']}_{provider_name}", help="Remove", use_container_width=True):
-                delete_show(client, r["tmdb_id"], r["region"], provider_name)
-                st.rerun()
+            st.button(ICONS["delete"], key=f"del_list_{r['tmdb_id']}_{provider_name}",
+                      help="Remove", use_container_width=True, on_click=delete_show,
+                      args=(client, r["tmdb_id"], r["region"], provider_name))
 
     # Show Details — summary + availability + season bricks + episode guide; lazy-loaded.
     eg_key = f"eg_{r['tmdb_id']}_{provider_name}"
@@ -1527,7 +1535,16 @@ def show_status_chip(r) -> str:
         return ":red-background[🚫 Canceled]"
     if ss == "Ended" or ps == "ENDED":
         return ":gray-background[🏁 Ended]"
-    return ":green-background[📺 Active]"
+    nad = r.get("next_air_date")
+    if nad:
+        try:
+            if dt.date.fromisoformat(nad) >= local_today():
+                return ":green-background[📅 Airing]"
+        except Exception:
+            pass
+    # Renewed but nothing on the calendar — not the same as "airing", and the distinction
+    # is the whole question of whether there's anything to do about this show.
+    return ":orange-background[⏳ Between seasons]"
 
 
 def render_grid_gallery(rows, client, wcounts, per_row=7):
@@ -1538,31 +1555,37 @@ def render_grid_gallery(rows, client, wcounts, per_row=7):
         cols = st.columns(per_row)
         for j, r in enumerate(rows[i:i + per_row]):
             with cols[j]:
+                # Marker for the CSS that clamps titles and equalises tile height. Every
+                # slot below is ALWAYS rendered — conditional lines were what made tiles
+                # ragged: a dated show was three lines taller than a sports follow.
+                st.markdown('<span class="sg-card"></span>', unsafe_allow_html=True)
                 clickable_poster(r['tmdb_id'], r.get("poster_path"))
                 st.button(r['title'], key=f"open_{r['tmdb_id']}_{r.get('provider_name')}",
                           use_container_width=True, help="Open show details",
                           on_click=open_show_page, args=(r,))
+
+                when = "—"
                 nad = r.get("next_air_date")
-                shown = False
                 if nad:
                     try:
                         days = (dt.date.fromisoformat(nad) - today).days
                         if days >= 0:
                             ne = get_next_episode(r["tmdb_id"])
                             ep = f"S{ne['season']}E{ne['episode']} · " if ne and ne.get("season") else ""
-                            st.caption(f"📅 {ep}{'TODAY' if days == 0 else f'in {days}d'}")
-                            shown = True
+                            when = f"📅 {ep}{'TODAY' if days == 0 else f'in {days}d'}"
                     except Exception:
                         pass
-                if (r.get("tmdb_id") or 0) > 0:   # status chip (skip sports rows)
-                    st.markdown(show_status_chip(r))
+                chip = show_status_chip(r) if (r.get("tmdb_id") or 0) > 0 else ":blue-background[🏈 Team]"
                 wc = wcounts.get(r["tmdb_id"], 0)
-                if wc:
-                    st.caption(f"✓ {wc} watched")
-                if st.button(ICONS["delete"], key=f"gdel_{r['tmdb_id']}_{r.get('provider_name')}",
-                             help="Remove", use_container_width=True):
-                    delete_show(client, r["tmdb_id"], r["region"], r.get("provider_name", DEFAULT_PROVIDER))
-                    st.rerun()
+                st.caption(when)
+                st.markdown(chip)
+                st.caption(f"✓ {wc} watched" if wc else "\u00a0")
+
+                st.button(ICONS["delete"], key=f"gdel_{r['tmdb_id']}_{r.get('provider_name')}",
+                          help="Remove", use_container_width=True,
+                          on_click=delete_show,
+                          args=(client, r["tmdb_id"], r["region"],
+                                r.get("provider_name", DEFAULT_PROVIDER)))
 
 
 # ---------------- Pin This + Available Now (Upcoming tab) ----------------
@@ -3368,6 +3391,13 @@ div[data-testid="stColumn"]:has(.sg-tile) div[data-testid="stVerticalBlockBorder
        color:inherit;opacity:0.65;font-size:0.85rem;line-height:1.45;min-height:4.95rem;margin:2px 0 4px;}
 /* Full poster, natural 2:3 aspect (no cropping) */
 .sgposter{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;display:block;cursor:pointer;}
+/* Uniform poster tiles: titles clamp to two lines so a long name can't push one tile
+   taller than its neighbours, and columns stretch to the tallest in the row. */
+div[data-testid="stHorizontalBlock"]:has(.sg-card){align-items:stretch;}
+div[data-testid="stColumn"]:has(.sg-card) .stButton>button p{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  overflow:hidden;line-height:1.25;}
+div[data-testid="stColumn"]:has(.sg-card) .stButton>button{min-height:3.2em;}
 div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
 /* Overlay the following button invisibly over the poster. margin-% is relative to
    WIDTH, so -150% = 1.5×width = the 2:3 poster's height; the button uses the same
