@@ -451,6 +451,16 @@ def main():
         at = _render(nav_view="📺 Watch", _wild_on=False, find_q="Sicario")
         assert not at.exception, str(at.exception[0].value)[:300]
 
+    @check("the logo returns you home from anywhere")
+    def _():
+        at = _render(nav_view="🏈 Sports", find_q="Sicario")
+        home = [b for b in at.button if "StreamGenie" in (b.label or "")]
+        assert home, "no home anchor rendered"
+        home[0].click().run()
+        assert not at.exception, str(at.exception[0].value)[:300]
+        assert at.session_state["nav_view"] == "📺 Watch", at.session_state["nav_view"]
+        assert not at.session_state["find_q"], "Find state survived going home"
+
     @check("clearing Find doesn't write a live widget's state")
     def _():
         # Assigning st.session_state["find_q"] inline after the text_input exists raises

@@ -3335,9 +3335,23 @@ if not auth.is_authenticated():
     st.stop()  # Stop execution until user logs in
 
 # User is authenticated - show user menu and continue with app
+def go_home():
+    """Back to the default view, with any Find state dropped.
+
+    The logo is the anchor. Once Find takes over the screen there was no way back that
+    didn't involve guessing which nav item you'd come in on. Runs as an on_click callback
+    so writing nav_view/find_q — both live widget keys — is legal.
+    """
+    st.session_state["nav_view"] = list(VIEWS)[0]
+    st.session_state["find_q"] = ""
+    st.session_state["_wild_on"] = False
+    st.session_state["_genie_on"] = False
+
+
 with st.sidebar:
-    st.markdown("### 🎬 StreamGenie")
-    st.caption("Shows, movies and teams — all in one list.")
+    st.button("🎬 StreamGenie", use_container_width=True, on_click=go_home,
+              help="Back to Watch")
+    st.caption("Everything you're watching, and what's on next.")
 
 auth.render_user_menu(client)
 auth.flush_pending_session()  # write the post-login cookie now that rendering is stable
@@ -3523,11 +3537,6 @@ st.markdown("""
 # frees the top of the page: content now starts near the top of the viewport instead of
 # below ~350px of banner + spacer.
 with st.sidebar:
-    _bell_uid = get_user_id()
-    _unread = notifications.get_unread_count(client, _bell_uid)
-    with st.popover(f"🔔 Notifications ({_unread})" if _unread else "🔔 Notifications",
-                    use_container_width=True):
-        notifications.render_notifications_panel(client, _bell_uid, key_prefix="hdr_")
     show_settings = st.toggle("⚙️ Settings", value=False, help="Show app settings")
 
 # Collapsible settings section
@@ -4831,71 +4840,99 @@ VIEWS = {
 }
 
 
-def render_sidebar_nav():
-    """Nav + contextual facets in the left margin, under the login info. Returns the
-    selected view key and stashes facet selections in session_state."""
+def render_sidebar_account():
+    """Left margin: identity and at-a-glance only. Navigation and filters moved ABOVE the
+    content (see render_top_nav) — a filter hidden in a sidebar dropdown is a filter
+    nobody uses."""
     with st.sidebar:
         st.markdown("---")
-        st.caption("BROWSE")
-        label = st.radio("Go to", list(VIEWS), key="nav_view", label_visibility="collapsed")
-        view = VIEWS[label]
-
-        st.markdown("---")
-        st.caption("FILTERS")
-
-        if view in ("watch", "allshows"):
-            # Only offer services this user actually tracks — a full provider list would
-            # be mostly dead options.
-            provs = sorted({normalize_provider_name(r.get("provider_name") or "")
-                            for r in list_shows(client)
-                            if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name")}
-                           - {""})
-            picked = st.multiselect("Service", provs, key="facet_provider",
-                                    placeholder="All services",
-                                    help="Filter your shows by where you watch them. "
-                                         "Sports follows are never filtered out.")
-            st.session_state["_facet_provider"] = set(picked)
-            if picked:
-                st.caption(f"Filtering to {len(picked)} service{'s' if len(picked) != 1 else ''}")
-        else:
-            st.session_state["_facet_provider"] = set()
-
-        if view == "discover":
-            # Surfaces the per-user genre hides that were previously buried inside a
-            # Discover sub-tab. Same genre_prefs storage, just reachable.
-            cur = genre_prefs.get_excluded(client, get_user_id())
-            new = set()
-            st.caption("Hide genres")
-            for key, (lbl, _ids, _ja) in genre_prefs.EXCLUDABLE_GENRES.items():
-                if st.checkbox(lbl, value=(key in cur), key=f"facet_genre_{key}"):
-                    new.add(key)
-            if new != cur:
-                genre_prefs.set_excluded(client, get_user_id(), new)
-                st.rerun()
-
-        st.markdown("---")
         st.caption("AT A GLANCE")
-        _rows = list_shows(client)
-        _tv = [r for r in _rows if (r.get("tmdb_id") or 0) > 0]
-        _today = local_today().isoformat()
-        _wk = (local_today() + dt.timedelta(days=7)).isoformat()
-        _soon = [r for r in _tv if r.get("next_air_date") and _today <= r["next_air_date"] <= _wk]
-        st.markdown(f"**{len(_soon)}** airing in the next 7 days")
-        st.caption(f"{len(_tv)} shows · {len(_rows) - len(_tv)} teams tracked")
+        rows = list_shows(client)
+        tv = [r for r in rows if (r.get("tmdb_id") or 0) > 0]
+        teams = len(rows) - len(tv)
+        today = local_today().isoformat()
+        wk = (local_today() + dt.timedelta(days=7)).isoformat()
+        soon = [r for r in tv if r.get("next_air_date") and today <= r["next_air_date"] <= wk]
+
+        def plural(n, one, many=None):
+            return f"{n} {one if n == 1 else (many or one + 's')}"
+
+        st.markdown(f"**{plural(len(soon), 'show')}** airing in the next 7 days"
+                    if soon else "**Nothing** airing in the next 7 days")
+        bits = [plural(len(tv), "show")]
+        if teams:
+            bits.append(plural(teams, "team"))
         try:
             if movies.media_type_available(client):
-                _mv = movies.list_movies(client, get_user_id())
-                if _mv:
-                    st.caption(f"🎬 {len(_mv)} movies on your list")
+                nmv = len(movies.list_movies(client, get_user_id()))
+                if nmv:
+                    bits.append("🎬 " + plural(nmv, "movie"))
         except Exception:
             pass
+        st.caption(" · ".join(bits) + " tracked")
 
-        if view in ("watch", "discover"):
-            st.markdown("---")
-            if st.button("♻️ Rebuild caches", use_container_width=True,
-                         help="Force fresh TMDB + recommendation data"):
-                st.cache_data.clear()
-                st.rerun()
+        st.markdown("---")
+        if st.button("♻️ Rebuild caches", use_container_width=True,
+                     help="Force fresh TMDB + recommendation data"):
+            st.cache_data.clear()
+            st.session_state.pop("_meta_store", None)
+            st.rerun()
+
+
+def render_top_nav():
+    """Category bar + visible facets above the content, the way a product listing page
+    does it. Returns the selected view key.
+
+    Filters used to be a sidebar multiselect: collapsed by default, so you couldn't see
+    what was available or whether anything was applied without opening it.
+    """
+    navrow = st.columns([6, 1.3])
+    with navrow[0]:
+        label = st.radio("View", list(VIEWS), key="nav_view", horizontal=True,
+                         label_visibility="collapsed")
+    with navrow[1]:
+        # In the sidebar this popover was ~300px wide and the cards were unreadable.
+        uid = get_user_id()
+        unread = notifications.get_unread_count(client, uid)
+        with st.popover(f"🔔 {unread}" if unread else "🔔",
+                        use_container_width=True,
+                        help=f"{unread} unread" if unread else "Notifications"):
+            notifications.render_notifications_panel(client, uid, key_prefix="hdr_")
+    view = VIEWS[label]
+
+    if view in ("watch", "allshows"):
+        # Only services this user actually tracks — the full provider list would be
+        # mostly dead options. Counts make the filter self-describing.
+        counts = {}
+        for r in list_shows(client):
+            if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name"):
+                p = normalize_provider_name(r["provider_name"])
+                if p:
+                    counts[p] = counts.get(p, 0) + 1
+        opts = ["All services"] + [p for p, _ in sorted(counts.items(), key=lambda kv: -kv[1])]
+        labels = {p: (p if p == "All services" else f"{p} ({counts[p]})") for p in opts}
+        picked = st.radio("Service", opts, key="facet_provider_radio", horizontal=True,
+                          format_func=lambda p: labels[p], label_visibility="collapsed")
+        # apply_provider_facet still takes a set, so one selection is a one-element set.
+        st.session_state["_facet_provider"] = set() if picked == "All services" else {picked}
+    else:
+        st.session_state["_facet_provider"] = set()
+
+    if view == "discover":
+        cur = genre_prefs.get_excluded(client, get_user_id())
+        cols = st.columns([1] + [1] * len(genre_prefs.EXCLUDABLE_GENRES))
+        with cols[0]:
+            st.caption("Hide:")
+        new = set()
+        for col, (key, (lbl, _ids, _ja)) in zip(cols[1:], genre_prefs.EXCLUDABLE_GENRES.items()):
+            with col:
+                if st.checkbox(lbl, value=(key in cur), key=f"facet_genre_{key}"):
+                    new.add(key)
+        if new != cur:
+            genre_prefs.set_excluded(client, get_user_id(), new)
+            st.rerun()
+
+    st.divider()
     return view
 
 
@@ -4910,7 +4947,8 @@ def apply_provider_facet(rows):
             or normalize_provider_name(r.get("provider_name") or "") in picked]
 
 
-_view = render_sidebar_nav()
+render_sidebar_account()
+_view = render_top_nav()
 _find_active = render_find_bar()
 
 if _view == "sports" and not _find_active:

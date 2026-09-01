@@ -294,7 +294,10 @@ def render_notifications_panel(client: Client, user_id: str, key_prefix: str = "
     # Display notifications
     for notification in notifications:
         with st.container():
-            bg_color = "#f0f2f6" if notification["is_read"] else "#e3f2fd"
+            # Theme-relative, not hardcoded light. These were #f0f2f6 / #e3f2fd with
+            # #666 body text, which read as bright slabs once the app went dark.
+            bg_color = ("rgba(255,255,255,.04)" if notification["is_read"]
+                        else "rgba(102,126,234,.16)")
             type_emoji = {
                 "new_episode": "🎬",
                 "reminder": "⏰",
@@ -318,13 +321,13 @@ def render_notifications_panel(client: Client, user_id: str, key_prefix: str = "
             # optional line can't terminate the block early and leak raw tags as text.
             card_html = (
                 f'<div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; '
-                f'margin-bottom: 8px; border-left: 4px solid #667eea;">'
+                f'margin-bottom: 8px; border-left: 4px solid #667eea; font-size:15px;">'
                 f'<div style="display: flex; align-items: start; justify-content: space-between;">'
                 f'<div style="flex: 1;">'
-                f'<strong>{type_emoji} {title_html}</strong>'
-                f'<p style="margin: 4px 0 0 0; font-size: 14px; color: #666;">{message_html}</p>'
+                f'<strong style="font-size:15px">{type_emoji} {title_html}</strong>'
+                f'<p style="margin: 4px 0 0 0; font-size: 14px; opacity: .85;">{message_html}</p>'
                 f'{show_line}'
-                f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #999;">{time_html}</p>'
+                f'<p style="margin: 4px 0 0 0; font-size: 12px; opacity: .6;">{time_html}</p>'
                 f'</div></div></div>'
             )
             st.html(card_html)
