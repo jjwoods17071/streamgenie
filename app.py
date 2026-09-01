@@ -340,7 +340,16 @@ def search_tv(query:str) -> List[Dict[str, Any]]:
     data = tmdb_get("/search/tv", {"query": query, "include_adult": "false", "language": "en-US", "page": 1})
     return data.get("results", [])
 
+@st.cache_data(ttl=21600, show_spinner=False)
 def tv_details(tv_id:int) -> Dict[str, Any]:
+    """One show's TMDB record (6h).
+
+    CACHED HERE, at the bottom, on purpose. get_show_meta, get_show_seasons,
+    get_next_episode and get_milestone are each cached separately but all call this — so
+    an uncached tv_details meant the same show was fetched three or four times per render
+    and the higher caches only hid it. A cold Watch render made 235 TMDB calls for 82
+    shows because of this.
+    """
     return tmdb_get(f"/tv/{tv_id}", {"language": "en-US"})
 
 @st.cache_data(ttl=21600, show_spinner=False)
