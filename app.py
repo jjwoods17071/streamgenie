@@ -424,10 +424,19 @@ def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
     all 82 entries and re-fetched the entire watchlist before the page could redraw —
     which is what made deleting feel slow. Per-id storage makes a delete cost nothing.
     """
-    store = st.session_state.setdefault("_meta_store", {})
+    # Explicit membership + subscript rather than st.session_state.setdefault(). This
+    # crashed with an AttributeError on Streamlit Cloud while passing locally on the
+    # pinned 1.39.0, so we don't rely on the proxy's dict-method surface being identical
+    # across versions. Also tolerates a stored value that isn't a dict.
+    if not isinstance(st.session_state.get("_meta_store"), dict):
+        st.session_state["_meta_store"] = {}
+    store = st.session_state["_meta_store"]
+
     missing = [t for t in tv_ids if t not in store]
     if missing:
-        store.update(tmdb.fetch_shows(missing))
+        fetched = tmdb.fetch_shows(missing) or {}
+        store.update(fetched)
+        st.session_state["_meta_store"] = store    # re-assign, don't assume by-reference
     return {t: store[t] for t in tv_ids if t in store}
 
 
@@ -943,7 +952,9 @@ def open_show_page(show: Dict[str, Any]) -> None:
     click, no race. Creates a real history entry (browser Back returns to the list) and
     is bookmarkable; still an in-app rerun (no reload → login preserved)."""
     sid = show.get("tmdb_id")
-    st.session_state.setdefault("_showcache", {})[sid] = show
+    if not isinstance(st.session_state.get("_showcache"), dict):
+        st.session_state["_showcache"] = {}
+    st.session_state["_showcache"][sid] = show
     st.query_params["show"] = str(sid)
     # Force the detail panel to scroll into focus on every open (cleared so the
     # EOF panel's 'scroll only on new show' guard always fires for a fresh click).
@@ -3521,6 +3532,9 @@ if show_settings:
         with col2:
             st.write("")
             st.caption(f"TMDB API: {ICONS['check'] if bool(TMDB_API_KEY) else ICONS['error']} {'Connected' if bool(TMDB_API_KEY) else 'Not set'}")
+            import sys as _sys
+            st.caption(f"Streamlit {st.__version__} · Python "
+                       f"{_sys.version_info.major}.{_sys.version_info.minor}")
 
         # Tabs for settings sections
         # Check if user is admin to show Maintenance tab
@@ -4302,7 +4316,9 @@ def render_ask_genie():
         import newsletter as _nl
         return _nl.build_chat_context(client, uid)
 
-    _hist = st.session_state.setdefault("genie_chat", [])
+    if not isinstance(st.session_state.get("genie_chat"), list):
+        st.session_state["genie_chat"] = []
+    _hist = st.session_state["genie_chat"]
     if not _hist:
         with st.chat_message("assistant", avatar="🧞"):
             st.markdown("Hi, I'm **Genie** — your AI streaming sidekick. "

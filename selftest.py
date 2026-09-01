@@ -87,6 +87,23 @@ def main():
         undef = [l for l in out.splitlines() if "undefined name" in l]
         assert not undef, "undefined names:\n        " + "\n        ".join(undef)
 
+    @check("no session_state dict-methods beyond get/subscript")
+    def _():
+        """st.session_state.setdefault() raised AttributeError on Streamlit Cloud while
+        working locally on the pinned 1.39.0. The proxy's dict-method surface is not
+        stable across versions; membership tests and subscripts are."""
+        import io, re as _re, tokenize
+        # Strip comments and docstrings first — otherwise the check trips on the comment
+        # explaining why the call isn't there.
+        code = []
+        with open("app.py", "rb") as fh:
+            for tok in tokenize.tokenize(fh.readline):
+                if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+                    code.append(tok.string)
+        risky = _re.findall(r"st\.session_state\.(setdefault|items|keys|values|popitem)",
+                            " ".join(code).replace(" . ", ".").replace(" ", ""))
+        assert not risky, f"fragile session_state methods: {sorted(set(risky))}"
+
     @check("set_page_config is the first Streamlit command")
     def _():
         src = open("app.py").read()
