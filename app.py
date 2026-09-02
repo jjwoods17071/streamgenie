@@ -59,6 +59,49 @@ _MODULE_CONTRACT = {
     movies: ("search", "release_info", "status_label", "media_type_available",
              "fetch_tv_rows", "list_movies", "enrich"),
 }
+
+
+@st.cache_resource(show_spinner=False)
+def _module_mtimes() -> Dict[str, float]:
+    """Process-wide (survives reruns; app.py's own globals do not)."""
+    return {}
+
+
+def _reload_changed_modules():
+    """Reload our own modules when their SOURCE has changed since this process loaded them.
+
+    app.py is the script and re-executes every run, so its edits land immediately. The
+    modules beside it are imports — resolved once into sys.modules and never reloaded.
+    After a deploy that adds a function to a module, Cloud can run new app.py against a
+    stale module object, which is exactly how `tmdb.fetch_shows` went missing in prod.
+
+    Deliberately mtime-gated rather than unconditional: watched, genre_prefs and dismissed
+    hold @st.cache_data functions, and reloading those every run would rebuild their caches
+    on every interaction. Order matters — a module is reloaded after anything it imports.
+    """
+    import importlib
+    seen = _module_mtimes()
+    for mod in (milestones, tmdb, movies, recs, watched, dismissed, genre_prefs):
+        path = getattr(mod, "__file__", None)
+        if not path:
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        known = seen.get(mod.__name__)
+        if known is None:
+            seen[mod.__name__] = mtime          # first sight: just imported, so it's fresh
+        elif mtime != known:
+            try:
+                importlib.reload(mod)
+                seen[mod.__name__] = mtime
+            except Exception as e:
+                st.warning(f"Couldn't reload {mod.__name__}: {e}. Reboot the app.")
+
+
+_reload_changed_modules()
+
 _stale = [f"{m.__name__}.{a}" for m, attrs in _MODULE_CONTRACT.items()
           for a in attrs if not hasattr(m, a)]
 if _stale:
