@@ -112,6 +112,47 @@ way to discover the API is wrong.
 
 ---
 
+## The track that matters most: killing manual progress entry
+
+Every watchlist app dies the same way — someone maintains it for three weeks, falls
+behind, the list becomes a lie, they stop opening it. No service except Netflix offers a
+history export, so the cost of saying "here's where I am" IS the product's survival
+problem, not a feature request.
+
+**On Trakt: they are a competitor, not a component.** They track progress by episode, have
+an up-next queue, an episode calendar and recommendations — most of what we do. Their moat
+is the automatic scrobbling ecosystem (extensions, device integrations) that we lack. Our
+moat is the multi-service "where do I watch it?" answer, film streaming-release dates, and
+a conversational way to update progress — which they lack.
+
+That shapes the integration precisely:
+
+- **One-way import: yes.** "Bring your Trakt history" is a migration on-ramp. It takes a
+  rival's users' data once, gives instant value, and leaves no ongoing dependency — if
+  they revoked access tomorrow, nothing we shipped would break.
+- **Two-way sync: no.** That makes Trakt the source of truth for progress and us a skin
+  over their data, with our core loop hostage to a competitor's API terms.
+- **Check their terms before building either.** Not verified as of writing; assume
+  competing use may be restricted until confirmed.
+
+Ranked by how much each actually reduces manual entry, and by how independent it leaves us:
+
+| approach | effort | independence | status |
+|---|---|---|---|
+| Voice / chat: "I watched S4 up to E3" | nearly free | full | **works today** (genie mark_caught_up) |
+| Netflix history import | tiny | full | exists, buried in a Discover expander |
+| Trakt one-way import | small | full after import | not started |
+| **Our own browser extension** | large | **full — this is the moat** | not started |
+| Trakt two-way sync | medium | dependent on a rival | not recommended |
+
+**Sequence:** surface the Netflix import where it can be found (it solves the headline
+problem and is hidden) → make the conversational form obvious in the UI, since it already
+works → Trakt import as an acquisition path → the extension when there is a reason to
+invest at that scale.
+
+The extension is the only one that makes the problem *disappear* rather than get faster.
+It is also the only one that would give us Trakt's moat instead of borrowing it.
+
 ## How to work through this
 
 - **One phase at a time, and finish it.** The failure mode is starting NEXT because it's
