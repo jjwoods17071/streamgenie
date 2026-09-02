@@ -1039,14 +1039,14 @@ def clickable_poster(tmdb_id, poster_path) -> None:
     NOT a full-page reload, which would drop the login session."""
     _OPENSEQ[0] += 1
     src = _poster_src(poster_path)
-    # Sports team logos are square/transparent — show at natural size in a short frame
-    # (not stretched into a tall 2:3 poster box). Opened via the adjacent clickable title.
+    # Sports crests are square and transparent, so they used to sit in a 92px frame while
+    # TV posters got a full 2:3 box — which is exactly why sports cells were stubby next to
+    # shows. Same frame now, with the crest centred large on a dark ground: the tile is
+    # composed art rather than a logo stretched into a poster shape.
     if sports.is_sports_id(tmdb_id):
         if src:
             st.markdown(
-                f'<div style="display:flex;align-items:center;justify-content:center;height:92px">'
-                f'<img src="{src}" style="max-height:88px;max-width:100%;object-fit:contain"></div>',
-                unsafe_allow_html=True)
+                f'<div class="sg-team"><img src="{src}"></div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="sgposter sgph">🏟️</div>', unsafe_allow_html=True)
         return
@@ -3441,6 +3441,13 @@ div[data-testid="stColumn"]:has(.sg-card) .stButton>button p{
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
   overflow:hidden;line-height:1.25;}
 div[data-testid="stColumn"]:has(.sg-card) .stButton>button{min-height:3.2em;}
+/* Sports crest in a poster-shaped frame so a team tile is exactly as tall as a show
+   tile. Radial ground gives the transparent crest something to sit on. */
+div.sg-team{aspect-ratio:2/3;border-radius:8px;overflow:hidden;display:flex;
+  align-items:center;justify-content:center;
+  background:radial-gradient(circle at 50% 42%, #2a2f3a 0%, #14161c 72%);}
+div.sg-team img{width:68%;max-height:52%;object-fit:contain;
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,.55));}
 div.sgph{aspect-ratio:2/3;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;}
 /* Overlay the following button invisibly over the poster. margin-% is relative to
    WIDTH, so -150% = 1.5×width = the 2:3 poster's height; the button uses the same
@@ -4943,7 +4950,6 @@ def _render_wildcard():
 # even when you were looking at Sports. Sidebar nav runs only the selected view.
 VIEWS = {
     "📺 Watch": "watch",
-    "🗂️ All Shows": "allshows",
     "✨ Discover": "discover",
     "🏈 Sports": "sports",
 }
@@ -4954,32 +4960,6 @@ def render_sidebar_account():
     content (see render_top_nav) — a filter hidden in a sidebar dropdown is a filter
     nobody uses."""
     with st.sidebar:
-        st.markdown("---")
-        st.caption("AT A GLANCE")
-        rows = list_shows(client)
-        tv = [r for r in rows if (r.get("tmdb_id") or 0) > 0]
-        teams = len(rows) - len(tv)
-        today = local_today().isoformat()
-        wk = (local_today() + dt.timedelta(days=7)).isoformat()
-        soon = [r for r in tv if r.get("next_air_date") and today <= r["next_air_date"] <= wk]
-
-        def plural(n, one, many=None):
-            return f"{n} {one if n == 1 else (many or one + 's')}"
-
-        st.markdown(f"**{plural(len(soon), 'show')}** airing in the next 7 days"
-                    if soon else "**Nothing** airing in the next 7 days")
-        bits = [plural(len(tv), "show")]
-        if teams:
-            bits.append(plural(teams, "team"))
-        try:
-            if movies.media_type_available(client):
-                nmv = len(movies.list_movies(client, get_user_id()))
-                if nmv:
-                    bits.append("🎬 " + plural(nmv, "movie"))
-        except Exception:
-            pass
-        st.caption(" · ".join(bits) + " tracked")
-
         st.markdown("---")
         if st.button("♻️ Rebuild caches", use_container_width=True,
                      help="Force fresh TMDB + recommendation data"):
@@ -5021,7 +5001,7 @@ def render_top_nav():
             notifications.render_notifications_panel(client, uid, key_prefix="hdr_")
     view = VIEWS[label]
 
-    if view in ("watch", "allshows"):
+    if view == "watch":
         # Only services this user actually tracks — the full provider list would be
         # mostly dead options. Counts make the filter self-describing.
         counts = {}
@@ -5076,34 +5056,6 @@ if _view == "sports" and not _find_active:
     render_sports_follow()
 
 
-
-if _view == "watch" and not _find_active:
-    # ONE list, both media types. A toggle made you choose which half of your watchlist
-    # to look at before answering the only question the view exists for — what do I watch
-    # tonight? Grouping is by readiness, not by media type.
-    # NOT wrapped in st.columns. Streamlit allows columns inside columns exactly one
-    # level deep, and the poster grids below already nest their own (tile row -> per-tile
-    # action row). A side rail here made that a third level and crashed the whole view.
-    _wn_rows = refresh_stale_air_dates(client, list_shows(client))
-    _wn_rows = refresh_sports_air_dates(client, _wn_rows)
-    _wn_rows = apply_provider_facet(_wn_rows)
-    # One parallel metadata pass for the whole list. The summary and catch-up both need
-    # "how far behind am I" for every show; per-show and serially that was ~16s cold.
-    with st.spinner("Checking your shows…"):
-        _metas = get_show_meta_many(
-            tuple(sorted(r["tmdb_id"] for r in _wn_rows if (r.get("tmdb_id") or 0) > 0)))
-    render_watch_summary(_wn_rows, _metas)
-    st.divider()
-    # Ready right now: episodes you're behind on, then films already streaming.
-    render_catch_up(_wn_rows, _metas)
-    render_movies(embed=True)
-    st.divider()
-    # Then what's scheduled, then what's renewed but undated.
-    render_upcoming(_wn_rows, as_tab=True)
-    # Discovery goes at the BOTTOM as a horizontal shelf: the list above is what you
-    # already have, this is what you might add, and a shelf needs no wrapping column.
-    st.divider()
-    render_for_you(limit=5, compact=True)
 
 if _view == "discover" and not _find_active:
     st.subheader("🆕 New This Month")
@@ -5295,26 +5247,19 @@ if _view == "discover" and not _find_active:
         pass
 
 
-if _view == "allshows" and not _find_active:
-    # Watchlist section below search
-    st.write("---")
+if _view == "watch" and not _find_active:
+    # ONE list. Watch and All Shows were the same rows at two densities — a queue and a
+    # library — which read as clutter and made "where do I look?" a question. The status
+    # filter below IS the old Watch: Behind is what used to be Catch Up, Between seasons
+    # is what used to be Coming eventually, and the agenda is a view mode rather than a
+    # separate block. Nothing was removed; six stacked sections became one list.
+    _wn_rows = refresh_stale_air_dates(client, list_shows(client))
+    _wn_rows = refresh_sports_air_dates(client, _wn_rows)
 
-    # Header with icon actions and view toggle
-    header_cols = st.columns([7, 1, 1, 1])
-    with header_cols[0]:
-        st.subheader(f"{ICONS['tv']} Your Watchlist")
-    with header_cols[1]:
-        # Initialize view mode if not set
-        if 'view_mode' not in st.session_state:
-            st.session_state.view_mode = 'grid'
-    with header_cols[2]:
-        if st.button(":material/grid_view:", key="grid_view", help="Grid view", use_container_width=True):
-            st.session_state.view_mode = 'grid'
-            st.rerun()
-    with header_cols[3]:
-        if st.button(":material/view_list:", key="list_view", help="List view", use_container_width=True):
-            st.session_state.view_mode = 'list'
-            st.rerun()
+    # One control: grid / list / the dated agenda that used to be its own block.
+    _vm = st.radio("View", ["▦ Grid", "📋 List", "🗓️ Calendar"], horizontal=True,
+                   key="wl_view_mode", label_visibility="collapsed")
+    st.session_state.view_mode = {"▦ Grid": "grid", "📋 List": "list"}.get(_vm, "grid")
 
     # Export button
     if st.button(f"{ICONS['download']} Export CSV", key="export_csv_btn", use_container_width=False):
@@ -5322,8 +5267,7 @@ if _view == "allshows" and not _find_active:
 
     export_csv = st.session_state.get('show_export', False)
 
-    rows = list_shows(client)
-    rows = apply_provider_facet(rows)
+    rows = apply_provider_facet(_wn_rows)
 
     # Auto-update production status for shows that don't have it
     if rows:
@@ -5452,25 +5396,34 @@ if _view == "allshows" and not _find_active:
         for r in rows:
             _groups[_viewer_group(r)].append(r)
 
-        _filter_opts = {f"All ({len(rows)})": "all"}
-        for _lbl, _key in ((f"▶️ Behind", "behind"), ("🆕 Not started", "notstarted"),
+        _filter_opts = {}
+        for _lbl, _key in (("▶️ Behind", "behind"), ("🆕 Not started", "notstarted"),
                            ("⏳ Between seasons", "caught_up"), ("✅ Finished", "history"),
                            ("🏈 Teams", "teams")):
             if _groups[_key]:      # don't show a tab that filters to nothing
                 _filter_opts[f"{_lbl} ({len(_groups[_key])})"] = _key
+        _filter_opts[f"All ({len(rows)})"] = "all"   # last: the fallback, not the default
         with sc[1]:
             _fl = st.radio("Status", list(_filter_opts.keys()), horizontal=True,
                            key="wl_viewer_filter", label_visibility="collapsed")
         _fmode = _filter_opts.get(_fl, "all")
         _shown = _groups.get(_fmode, rows) if _fmode != "all" else rows
 
-        if not _shown:
+        if _vm == "🗓️ Calendar":
+            # What used to be the separate "Upcoming" block: dates, month grid, .ics
+            # export. Same renderer, now reached as a view of the same list.
+            render_upcoming(_shown, as_tab=True)
+        elif not _shown:
             st.info("No shows match this filter.")
         elif view_mode == 'grid':
             render_grid_gallery(_shown, client, _wcounts)
         else:
             for r in _shown:
                 render_show_row(r, 'list', client, _wcounts)
+
+        # Films live in the same list rather than a section of their own.
+        if _fmode in ("all", "behind"):
+            render_movies(embed=True)
 
 
 # ── Show-detail panel — rendered BELOW the tab bar so the menu stays at the top.

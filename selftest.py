@@ -623,13 +623,21 @@ def main():
         _at.run()
         return _at
 
-    for _label in ("📺 Watch", "🗂️ All Shows", "✨ Discover", "🏈 Sports"):
+    for _label in ("📺 Watch", "✨ Discover", "🏈 Sports"):
         def _make(lbl):
             @check(f"renders: {lbl}")
             def _():
                 at = _render(nav_view=lbl, _wild_on=False, find_q="")
                 assert not at.exception, str(at.exception[0].value)[:300]
         _make(_label)
+
+    @check("renders: Watch / Calendar view")
+    def _():
+        # The dated agenda used to be its own block; the merge made it a view mode, so
+        # it needs its own render or a crash there would go unseen.
+        at = _render(nav_view="📺 Watch", wl_view_mode="🗓️ Calendar")
+        assert not at.exception, str(at.exception[0].value)[:300]
+        _render(wl_view_mode="▦ Grid")      # leave the shared instance on the default
 
     @check("renders: Wildcard")
     def _():
