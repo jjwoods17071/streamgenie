@@ -49,6 +49,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--genie", action="store_true", help="also exercise the model ranking (costs money)")
     ap.add_argument("--user", default=DEFAULT_USER)
+    ap.add_argument("--email", default="jjwoods@gmail.com",
+                    help="real email of --user; a wrong value rewrites their profile row")
     args = ap.parse_args()
 
     try:
@@ -58,6 +60,10 @@ def main():
         pass
 
     UID = args.user
+    # MUST match the account's real email. app.py calls auth.ensure_user_record() on every
+    # load, which upserts public.users ON ID — so a placeholder email here silently
+    # rewrites the real profile row. It did exactly that before this was noticed.
+    REAL_EMAIL = args.email
 
     _memo = {}
 
@@ -423,6 +429,144 @@ def main():
         assert [g[0] for g in groups] == ["streaming", "coming"], groups
         assert sum(len(g[2]) for g in groups) == 3
 
+    # ---------------- writes ----------------
+    # Every check above this point is a read or a pure function. The operations a user
+    # performs constantly — add, delete, mark watched, dismiss, vote — had ZERO coverage,
+    # because there is one environment and testing them meant writing to real data.
+    # These run against a dedicated empty auth user instead.
+    print("\n\033[1mWrite paths\033[0m")
+
+    SANDBOX = "6a8419b6-b9b2-48e7-b1e4-0910d96cb42e"     # selftest@streamgenie.local
+    TEST_TV, TEST_MOVIE = 1396, 550                      # Breaking Bad / Fight Club
+
+    def sandbox_ok():
+        """Refuse to write anywhere near a real account. A bug in a cleanup filter is how
+        a test suite eats someone's watchlist."""
+        assert SANDBOX != UID, "sandbox id equals the read-test user"
+        rows = client.table("shows").select("tmdb_id").eq("user_id", SANDBOX).execute().data
+        assert len(rows) < 50, f"sandbox has {len(rows)} rows — refusing to treat as scratch"
+
+    def sweep():
+        """Leave nothing behind, including after a crashed earlier run."""
+        for tbl, col in (("shows", "user_id"), ("watched_episodes", "user_id"),
+                         ("dismissed_shows", "user_id"), ("rec_feedback", "user_id")):
+            try:
+                client.table(tbl).delete().eq(col, SANDBOX).execute()
+            except Exception:
+                pass
+
+    sandbox_ok()
+    # A user created in the Supabase dashboard can authenticate but has no public.users
+    # row, and shows/watched_episodes/rec_feedback all FK onto it — so every insert fails
+    # until the app's own provisioning runs. This is what first login would do.
+    try:
+        client.table("users").upsert(
+            {"id": SANDBOX, "email": "selftest@streamgenie.local",
+             "username": "selftest_sandbox"}, on_conflict="id").execute()
+    except Exception as e:
+        print(f"  sandbox provisioning: {e}")
+    sweep()
+
+    @check("a show can be added and removed")
+    def _():
+        try:
+            client.table("shows").insert({
+                "user_id": SANDBOX, "tmdb_id": TEST_TV, "media_type": "tv",
+                "title": "Breaking Bad", "region": "US", "on_provider": True,
+                "provider_name": "Netflix"}).execute()
+            got = client.table("shows").select("title,provider_name,media_type")\
+                .eq("user_id", SANDBOX).eq("tmdb_id", TEST_TV).execute().data
+            assert len(got) == 1, f"expected 1 row, got {len(got)}"
+            assert got[0]["media_type"] == "tv" and got[0]["provider_name"] == "Netflix"
+            client.table("shows").delete().eq("user_id", SANDBOX)\
+                .eq("tmdb_id", TEST_TV).execute()
+            left = client.table("shows").select("tmdb_id").eq("user_id", SANDBOX).execute().data
+            assert not left, f"{len(left)} rows survived the delete"
+        finally:
+            sweep()
+
+    @check("the same tmdb_id can be a show AND a film at once")
+    def _():
+        # The entire reason media_type exists: TMDB reuses ids across media types, so the
+        # unique index has to be (user, tmdb_id, media_type) or the second add overwrites
+        # the first. This is the check that would catch a migration regression.
+        try:
+            for mt, title in (("tv", "tv-550"), ("movie", "movie-550")):
+                client.table("shows").insert({
+                    "user_id": SANDBOX, "tmdb_id": TEST_MOVIE, "media_type": mt,
+                    "title": title, "region": "US", "on_provider": True}).execute()
+            rows = client.table("shows").select("media_type,title")\
+                .eq("user_id", SANDBOX).eq("tmdb_id", TEST_MOVIE).execute().data
+            assert len(rows) == 2, f"both media types should coexist, got {len(rows)}"
+            assert {r["media_type"] for r in rows} == {"tv", "movie"}
+        finally:
+            sweep()
+
+    @check("movies.add / movies.remove round-trip")
+    def _():
+        try:
+            m = movies.search("Fight Club", 1)
+            assert m, "search returned nothing"
+            assert movies.add(client, SANDBOX, m[0]), "add reported failure"
+            mine = movies.list_movies(client, SANDBOX)
+            assert len(mine) == 1 and mine[0]["media_type"] == "movie", mine
+            # a film must never reach the TV surfaces
+            tv_rows = movies.fetch_tv_rows(client, SANDBOX, "tmdb_id,title")
+            assert not tv_rows, f"film leaked into the TV fetch: {tv_rows}"
+            assert movies.remove(client, SANDBOX, m[0]["tmdb_id"]), "remove reported failure"
+            assert not movies.list_movies(client, SANDBOX), "film survived removal"
+        finally:
+            sweep()
+
+    @check("marking episodes watched updates counts and last-watched")
+    def _():
+        import watched as _w
+        try:
+            for ep in (1, 2, 3):
+                assert _w.set_watched(client, SANDBOX, TEST_TV, 2, ep, True), f"S2E{ep} failed"
+            counts = _w.watched_counts(client, SANDBOX)
+            assert counts.get(TEST_TV) == 3, f"expected 3 watched, got {counts.get(TEST_TV)}"
+            assert _w.last_watched(client, SANDBOX).get(TEST_TV) == (2, 3), "wrong furthest episode"
+            assert _w.set_watched(client, SANDBOX, TEST_TV, 2, 3, False), "unmark failed"
+            assert _w.watched_counts(client, SANDBOX).get(TEST_TV) == 2, "unmark didn't take"
+        finally:
+            sweep()
+
+    @check("dismissing a show hides it from discovery")
+    def _():
+        import dismissed as _d
+        try:
+            _d.dismiss(client, SANDBOX, TEST_TV)
+            assert TEST_TV in _d.get_dismissed(client, SANDBOX), "dismissal didn't persist"
+        finally:
+            sweep()
+
+    @check("a rec vote persists and is readable as taste")
+    def _():
+        try:
+            client.table("rec_feedback").upsert(
+                {"user_id": SANDBOX, "tmdb_id": TEST_TV, "title": "Breaking Bad",
+                 "verdict": "down"}, on_conflict="user_id,title").execute()
+            taste = recs.taste_signals(client, SANDBOX)
+            assert "Breaking Bad" in taste["disliked"], taste
+            # upsert, not insert — voting twice must not create a second row
+            client.table("rec_feedback").upsert(
+                {"user_id": SANDBOX, "tmdb_id": TEST_TV, "title": "Breaking Bad",
+                 "verdict": "up"}, on_conflict="user_id,title").execute()
+            taste = recs.taste_signals(client, SANDBOX)
+            assert taste["liked"] == ["Breaking Bad"] and not taste["disliked"], taste
+        finally:
+            sweep()
+
+    @check("the sandbox is left clean")
+    def _():
+        for tbl in ("shows", "watched_episodes", "dismissed_shows", "rec_feedback"):
+            try:
+                n = len(client.table(tbl).select("user_id").eq("user_id", SANDBOX).execute().data)
+            except Exception:
+                continue
+            assert n == 0, f"{n} rows left behind in {tbl}"
+
     # ---------------- newsletter ----------------
     print("\n\033[1mNewsletter\033[0m")
 
@@ -471,7 +615,7 @@ def main():
     # the TMDB work is paid once. Separate instances cost ~150s instead of ~35s.
     _at = AppTest.from_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"),
                             default_timeout=180)
-    _at.session_state["user"] = {"id": UID, "email": "selftest@local"}
+    _at.session_state["user"] = {"id": UID, "email": REAL_EMAIL}
 
     def _render(**state):
         for k, v in state.items():

@@ -2,6 +2,17 @@
 
 Read `PRODUCT.md` first. It defines what this app is for; this file is how we build it.
 
+## 0. Posture
+
+**Treat this as a product, not a personal script** (decided 2026-09-01). Other people's
+accounts exist in it, and a broken page counts as a real failure. In practice: no
+unverified pushes to main, data changes always previewed and backed up, and a bias toward
+confirming the shape of a change before writing it.
+
+**Ask before building anything that touches layout or navigation.** Confirm the shape
+first, even when the request seems clear — the cost of asking is one message; the cost of
+building the wrong shape is a day. Routine calls inside an agreed shape don't need asking.
+
 ## 1. Clarify before building
 
 This project has one job (see PRODUCT.md) and a lot of surface area. Most rework here has
