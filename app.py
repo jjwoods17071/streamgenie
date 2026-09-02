@@ -23,6 +23,7 @@ import milestones  # season premiere / finale classification (app + newsletter)
 import tmdb  # shared TMDB client (retry + parallel fan-out)
 import movies  # movie watchlist + TMDB /movie endpoints
 import dismissed  # "Not interested" dismissals for discovery carousels
+import filters  # suspendable user filters
 import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
 import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
@@ -3964,22 +3965,14 @@ if show_settings:
                     "(Email Reminders tab). **Leaving-soon** alerts aren't toggle-able yet — tell me if you "
                     "want them added here.")
 
-            # ── Discover filters: hide whole genres (opt-in per user) ──
+            # ── Discover filters ──
+            # Genre hides moved to the 🧹 Filters popover in the top bar, which also owns
+            # suspension. Two editors over two different stores is how preferences drift.
             st.divider()
-            st.markdown("**🙈 Hide genres from Discover**")
-            st.caption("Hide whole genres from the Discover list. Off by default — turn on only what "
-                       "you never want to see. (Doesn't affect anyone else's account.)")
-            _cur_excl = genre_prefs.get_excluded(client, user_id)
-            _excl_new = set()
-            _gcols = st.columns(len(genre_prefs.EXCLUDABLE_GENRES))
-            for _i, (_gk, (_glabel, _gids, _ja)) in enumerate(genre_prefs.EXCLUDABLE_GENRES.items()):
-                if _gcols[_i].checkbox(f"Hide {_glabel}", value=(_gk in _cur_excl), key=f"genx_{_gk}"):
-                    _excl_new.add(_gk)
-            if st.button(":material/save: Save Discover filters", key="save_genre_excl",
-                         use_container_width=True, type="primary"):
-                genre_prefs.set_excluded(client, user_id, _excl_new)
-                st.success("Saved! Hidden genres won't appear in Discover.")
-                st.rerun()
+            st.markdown("**🙈 Hiding genres**")
+            st.caption("Genre filters now live in **🧹 Filters** in the top bar — where you "
+                       "can also pause one for an evening rather than switching it off "
+                       "and forgetting to switch it back.")
 
         st.write("---")
 else:
@@ -4060,7 +4053,7 @@ def render_for_you(limit=6, compact=False):
         res = _cached_recs(client, uid,
                            tuple(sorted(int(i) for i in _wl_ids if i is not None)),
                            tuple(sorted(int(i) for i in _dismissed_ids if i is not None)),
-                           tuple(sorted(genre_prefs.get_excluded(client, uid))),
+                           tuple(sorted(active_genre_hides())),
                            limit)
 
     picks = res.get("picks") or []
@@ -4797,7 +4790,7 @@ def _render_wildcard():
         res = _cached_recs(client, uid,
                            tuple(sorted(int(i) for i in _wl_ids if i is not None)),
                            tuple(sorted(int(i) for i in _dismissed_ids if i is not None)),
-                           tuple(sorted(genre_prefs.get_excluded(client, uid))),
+                           tuple(sorted(active_genre_hides())),
                            20)
     pool = res.get("picks") or []
     if not pool:
@@ -4881,6 +4874,107 @@ def render_sidebar_account():
                    "Sports data from ESPN.")
 
 
+def active_genre_hides():
+    """Genre keys currently IN FORCE — enabled and not paused.
+
+    This is where suspension becomes real: a paused filter drops out here, so the results
+    change. Everything else would just be a label that lies.
+    """
+    state = get_filter_state()
+    return {k.split(":", 1)[1] for k in filters.active_keys(state) if k.startswith("genre:")}
+
+
+def get_filter_state():
+    """Filter state from the DB, falling back to session when the migration hasn't run.
+
+    Session-only means a suspension can't outlive the tab — which defeats the point, since
+    the whole idea is that it expires on its own later. The UI says so rather than
+    pretending it persisted.
+    """
+    uid = get_user_id()
+    if filters.table_available(client):
+        return filters.get_state(client, uid)
+    return st.session_state.get("_filter_state_local") or {}
+
+
+def _set_filter(key, **fields):
+    uid = get_user_id()
+    if filters.table_available(client):
+        if "enabled" in fields:
+            filters.set_enabled(client, uid, key, fields["enabled"])
+        elif fields.get("suspended_until") is None:
+            filters.resume(client, uid, key)
+        else:
+            filters.suspend(client, uid, key, fields["suspended_until"])
+    else:
+        local = dict(st.session_state.get("_filter_state_local") or {})
+        cur = dict(local.get(key) or {"enabled": False, "suspended_until": None})
+        if "suspended_until" in fields and fields["suspended_until"] is not None:
+            fields = {**fields, "suspended_until": fields["suspended_until"].isoformat()}
+        cur.update(fields)
+        local[key] = cur
+        st.session_state["_filter_state_local"] = local
+
+
+def render_filter_controls():
+    """Filters you can switch off OR pause.
+
+    The niece problem: "hide kids' content" is right almost always and wrong for one
+    evening. Services model preferences as permanent, so you either live with the wrong
+    result or turn it off and forget. A suspension expires by itself.
+    """
+    import datetime as _dt
+    state = get_filter_state()
+    if not filters.table_available(client):
+        st.caption("⚠️ Not saved yet — run `migrations/2026-09-02_filter_prefs.sql`. "
+                   "Until then these last only for this session.")
+
+    for key, (label, helptext) in filters.FILTERS.items():
+        entry = state.get(key) or {}
+        on = bool(entry.get("enabled"))
+        paused = filters.is_suspended(entry)
+
+        c = st.columns([3, 2])
+        with c[0]:
+            new_on = st.checkbox(label, value=on, key=f"flt_{key}", help=helptext)
+            if new_on != on:
+                _set_filter(key, enabled=new_on)
+                st.rerun()
+        with c[1]:
+            if not new_on:
+                st.caption("off")
+            elif paused:
+                st.caption(f"⏸ {filters.describe_suspension(entry)}")
+                if st.button("Resume", key=f"fltres_{key}", use_container_width=True):
+                    _set_filter(key, suspended_until=None)
+                    st.rerun()
+            else:
+                choice = st.selectbox(
+                    "Pause", ["—"] + list(filters.SUSPEND_PRESETS), key=f"fltsus_{key}",
+                    label_visibility="collapsed",
+                    help="Turn this filter off for a while; it comes back on its own")
+                if choice != "—":
+                    until = filters.SUSPEND_PRESETS[choice](_dt.datetime.now(_dt.timezone.utc))
+                    _set_filter(key, suspended_until=until)
+                    st.session_state[f"fltsus_{key}"] = "—"
+                    st.rerun()
+
+
+def render_suspension_banner():
+    """A suspended filter must announce itself. Quietly changing what someone sees is how
+    a filter stops being trusted — the count is always stated, same rule as the hidden
+    caught-up shows."""
+    state = get_filter_state()
+    paused = filters.suspended_keys(state)
+    if not paused:
+        return
+    bits = []
+    for k in sorted(paused):
+        label = filters.FILTERS.get(k, (k, ""))[0]
+        bits.append(f"**{label}** ({filters.describe_suspension(state[k])})")
+    st.info("⏸ Paused: " + " · ".join(bits))
+
+
 def render_top_nav():
     """Category bar + visible facets above the content, the way a product listing page
     does it. Returns the selected view key.
@@ -4888,11 +4982,19 @@ def render_top_nav():
     Filters used to be a sidebar multiselect: collapsed by default, so you couldn't see
     what was available or whether anything was applied without opening it.
     """
-    navrow = st.columns([6, 1.3])
+    navrow = st.columns([5.2, 1.1, 1.3])
     with navrow[0]:
         label = st.radio("View", list(VIEWS), key="nav_view", horizontal=True,
                          label_visibility="collapsed")
     with navrow[1]:
+        _fstate = get_filter_state()
+        _susp = filters.suspended_keys(_fstate)
+        _act = filters.active_keys(_fstate)
+        _flabel = ("⏸ Filters" if _susp else (f"🧹 Filters ({len(_act)})" if _act else "🧹 Filters"))
+        with st.popover(_flabel, use_container_width=True,
+                        help="Hide content you never want — temporarily or for good"):
+            render_filter_controls()
+    with navrow[2]:
         # In the sidebar this popover was ~300px wide and the cards were unreadable.
         uid = get_user_id()
         unread = notifications.get_unread_count(client, uid)
@@ -4920,20 +5022,9 @@ def render_top_nav():
     else:
         st.session_state["_facet_provider"] = set()
 
-    if view == "discover":
-        cur = genre_prefs.get_excluded(client, get_user_id())
-        cols = st.columns([1] + [1] * len(genre_prefs.EXCLUDABLE_GENRES))
-        with cols[0]:
-            st.caption("Hide:")
-        new = set()
-        for col, (key, (lbl, _ids, _ja)) in zip(cols[1:], genre_prefs.EXCLUDABLE_GENRES.items()):
-            with col:
-                if st.checkbox(lbl, value=(key in cur), key=f"facet_genre_{key}"):
-                    new.add(key)
-        if new != cur:
-            genre_prefs.set_excluded(client, get_user_id(), new)
-            st.rerun()
-
+    # Filters live in the 🧹 popover above, not inline — rendering the same widgets twice
+    # collides on every key.
+    render_suspension_banner()
     st.divider()
     return view
 
@@ -5137,7 +5228,7 @@ if _view == "discover" and not _find_active:
     with st.expander("🔎 New & returning on your services"):
         discover.render_discover_section(region, _wl_ids, _add_discovered,
                                          _dismissed_ids, _dismiss_discovered,
-                                         genre_prefs.get_excluded(client, get_user_id()),
+                                         active_genre_hides(),
                                          _exclude_genre)
     with st.expander("📥 Import Netflix history"):
         discover.render_netflix_import(_wl_ids, _add_discovered)

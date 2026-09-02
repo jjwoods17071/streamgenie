@@ -590,6 +590,50 @@ def main():
                 continue
             assert n == 0, f"{n} rows left behind in {tbl}"
 
+    @check("a suspended filter expires by itself")
+    def _():
+        """The whole point: "hide kids" is right 360 days a year and wrong the evening a
+        niece visits. A suspension with a PAST timestamp must be back in force — if it
+        didn't self-heal, users would be right not to trust it."""
+        import datetime as _dt, filters as _f
+        now = _dt.datetime(2026, 9, 2, 20, 0, tzinfo=_dt.timezone.utc)
+        live = {"enabled": True, "suspended_until": (now + _dt.timedelta(hours=2)).isoformat()}
+        past = {"enabled": True, "suspended_until": (now - _dt.timedelta(hours=1)).isoformat()}
+        off = {"enabled": False, "suspended_until": None}
+        on = {"enabled": True, "suspended_until": None}
+
+        assert _f.is_suspended(live, now), "live suspension not detected"
+        assert not _f.is_suspended(past, now), "expired suspension did NOT self-heal"
+        assert _f.describe_suspension(live, now), "a paused filter must say when it returns"
+
+        state = {"genre:kids": live, "genre:anime": on, "genre:reality": off}
+        assert _f.active_keys(state, now) == {"genre:anime"}, _f.active_keys(state, now)
+        assert _f.suspended_keys(state, now) == {"genre:kids"}, _f.suspended_keys(state, now)
+
+        # "tonight" must run past midnight, or an evening's viewing gets cut off
+        tonight = _f.SUSPEND_PRESETS["For tonight"](now)
+        assert tonight > now + _dt.timedelta(hours=6), tonight
+        assert tonight.hour == 6, tonight
+
+    @check("filter suspension round-trips through the database")
+    def _():
+        import datetime as _dt, filters as _f
+        if not _f.table_available(client):
+            return "migrations/2026-09-02_filter_prefs.sql not run yet"
+        try:
+            until = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=3)
+            assert _f.suspend(client, SANDBOX, "genre:kids", until), "suspend failed"
+            st8 = _f.get_state(client, SANDBOX)
+            assert _f.is_suspended(st8.get("genre:kids", {})), "suspension didn't persist"
+            assert _f.resume(client, SANDBOX, "genre:kids"), "resume failed"
+            st8 = _f.get_state(client, SANDBOX)
+            assert not _f.is_suspended(st8.get("genre:kids", {})), "resume didn't take"
+        finally:
+            try:
+                client.table("filter_prefs").delete().eq("user_id", SANDBOX).execute()
+            except Exception:
+                pass
+
     # ---------------- newsletter ----------------
     print("\n\033[1mNewsletter\033[0m")
 
