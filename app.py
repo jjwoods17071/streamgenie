@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+import html
 import json
 import logging
 from typing import Optional, Dict, Any, List
@@ -4992,6 +4993,51 @@ def render_suspension_banner():
     st.info("⏸ Paused: " + " · ".join(bits))
 
 
+def render_service_filter():
+    """Service filter that collapses when you're not using it.
+
+    Twelve options laid flat took two rows and dominated the page. A plain dropdown was
+    worse — it read "All services" and hid what was available. So: a trigger that STATES
+    the current selection, opening to a logo grid that closes on choice. Visible state,
+    one row.
+    """
+    counts = {}
+    for r in list_shows(client):
+        if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name"):
+            p = normalize_provider_name(r["provider_name"])
+            if p:
+                counts[p] = counts.get(p, 0) + 1
+    ordered = [p for p, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+    current = next(iter(st.session_state.get("_facet_provider") or []), None)
+    if current not in ordered:
+        current = None
+
+    total = sum(counts.values())
+    trigger = f"📺 {current} ({counts[current]})" if current else f"📺 All services ({total})"
+    with st.popover(trigger, help="Show only what's on one service"):
+        _service_option("All services", total, None, current is None)
+        st.markdown("---")
+        cols = st.columns(3)
+        for i, p in enumerate(ordered):
+            with cols[i % 3]:
+                _service_option(p, counts[p], get_provider_logo_url(p), p == current)
+
+
+def _service_option(label, count, logo, selected):
+    """One service: brand mark above the button. A wall of service NAMES is what made the
+    flat radio unreadable; a logo is recognised without being read."""
+    if logo:
+        st.markdown(
+            f'<div style="display:flex;align-items:center;justify-content:center;'
+            f'height:26px;margin-bottom:-6px">'
+            f'<img src="{logo}" style="height:22px;border-radius:4px;object-fit:contain">'
+            f'</div>', unsafe_allow_html=True)
+    if st.button(f"{label} ({count})", key=f"svc_{label}", use_container_width=True,
+                 type="primary" if selected else "secondary"):
+        st.session_state["_facet_provider"] = set() if label == "All services" else {label}
+        st.rerun()
+
+
 def render_top_nav():
     """Category bar + visible facets above the content, the way a product listing page
     does it. Returns the selected view key.
@@ -5022,20 +5068,7 @@ def render_top_nav():
     view = VIEWS[label]
 
     if view == "watch":
-        # Only services this user actually tracks — the full provider list would be
-        # mostly dead options. Counts make the filter self-describing.
-        counts = {}
-        for r in list_shows(client):
-            if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name"):
-                p = normalize_provider_name(r["provider_name"])
-                if p:
-                    counts[p] = counts.get(p, 0) + 1
-        opts = ["All services"] + [p for p, _ in sorted(counts.items(), key=lambda kv: -kv[1])]
-        labels = {p: (p if p == "All services" else f"{p} ({counts[p]})") for p in opts}
-        picked = st.radio("Service", opts, key="facet_provider_radio", horizontal=True,
-                          format_func=lambda p: labels[p], label_visibility="collapsed")
-        # apply_provider_facet still takes a set, so one selection is a one-element set.
-        st.session_state["_facet_provider"] = set() if picked == "All services" else {picked}
+        render_service_filter()
     else:
         st.session_state["_facet_provider"] = set()
 
@@ -5266,14 +5299,18 @@ if _view == "watch" and not _find_active:
     _wn_rows = refresh_stale_air_dates(client, list_shows(client))
     _wn_rows = refresh_sports_air_dates(client, _wn_rows)
 
-    # One control: grid / list / the dated agenda that used to be its own block.
-    _vm = st.radio("View", ["▦ Grid", "📋 List", "🗓️ Calendar"], horizontal=True,
-                   key="wl_view_mode", label_visibility="collapsed")
+    # View mode and the rarely-used actions share one row on the right, rather than each
+    # claiming a line. Export is a once-a-year action; it was permanent furniture.
+    _vmcol, _ovcol = st.columns([4, 1])
+    with _vmcol:
+        _vm = st.radio("View", ["▦ Grid", "📋 List", "🗓️ Calendar"], horizontal=True,
+                       key="wl_view_mode", label_visibility="collapsed")
+    with _ovcol:
+        with st.popover("⋯", use_container_width=True, help="More actions"):
+            if st.button(f"{ICONS['download']} Export CSV", key="export_csv_btn",
+                         use_container_width=True):
+                st.session_state.show_export = True
     st.session_state.view_mode = {"▦ Grid": "grid", "📋 List": "list"}.get(_vm, "grid")
-
-    # Export button
-    if st.button(f"{ICONS['download']} Export CSV", key="export_csv_btn", use_container_width=False):
-        st.session_state.show_export = True
 
     export_csv = st.session_state.get('show_export', False)
 
@@ -5360,8 +5397,6 @@ if _view == "watch" and not _find_active:
             rows = sorted(rows, key=lambda x: normalize_provider_name(x.get("provider_name", "")).lower(), reverse=(sort_order == "desc"))
         elif sort_by == "added":
             rows = sorted(rows, key=lambda x: x.get("created_at") or "", reverse=(sort_order == "desc"))
-
-        st.caption(f"Tracking {len(rows)} show(s) \u2022 {sort_label}")
 
         # Watched-episode counts for badges (one query; {} if table not yet created)
         _wcounts = watched.watched_counts(client, get_user_id())
