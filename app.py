@@ -3097,16 +3097,15 @@ def get_provider_logo_url(provider_name: str) -> Optional[str]:
     if provider_lower in st.session_state.logo_overrides:
         return st.session_state.logo_overrides[provider_lower]
 
-    provider_logos = get_all_provider_logos()
-
-    # Exact match (preferred)
-    if provider_lower in provider_logos:
-        return provider_logos[provider_lower]
-
-    # Then everything TMDB knows, keyed by the same normalizer we display with.
+    # TMDB first: its URLs are live, and the hardcoded map below has rotted — the
+    # JustWatch link for Showtime 404s and renders as a broken-image icon.
     live = tmdb_provider_logos()
     if provider_lower in live:
         return live[provider_lower]
+
+    provider_logos = get_all_provider_logos()
+    if provider_lower in provider_logos:
+        return provider_logos[provider_lower]
 
     # Partial match only for longer, specific keys to avoid false matches
     # Only match if key is at least 4 chars and is a clear substring
@@ -5113,27 +5112,37 @@ def render_onboarding() -> bool:
                "including add-on channels like MGM+ through Prime. You can change this "
                "any time under 🧹 Filters.")
 
+    # Showtime is deliberately absent: in the US it folded into Paramount+ and TMDB no
+    # longer lists it, so offering it would be a dead option with no logo.
     common = ["Netflix", "Prime Video", "Max", "Hulu", "Disney+", "Apple TV+",
-              "Paramount+", "Peacock", "AMC+", "MGM+", "Starz", "Showtime"]
+              "Paramount+", "Peacock", "AMC+", "MGM+", "Starz"]
     # anything already implied by their library, so an importing user sees familiar names
     from_library = sorted({normalize_provider_name(r["provider_name"])
                            for r in list_shows(client)
                            if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name")} - {""})
     options = list(dict.fromkeys(common + from_library))
 
-    picked = set()
+    chosen = set(st.session_state.get("_onb_picked") or [])
     cols = st.columns(4)
     for i, svc in enumerate(options):
         with cols[i % 4]:
             logo = get_provider_logo_url(svc)
-            if logo:
-                st.markdown(
-                    f'<div style="display:flex;align-items:center;justify-content:center;'
-                    f'height:44px;margin-bottom:-6px">'
-                    f'<img src="{logo}" style="height:38px;border-radius:8px;'
-                    f'object-fit:contain"></div>', unsafe_allow_html=True)
-            if st.checkbox(svc, key=f"onb_{svc}"):
-                picked.add(svc)
+            st.markdown(
+                f'<div style="display:flex;align-items:center;justify-content:center;'
+                f'height:84px">'
+                + (f'<img src="{logo}" alt="" style="height:76px;border-radius:12px;'
+                   f'object-fit:contain">' if logo else
+                   '<div style="height:76px;width:76px;border-radius:12px;'
+                   'background:rgba(255,255,255,.06)"></div>')
+                + '</div>', unsafe_allow_html=True)
+            on = svc in chosen
+            if st.button(f"{'✓ ' if on else ''}{svc}", key=f"onb_{svc}",
+                         use_container_width=True,
+                         type="primary" if on else "secondary"):
+                chosen.symmetric_difference_update({svc})
+                st.session_state["_onb_picked"] = sorted(chosen)
+                st.rerun()
+    picked = chosen
 
     st.markdown("---")
     b = st.columns([2, 2, 6])
@@ -5141,6 +5150,7 @@ def render_onboarding() -> bool:
         if st.button("Continue", type="primary", use_container_width=True,
                      disabled=not picked):
             filters.set_subscriptions(client, uid, picked)
+            st.session_state.pop("_onb_picked", None)
             st.session_state["_onboarded"] = True
             st.rerun()
     with b[1]:
