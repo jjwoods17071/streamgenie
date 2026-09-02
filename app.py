@@ -1580,6 +1580,10 @@ def render_grid_gallery(rows, client, wcounts, per_row=7):
     """True poster-tile gallery for the grid view (vs. the detailed list rows).
     Each card's title is a button that opens the full show-detail page (PDP)."""
     today = local_today()
+    # "last watched S2E10" says where to RESUME. A bare count says how far behind you are
+    # but not where you stopped, which is the thing you actually need. This marker lived
+    # in render_catch_up and vanished when the merge made that function unreachable.
+    lastw = watched.last_watched(client, get_user_id())
     for i in range(0, len(rows), per_row):
         cols = st.columns(per_row)
         for j, r in enumerate(rows[i:i + per_row]):
@@ -1608,7 +1612,9 @@ def render_grid_gallery(rows, client, wcounts, per_row=7):
                 wc = wcounts.get(r["tmdb_id"], 0)
                 st.caption(when)
                 st.markdown(chip)
-                st.caption(f"✓ {wc} watched" if wc else "\u00a0")
+                _se = lastw.get(r["tmdb_id"])
+                st.caption(f"✓ S{_se[0]}E{_se[1]}" if _se
+                           else (f"✓ {wc} watched" if wc else "\u00a0"))
 
                 st.button(ICONS["delete"], key=f"gdel_{r['tmdb_id']}_{r.get('provider_name')}",
                           help="Remove", use_container_width=True,
@@ -2173,7 +2179,7 @@ def render_upcoming(rows, as_tab=False):
     if as_tab:
         st.subheader(f"📅 Upcoming Episodes ({len(up)})")
         if not up and not pinned_ids:
-            st.info("No upcoming episodes scheduled for your watchlist yet. Add shows from the Discover tab "
+            st.info("**Nothing scheduled yet.** Add shows from Discover, or search above — "
                     "to see what's coming up.")
             render_coming_eventually(rows, set(up_by_id))
             return
@@ -2204,82 +2210,6 @@ def render_upcoming(rows, as_tab=False):
             return
         with st.expander(f"📅 Upcoming Episodes ({len(up)})", expanded=soon):
             _agenda()
-
-
-def render_catch_up(rows, metas=None):
-    """📥 Catch Up — released-but-unwatched episodes, ONLY for shows you've started
-    (≥1 watched episode), so the count means 'you're N behind' rather than 'everything'."""
-    st.subheader("📥 Catch Up")
-    st.caption("Shows you've started watching and have fallen behind on — released episodes "
-               "you haven't marked watched yet.")
-    wcounts = watched.watched_counts(client, get_user_id())
-    _lastw = watched.last_watched(client, get_user_id())
-
-    def _progress(tid, n):
-        se = _lastw.get(tid)
-        where = f" · last watched S{se[0]}E{se[1]}" if se else ""
-        return f":blue[**{n} to watch**]{where}"
-
-    avail = []
-    for r in rows:
-        tid = r.get("tmdb_id")
-        if not tid or tid < 0:          # skip sports rows
-            continue
-        w = wcounts.get(tid, 0)
-        if w <= 0:                       # only shows you've STARTED
-            continue
-        n = available_now_count(tid, w, (metas or {}).get(tid))
-        if n > 0:
-            avail.append((n, r))
-    if not avail:
-        if not wcounts:
-            st.info("Mark some episodes watched (on a show's page) and this tab will track what "
-                    "you've fallen behind on.")
-        else:
-            st.success("You're all caught up on the shows you've started. 🎉")
-        return
-    avail.sort(key=lambda x: -x[0])
-    total = sum(n for n, _ in avail)
-    hc = st.columns([4, 2])
-    with hc[0]:
-        st.markdown(f"**{total} episode{'s' if total != 1 else ''} to catch up on "
-                    f"across {len(avail)} show{'s' if len(avail) != 1 else ''}**")
-    with hc[1]:
-        cu_view = st.radio("View", ["▦ Grid", "📋 List"], horizontal=True,
-                           key="cu_view", label_visibility="collapsed")
-
-    def _cu_remove(r, idx):
-        # Key must be unique per rendered row: the same show (tmdb_id) can appear under
-        # multiple regions/providers, so include the region, provider AND the list position.
-        key = (f"cu_rm_{r['tmdb_id']}_{r.get('region') or DEFAULT_REGION}_"
-               f"{r.get('provider_name') or DEFAULT_PROVIDER}_{idx}")
-        st.button("🗑", key=key, help="Remove from your list",
-                  on_click=delete_show,
-                  args=(client, r['tmdb_id'], r.get('region') or DEFAULT_REGION,
-                        r.get('provider_name') or DEFAULT_PROVIDER))
-
-    if cu_view == "▦ Grid":
-        per = 6
-        for i in range(0, len(avail), per):
-            cols = st.columns(per)
-            for j, (n, r) in enumerate(avail[i:i + per]):
-                with cols[j]:
-                    clickable_poster(r['tmdb_id'], r.get("poster_path"))
-                    clickable_title(r['title'], r)
-                    st.caption(_progress(r["tmdb_id"], n))
-                    _render_service_logo(r)
-                    _cu_remove(r, i + j)
-    else:
-        for idx, (n, r) in enumerate(avail):
-            c = st.columns([1, 4, 1])
-            with c[0]:
-                clickable_poster(r['tmdb_id'], r.get("poster_path"))
-            with c[1]:
-                clickable_title(r['title'], r)
-                st.caption(_progress(r["tmdb_id"], n))
-                _render_service_logo(r)
-            with c[2]:
-                _cu_remove(r, idx)
 
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
@@ -4407,51 +4337,6 @@ def _cached_movie_status(_client, user_id, region, id_sig):
     return movies.enrich(_client, user_id, region)
 
 
-def render_watch_summary(rows, metas=None):
-    """The one-line answer to "is there anything for me right now?", plus an honest
-    account of what the page is hiding.
-
-    The list defaults to things you can act on. A show you're caught up on with no
-    announced date has nothing to offer, so it stays out of the way — but silently
-    dropping a third of someone's watchlist is how people stop trusting a list, so the
-    count is always stated and one click brings it back.
-    """
-    uid = get_user_id()
-    wcounts = watched.watched_counts(client, uid)
-    today = local_today()
-
-    ready = scheduled = waiting = 0
-    for r in rows:
-        tid = r.get("tmdb_id") or 0
-        if tid < 0:
-            continue
-        nad = r.get("next_air_date")
-        dated = False
-        if nad:
-            try:
-                dated = dt.date.fromisoformat(nad) >= today
-            except Exception:
-                dated = False
-        w = wcounts.get(tid, 0)
-        behind = available_now_count(tid, w, (metas or {}).get(tid)) if w > 0 else 0
-        if behind > 0:
-            ready += 1
-        elif dated:
-            scheduled += 1
-        else:
-            waiting += 1
-
-    bits = []
-    if ready:
-        bits.append(f"**{ready}** ready to watch")
-    if scheduled:
-        bits.append(f"**{scheduled}** with a date")
-    st.markdown(" · ".join(bits) if bits else "**Nothing waiting** — you're caught up.")
-    if waiting:
-        st.caption(f"{waiting} caught up with no announced date — hidden below. "
-                   "Renewed shows appear in *Coming eventually*.")
-
-
 def render_movies(embed=False):
     """🎬 Movies — the film half of the watchlist.
 
@@ -4529,7 +4414,7 @@ def render_movies(embed=False):
                                         tuple(sorted(m["tmdb_id"] for m in movies.list_movies(client, uid))))
     if not enriched:
         if not embed:
-            st.info("No movies yet — search above to add one.")
+            st.info("**No films yet.** Search above for one you've been meaning to watch.")
         return          # embedded: stay silent rather than pad Watch with an empty block
     st.markdown(f"### 🎬 Movies ({len(enriched)})" if embed
                 else f"### Your movies ({len(enriched)})")
@@ -4640,6 +4525,22 @@ def render_movie_page(tmdb_id: int):
         with b[2]:
             st.button("✕ Close", key=f"mpdp_close_{tmdb_id}", use_container_width=True,
                       on_click=lambda: st.query_params.clear())
+
+
+def render_import_prompt():
+    """The Netflix history import, surfaced where someone actually feels the problem.
+
+    Manual progress entry is what makes trackers get abandoned, and this is the one
+    feature that avoids it — yet it lived in a collapsed expander inside Discover. Trakt
+    leads their whole onboarding with "bring your watch history"; ours was three levels
+    down. Same feature, opposite prominence.
+    """
+    with st.container(border=True):
+        st.markdown("**📥 Bring your watch history**")
+        st.caption("Rather than marking episodes by hand, import what you've already "
+                   "watched — it back-fills your progress in a couple of minutes.")
+        with st.expander("Import from Netflix"):
+            discover.render_netflix_import(_wl_ids, _add_discovered)
 
 
 def render_movie_recs():
@@ -4778,7 +4679,7 @@ def render_find_bar():
 
     tv, mv = _find_results(q, region)
     if not tv and not mv:
-        st.info("Nothing found. Try fewer words.")
+        st.info("**Nothing matched.** Try fewer words, or a different spelling.")
         return True
 
     owned = {r.get("tmdb_id") for r in list_shows(client)}
@@ -5227,7 +5128,8 @@ if _view == "discover" and not _find_active:
     st.divider()
     st.subheader("✨ For You")
     st.caption("Shows like the ones you actually watch — seeded from your viewing history, "
-               "not from what's popular.")
+               "not from what's popular. 👍 and 👎 sharpen these: the more you rate, the "
+               "closer they get.")
     render_for_you()
 
     # The provider sweep and the Netflix import are secondary to real recommendations,
@@ -5414,7 +5316,12 @@ if _view == "watch" and not _find_active:
             # export. Same renderer, now reached as a view of the same list.
             render_upcoming(_shown, as_tab=True)
         elif not _shown:
-            st.info("No shows match this filter.")
+            if _fmode == "behind":
+                st.info("**Nothing to catch up on right now.** "
+                        "Watched something elsewhere? Import it and it'll show up here.")
+                render_import_prompt()
+            else:
+                st.info("Nothing in this group yet.")
         elif view_mode == 'grid':
             render_grid_gallery(_shown, client, _wcounts)
         else:

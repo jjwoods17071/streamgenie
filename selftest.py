@@ -662,6 +662,21 @@ def main():
         assert not at.exception, str(at.exception[0].value)[:300]
         _render(wl_view_mode="▦ Grid")      # leave the shared instance on the default
 
+    @check("no unreachable render_ functions")
+    def _():
+        """The Watch/All Shows merge left render_catch_up defined but never called — and
+        it owned the "last watched S2E10" marker, so that feature silently disappeared.
+        Dead UI code is how a merge loses a feature without anything going red."""
+        import ast as _a
+        src_ = open("app.py").read()
+        tree = _a.parse(src_)
+        defined = {n.name for n in tree.body
+                   if isinstance(n, _a.FunctionDef) and n.name.startswith("render_")}
+        called = {n.func.id for n in _a.walk(tree)
+                  if isinstance(n, _a.Call) and isinstance(n.func, _a.Name)}
+        orphans = sorted(defined - called)
+        assert not orphans, f"defined but never called: {orphans}"
+
     @check("renders: Wildcard")
     def _():
         at = _render(nav_view="📺 Watch", _wild_on=True)
