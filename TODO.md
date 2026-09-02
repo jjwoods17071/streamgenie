@@ -1,5 +1,7 @@
 # StreamGenie — open work
 
+**Sequencing lives in ROADMAP.md** (Now / Near / Next). This file is the flat list.
+
 Replaces PRODUCT_ROADMAP.md, which was leftover chat text from May, not a roadmap.
 Current as of 2026-09-01. See PRODUCT.md for what the app is for, CLAUDE.md for how we
 work on it.
