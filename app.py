@@ -1565,15 +1565,23 @@ def show_status_chip(r) -> str:
         return ":red-background[🚫 Canceled]"
     if ss == "Ended" or ps == "ENDED":
         return ":gray-background[🏁 Ended]"
+    # "Airing" named a category. What you actually want to know is WHEN — and for a team
+    # it's a game, not an episode. A separate "Team" chip said nothing the crest didn't.
+    is_team = (r.get("tmdb_id") or 0) < 0
     nad = r.get("next_air_date")
     if nad:
         try:
-            if dt.date.fromisoformat(nad) >= local_today():
-                return ":green-background[📅 Airing]"
+            d = dt.date.fromisoformat(nad)
+            if d >= local_today():
+                when = d.strftime("%a %d %b")
+                label = "Next game" if is_team else "Next episode"
+                return f":green-background[📅 {label} · {when}]"
         except Exception:
             pass
-    # Renewed but nothing on the calendar — not the same as "airing", and the distinction
-    # is the whole question of whether there's anything to do about this show.
+    if is_team:
+        return ":orange-background[⏳ Off-season]"
+    # Renewed but nothing on the calendar — not the same as airing, and the distinction is
+    # the whole question of whether there's anything to do about this show.
     return ":orange-background[⏳ Between seasons]"
 
 
@@ -1599,17 +1607,23 @@ def render_grid_gallery(rows, client, wcounts, per_row=7):
                           on_click=open_show_page, args=(r,))
 
                 when = "—"
+                if (r.get("tmdb_id") or 0) < 0:
+                    _lg, _ = sports.decode_id(r["tmdb_id"])
+                    when = sports.league_label(_lg) if _lg else "—"
                 nad = r.get("next_air_date")
                 if nad:
                     try:
                         days = (dt.date.fromisoformat(nad) - today).days
                         if days >= 0:
-                            ne = get_next_episode(r["tmdb_id"])
-                            ep = f"S{ne['season']}E{ne['episode']} · " if ne and ne.get("season") else ""
-                            when = f"📅 {ep}{'TODAY' if days == 0 else f'in {days}d'}"
+                            if (r.get("tmdb_id") or 0) < 0:
+                                when = f"{when} · {'TODAY' if days == 0 else f'in {days}d'}"
+                            else:
+                                ne = get_next_episode(r["tmdb_id"])
+                                ep = f"S{ne['season']}E{ne['episode']} · " if ne and ne.get("season") else ""
+                                when = f"📅 {ep}{'TODAY' if days == 0 else f'in {days}d'}"
                     except Exception:
                         pass
-                chip = show_status_chip(r) if (r.get("tmdb_id") or 0) > 0 else ":blue-background[🏈 Team]"
+                chip = show_status_chip(r)
                 wc = wcounts.get(r["tmdb_id"], 0)
                 st.caption(when)
                 st.markdown(chip)
@@ -4854,12 +4868,15 @@ def render_sidebar_account():
     content (see render_top_nav) — a filter hidden in a sidebar dropdown is a filter
     nobody uses."""
     with st.sidebar:
-        st.markdown("---")
-        if st.button("♻️ Rebuild caches", use_container_width=True,
-                     help="Force fresh TMDB + recommendation data"):
-            st.cache_data.clear()
-            st.session_state.pop("_meta_store", None)
-            st.rerun()
+        # Developer escape hatch: it drops every cache for the session. Nothing a normal
+        # user should be offered, or could interpret.
+        if auth.is_admin(client, get_user_id()):
+            st.markdown("---")
+            if st.button("♻️ Rebuild caches", use_container_width=True,
+                         help="Admin: force fresh TMDB + recommendation data"):
+                st.cache_data.clear()
+                st.session_state.pop("_meta_store", None)
+                st.rerun()
 
         # REQUIRED by the TMDB API terms — logo plus this exact disclaimer — even for
         # non-commercial use, which is what we are (see PRODUCT.md). Don't remove it.

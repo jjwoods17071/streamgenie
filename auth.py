@@ -2,6 +2,7 @@
 Authentication module for StreamGenie
 Handles user signup, login, logout, session management, and user roles
 """
+import html
 import os
 import streamlit as st
 from supabase import Client
@@ -422,7 +423,11 @@ def render_user_menu(client: Client):
 
     with st.sidebar:
         st.markdown("---")
-        st.markdown(f"**👤 {user['email']}**")
+        # NOT st.markdown: it auto-links anything that looks like an address, turning the
+        # signed-in user's own email into a mailto we have no reason to offer.
+        st.caption("Signed in as")
+        st.markdown(f'<div style="font-weight:600;margin:-8px 0 6px">'
+                    f'{html.escape(user["email"] or "")}</div>', unsafe_allow_html=True)
 
         if st.button("🚪 Logout", use_container_width=True):
             logout_user(client)
