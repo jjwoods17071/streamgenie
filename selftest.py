@@ -714,6 +714,7 @@ def main():
     _at = AppTest.from_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py"),
                             default_timeout=180)
     _at.session_state["user"] = {"id": UID, "email": REAL_EMAIL}
+    _at.session_state["_onboarded"] = True   # skip first-run setup; see the check below
 
     def _render(**state):
         for k, v in state.items():
@@ -771,6 +772,41 @@ def main():
         again[0].click().run()
         assert not at.session_state["_facet_provider"], \
             f"second click did not clear it: {at.session_state['_facet_provider']}"
+
+    @check("first-run setup asks for services, then never again")
+    def _():
+        """The takeover must appear for someone who hasn't answered, and must NOT appear
+        once they have — an onboarding screen that re-shows is worse than none. Also
+        guards the render tests: they bypass it, so something has to prove it still fires.
+        """
+        import filters as _f
+        if not _f.table_available(client):
+            return "filter_prefs migration not run"
+        at = AppTest.from_file(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "app.py"), default_timeout=180)
+        at.session_state["user"] = {"id": SANDBOX, "email": "selftest@streamgenie.local"}
+        try:
+            client.table("filter_prefs").delete().eq("user_id", SANDBOX).execute()
+            at.run()
+            assert not at.exception, str(at.exception[0].value)[:300]
+            heads = " ".join(m.value for m in at.markdown)
+            assert "which services do you have" in heads.lower(), \
+                "first-run setup did not appear for a user who never answered"
+
+            # answering must retire it permanently
+            _f.set_subscriptions(client, SANDBOX, ["Netflix"])
+            at2 = AppTest.from_file(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                 "app.py"), default_timeout=180)
+            at2.session_state["user"] = {"id": SANDBOX, "email": "selftest@streamgenie.local"}
+            at2.run()
+            heads2 = " ".join(m.value for m in at2.markdown)
+            assert "which services do you have" not in heads2.lower(), \
+                "setup re-appeared after being answered"
+        finally:
+            try:
+                client.table("filter_prefs").delete().eq("user_id", SANDBOX).execute()
+            except Exception:
+                pass
 
     @check("renders: Wildcard")
     def _():

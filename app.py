@@ -5044,6 +5044,76 @@ def render_filter_controls():
                     st.rerun()
 
 
+ONBOARDED_KEY = "onboarding:services"
+
+
+def render_onboarding() -> bool:
+    """First-run: ask which services they have. Returns True if it took over the screen.
+
+    This is the question that turns "where does this stream?" into "where can *I* watch
+    it?" — and it was buried in a popover a new user would never open. It also pairs with
+    the history import: which services you have, then bring what you've already watched,
+    are the two things that decide whether this app is useful on day one.
+
+    Asked ONCE. Skipping is remembered too, so it never nags.
+    """
+    if st.session_state.get("_onboarded"):
+        return False
+    if not filters.table_available(client):
+        return False        # nowhere to record the answer; don't trap the user
+    uid = get_user_id()
+    state = filters.get_state(client, uid)
+    if filters.has_answered(client, uid) or ONBOARDED_KEY in state:
+        st.session_state["_onboarded"] = True
+        return False
+
+    st.markdown("## 👋 Welcome to StreamGenie")
+    st.markdown("#### First, which services do you have?")
+    st.caption("We track shows across every service, so knowing yours lets us say "
+               "**you can watch this tonight** instead of just naming where it streams — "
+               "including add-on channels like MGM+ through Prime. You can change this "
+               "any time under 🧹 Filters.")
+
+    common = ["Netflix", "Prime Video", "Max", "Hulu", "Disney+", "Apple TV+",
+              "Paramount+", "Peacock", "AMC+", "MGM+", "Starz", "Showtime"]
+    # anything already implied by their library, so an importing user sees familiar names
+    from_library = sorted({normalize_provider_name(r["provider_name"])
+                           for r in list_shows(client)
+                           if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name")} - {""})
+    options = list(dict.fromkeys(common + from_library))
+
+    picked = set()
+    cols = st.columns(4)
+    for i, svc in enumerate(options):
+        with cols[i % 4]:
+            logo = get_provider_logo_url(svc)
+            if logo:
+                st.markdown(
+                    f'<div style="display:flex;align-items:center;justify-content:center;'
+                    f'height:44px;margin-bottom:-6px">'
+                    f'<img src="{logo}" style="height:38px;border-radius:8px;'
+                    f'object-fit:contain"></div>', unsafe_allow_html=True)
+            if st.checkbox(svc, key=f"onb_{svc}"):
+                picked.add(svc)
+
+    st.markdown("---")
+    b = st.columns([2, 2, 6])
+    with b[0]:
+        if st.button("Continue", type="primary", use_container_width=True,
+                     disabled=not picked):
+            filters.set_subscriptions(client, uid, picked)
+            st.session_state["_onboarded"] = True
+            st.rerun()
+    with b[1]:
+        if st.button("Skip for now", use_container_width=True):
+            # Remembered, so it never asks twice. An empty subscription list still means
+            # "never answered" everywhere else, which is what stops us gating their library.
+            filters.set_enabled(client, uid, ONBOARDED_KEY, True)
+            st.session_state["_onboarded"] = True
+            st.rerun()
+    return True
+
+
 def get_subscriptions():
     uid = get_user_id()
     if filters.table_available(client):
@@ -5217,6 +5287,11 @@ def apply_provider_facet(rows):
 
 
 render_sidebar_account()
+
+# First run takes over the main pane before any of the app is drawn.
+if render_onboarding():
+    st.stop()
+
 _view = render_top_nav()
 _find_active = render_find_bar()
 
