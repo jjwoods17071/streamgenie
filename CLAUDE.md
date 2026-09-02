@@ -121,6 +121,13 @@ that were never broken. **Fix what was reported, not the whole category.**
 - Writing a widget's own `session_state` key inline after the widget exists raises. Use an
   `on_click` callback.
 - `if st.button(): work(); st.rerun()` runs the script twice. Use `on_click`.
+- **A picker where each option is its own widget costs one full round-trip per click**, and
+  a rerun closes any popover it lives in, so the user can only ever choose once. Put
+  multi-choice UI in `st.form` — widgets inside don't rerun until submit, so N choices cost
+  one redraw. This is the difference between "cumbersome" and "instant" on Streamlit Cloud,
+  where the round-trip dominates (the Python is ~0.2s).
+- A static check that greps `ast.unparse(fn)` matches the DOCSTRING too — one failed on
+  prose describing the `st.rerun()` it had just removed. Strip the docstring first.
 - Caching on a *tuple of ids* means adding or removing one item invalidates everything.
   Prefer per-id storage.
 - Cache the lowest-level fetch. `tv_details` uncached meant four higher caches each

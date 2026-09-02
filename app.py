@@ -5059,20 +5059,25 @@ def render_subscription_picker():
     known = sorted(set(known))
 
     current = get_subscriptions()
-    st.caption("Tick what you pay for. We'll say when something is included in a service "
-               "you already have — including add-on channels like MGM+ through Prime.")
-    picked = set()
-    cols = st.columns(2)
-    for i, svc in enumerate(known):
-        with cols[i % 2]:
-            if st.checkbox(svc, value=(svc in current), key=f"sub_{svc}"):
-                picked.add(svc)
-    if picked != current:
-        if filters.table_available(client):
-            filters.set_subscriptions(client, uid, picked)
-        else:
-            st.session_state["_subs_local"] = sorted(picked)
-        st.rerun()
+    st.caption("Tick what you pay for, then Save. We'll say when something is included in "
+               "a service you already have — including add-on channels like MGM+ through "
+               "Prime.")
+    # A form, for the same reason as the service filter: this used to write to the
+    # database and rerun on EVERY tick, so setting up eight services was eight round-trips
+    # and eight writes. Now it's one of each.
+    with st.form("subs_picker", border=False):
+        picked = set()
+        cols = st.columns(2)
+        for i, svc in enumerate(known):
+            with cols[i % 2]:
+                if st.checkbox(svc, value=(svc in current), key=f"sub_{svc}"):
+                    picked.add(svc)
+        if st.form_submit_button("Save services", type="primary") and picked != current:
+            if filters.table_available(client):
+                filters.set_subscriptions(client, uid, picked)
+            else:
+                st.session_state["_subs_local"] = sorted(picked)
+            st.toast(f"Saved {len(picked)} service{'' if len(picked) == 1 else 's'}")
 
 
 def render_suspension_banner():
@@ -5121,12 +5126,16 @@ def provider_logo_html(name: str, size: int = 44) -> str:
 
 
 def render_service_filter():
-    """Service filter that collapses when you're not using it.
+    """Service filter: pick as many as you like, one redraw at the end.
 
-    Twelve options laid flat took two rows and dominated the page. A plain dropdown was
-    worse — it read "All services" and hid what was available. So: a trigger that STATES
-    the current selection, opening to a logo grid that closes on choice. Visible state,
-    one row.
+    It used to be one button per service, each doing `set(); st.rerun()`. Streamlit already
+    reruns after a button, so that was TWO full passes per click — and because a rerun
+    closes the popover, you could only ever choose one service before it shut. Reopen,
+    click, wait, repeat.
+
+    A form fixes both: widgets inside one don't rerun as you touch them, so ticking six
+    services costs the same single round-trip as ticking one. Multi-select comes free —
+    apply_provider_facet already took a set; only this UI was forcing a single choice.
     """
     counts = {}
     for r in list_shows(client):
@@ -5135,51 +5144,58 @@ def render_service_filter():
             if p:
                 counts[p] = counts.get(p, 0) + 1
     ordered = [p for p, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
-    current = next(iter(st.session_state.get("_facet_provider") or []), None)
-    if current not in ordered:
-        current = None
+    picked = {p for p in (st.session_state.get("_facet_provider") or set()) if p in ordered}
 
     total = sum(counts.values())
-    trigger = f"📺 {current} ({counts[current]})" if current else f"📺 All services ({total})"
+    shown = sum(counts[p] for p in picked) if picked else total
+    if not picked:
+        trigger = f"📺 All services ({total})"
+    elif len(picked) == 1:
+        one = next(iter(picked))
+        trigger = f"📺 {one} ({counts[one]})"
+    else:
+        trigger = f"📺 {len(picked)} services ({shown})"
+
     subs = get_subscriptions()
-    with st.popover(trigger, help="Show only what's on one service"):
-        _service_option("All services", total, None, current is None)
-        # Services you pay for first. Without the split, MGM+ (2 shows, an add-on you may
-        # not have) sits as an equal of Netflix (28), which is not how anyone thinks.
-        # Strictly what they subscribe to. A channel reachable THROUGH Prime is still a
-        # separate purchase, so it belongs under "Not subscribed".
-        mine = [p for p in ordered if p in subs] if subs else ordered
-        others = [p for p in ordered if p not in subs] if subs else []
-        for header, group in (("Your services", mine), ("Not subscribed", others)):
-            if not group:
-                continue
-            if subs:
-                st.markdown(f"**{header}**")
-            cols = st.columns(3)
-            for i, p in enumerate(group):
-                with cols[i % 3]:
-                    _service_option(p, counts[p], provider_logo_html(p, 44), p == current)
-
-
-def _service_option(label, count, mark, selected):
-    """One service: brand mark above the button. A wall of service NAMES is what made the
-    flat radio unreadable; a logo is recognised without being read.
-
-    Clicking the SELECTED service clears the filter. A filter you can turn on but not off
-    by the same gesture is a trap — the only way back was hunting for "All services".
-    """
-    if mark:
-        st.markdown(
-            f'<div style="display:flex;justify-content:center;height:52px;'
-            f'margin-bottom:-6px">{mark}</div>', unsafe_allow_html=True)
-    if st.button(f"{'✓ ' if selected else ''}{label} ({count})", key=f"svc_{label}",
-                 use_container_width=True, type="primary" if selected else "secondary",
-                 help="Click again to clear this filter" if selected else None):
-        if selected or label == "All services":
-            st.session_state["_facet_provider"] = set()      # toggle off
-        else:
-            st.session_state["_facet_provider"] = {label}
-        st.rerun()
+    with st.popover(trigger, help="Show only what's on the services you tick"):
+        with st.form("svc_filter", border=False):
+            st.caption("Tick any number, then Apply.")
+            want = set()
+            # Services you pay for first. Without the split, MGM+ (2 shows, an add-on you
+            # may not have) sits as an equal of Netflix (28), which is not how anyone
+            # thinks. A channel reachable THROUGH Prime is still a separate purchase, so
+            # it belongs under "Not subscribed".
+            mine = [p for p in ordered if p in subs] if subs else ordered
+            others = [p for p in ordered if p not in subs] if subs else []
+            for header, group in (("Your services", mine), ("Not subscribed", others)):
+                if not group:
+                    continue
+                if subs:
+                    st.markdown(f"**{header}**")
+                cols = st.columns(3)
+                for i, p in enumerate(group):
+                    with cols[i % 3]:
+                        mark = provider_logo_html(p, 44)
+                        if mark:
+                            st.markdown(
+                                f'<div style="display:flex;justify-content:center;'
+                                f'height:52px;margin-bottom:-6px">{mark}</div>',
+                                unsafe_allow_html=True)
+                        if st.checkbox(f"{p} ({counts[p]})", value=p in picked,
+                                       key=f"svc_{p}"):
+                            want.add(p)
+            row = st.columns(2)
+            with row[0]:
+                apply_it = st.form_submit_button("Apply", type="primary",
+                                                 use_container_width=True)
+            with row[1]:
+                # Named for what it does. "All services" as a thirteenth tile read like a
+                # service you could pick rather than the way back out.
+                clear_it = st.form_submit_button("Show all", use_container_width=True)
+            if clear_it:
+                st.session_state["_facet_provider"] = set()
+            elif apply_it:
+                st.session_state["_facet_provider"] = want
 
 
 def render_top_nav():

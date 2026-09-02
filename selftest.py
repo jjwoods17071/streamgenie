@@ -821,6 +821,27 @@ def main():
     _at.session_state["user"] = {"id": UID, "email": REAL_EMAIL}
     _at.session_state["_onboarded"] = True   # skip first-run setup; see the check below
 
+    class _FakeState:
+        """Just enough `st` for a pure app.py helper: session_state and nothing else. If a
+        function needs more than this it isn't pure and belongs in a module."""
+        def __init__(self, state):
+            self.session_state = dict(state)
+
+    def _fn_from_app(name, ns):
+        """Lift ONE function out of app.py and bind it to an explicit namespace.
+
+        Deliberately explicit: an earlier exec-slice test left a helper undefined and
+        reported "all clear" on 82 rows. Anything the function needs must be passed in, so
+        a missing name raises here instead of passing silently.
+        """
+        import ast as _a
+        tree = _a.parse(open("app.py").read())
+        fn = next((n for n in tree.body
+                   if isinstance(n, _a.FunctionDef) and n.name == name), None)
+        assert fn, f"{name} not found at app.py top level"
+        exec(compile(_a.Module(body=[fn], type_ignores=[]), "app.py", "exec"), ns)
+        return ns[name]
+
     def _render(**state):
         for k, v in state.items():
             _at.session_state[k] = v
@@ -858,25 +879,63 @@ def main():
         orphans = sorted(defined - called)
         assert not orphans, f"defined but never called: {orphans}"
 
-    @check("selecting the active service again clears the filter")
+    @check("the service filter takes several services in one redraw")
     def _():
-        """A filter you can switch on but not off with the same gesture is a trap — the
-        only way back was hunting for "All services"."""
+        """Every service used to be a button doing `set(); st.rerun()`. Streamlit already
+        reruns after a button, so that was two full passes per click — and a rerun closes
+        the popover, so you could only ever pick one before it shut. Ticking N services in
+        a form is one round-trip regardless of N."""
         at = _render(nav_view="📺 Watch")
-        # find the service buttons rendered inside the popover
-        svc = [b for b in at.button if b.key and b.key.startswith("svc_")
-               and b.key != "svc_All services"]
-        if not svc:
-            return "no service buttons rendered (popover contents not exposed)"
-        first = svc[0]
-        first.click().run()
+        boxes = [c for c in at.checkbox if c.key and c.key.startswith("svc_")]
+        if len(boxes) < 2:
+            return f"needs 2+ services in the library, saw {len(boxes)}"
+        # tick two WITHOUT running in between — that is the whole point of the form
+        boxes[0].check()
+        boxes[1].check()
+        submit = [b for b in at.button if b.label == "Apply"]
+        assert submit, "no Apply button in the filter form"
+        submit[0].click().run()
         picked = at.session_state["_facet_provider"]
-        assert picked, "first click did not apply a filter"
-        again = [b for b in at.button if b.key == first.key]
-        assert again, "button vanished after selection"
-        again[0].click().run()
-        assert not at.session_state["_facet_provider"], \
-            f"second click did not clear it: {at.session_state['_facet_provider']}"
+        assert len(picked) == 2, f"two ticks should apply two services, got {picked}"
+        # ...and there is a way back out
+        clear = [b for b in at.button if b.label == "Show all"]
+        assert clear, "no way to clear the filter"
+        clear[0].click().run()
+        assert not at.session_state["_facet_provider"], "Show all did not clear it"
+
+    @check("multi-service filtering actually widens the results")
+    def _():
+        """apply_provider_facet always took a set; only the old UI forced one choice. If
+        two services didn't return the union, multi-select would be a lie."""
+        rows = [{"tmdb_id": 1, "provider_name": "Netflix"},
+                {"tmdb_id": 2, "provider_name": "Hulu"},
+                {"tmdb_id": 3, "provider_name": "Max"},
+                {"tmdb_id": -9, "provider_name": None}]      # a sports follow
+        ns = {"st": _FakeState({"_facet_provider": {"Netflix", "Hulu"}}),
+              "normalize_provider_name": lambda n: n or ""}
+        fn = _fn_from_app("apply_provider_facet", ns)
+        got = {r["tmdb_id"] for r in fn(rows)}
+        assert got == {1, 2, -9}, f"expected Netflix+Hulu+sports, got {got}"
+        ns["st"].session_state["_facet_provider"] = set()
+        assert len(fn(rows)) == 4, "no selection must mean no filtering"
+
+    @check("pickers batch their writes instead of one per click")
+    def _():
+        """The subscription picker wrote to the database and reran on EVERY tick, so
+        setting up eight services was eight round-trips and eight writes."""
+        import ast as _a
+        tree = _a.parse(open("app.py").read())
+        for name in ("render_service_filter", "render_subscription_picker"):
+            fn = next((n for n in _a.walk(tree)
+                       if isinstance(n, _a.FunctionDef) and n.name == name), None)
+            assert fn, f"{name} is gone"
+            # Unparse the CODE only. Including the docstring made this fail on a
+            # function whose prose explained the st.rerun() it had just removed.
+            body = fn.body[1:] if _a.get_docstring(fn) else fn.body
+            src = "\n".join(_a.unparse(n) for n in body)
+            assert "st.form(" in src, f"{name} must batch its widgets in a form"
+            assert "st.rerun()" not in src, \
+                f"{name} calls st.rerun() after a widget — that is a second full pass"
 
     @check("first-run setup asks for services, then never again")
     def _():

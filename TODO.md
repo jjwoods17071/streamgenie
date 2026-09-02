@@ -11,9 +11,6 @@ work on it.
 - [ ] **Collapse the sidebar?** Since nav moved above the content it holds only At a
       glance, Rebuild caches, the settings toggle, login and the TMDB attribution.
       Dropping it gives the poster grids the full window width.
-- [ ] **Service filter is single-select** (a radio, as asked). You can no longer filter to
-      "Netflix OR Hulu". Fine if that was never the use case — but it's a deliberate loss,
-      not an oversight.
 - [ ] **Trust `/Users/jjwoods/oks`** in Claude Code — the last directory still prompting.
 
 ## Parked deliberately
