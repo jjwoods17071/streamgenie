@@ -28,6 +28,7 @@ import providers  # provider resolution: id / name / kind / via / logo
 import dismissed  # "Not interested" dismissals for discovery carousels
 import filters  # suspendable user filters
 import genre_prefs  # Genre classification for Discover/recs (hides live in filters)
+import watchlist  # add/update/remove a show — the write paths, testable
 import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
@@ -85,7 +86,10 @@ _MODULE_CONTRACT = {
     movies: ("search", "release_info", "status_label", "media_type_available",
              "fetch_tv_rows", "list_movies", "enrich"),
     providers: ("resolve", "split_reseller", "build_catalogue", "routes", "watchable",
-                "SERVICE", "CHANNEL", "BUNDLE"),
+                "SERVICE", "CHANNEL", "BUNDLE", "logo_for", "logo_needs_light_tile"),
+    watchlist: ("upsert", "delete", "rows_for", "PLACEHOLDER_PROVIDERS"),
+    filters: ("get_state", "active_keys", "set_enabled", "suspend", "resume",
+              "get_subscriptions", "set_subscriptions", "has_answered"),
 }
 
 
@@ -307,65 +311,23 @@ def get_supabase_client() -> Client:
         st.stop()
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-PLACEHOLDER_PROVIDERS = (None, "", "Multiple Providers")
+PLACEHOLDER_PROVIDERS = watchlist.PLACEHOLDER_PROVIDERS
 
 def upsert_show(client: Client, tmdb_id:int, title:str, region:str, on_provider:bool, next_air_date:Optional[str], overview:str, poster_path:Optional[str], provider_name:str):
-    """Insert or update a show in the user's watchlist.
+    """Add or update a show for the signed-in user. See watchlist.upsert for the rules."""
+    return watchlist.upsert(client, get_user_id(), tmdb_id, title, region, on_provider,
+                            next_air_date, overview, poster_path, provider_name)
 
-    Invariant: ONE row per (user_id, tmdb_id). The table allows multiple
-    provider rows per show, but the app treats ownership as per-tmdb_id, so if
-    the show is already tracked under ANY provider we update that row in place
-    instead of inserting a second one (which is how duplicates used to form).
+
+def delete_show(client: Client, tmdb_id:int, region:str = None, provider_name:str = None):
+    """Remove a show for the signed-in user.
+
+    region and provider_name are ignored — kept so the 17 call sites don't all change.
+    Ownership is per (user_id, tmdb_id); see watchlist.delete for why matching on them
+    was a silent-failure risk.
     """
-    user_id = get_user_id()
+    return watchlist.delete(client, get_user_id(), tmdb_id)
 
-    # Find any existing row for this show, regardless of provider_name.
-    existing = client.table("shows")\
-        .select("id, provider_name, on_provider, created_at")\
-        .eq("user_id", user_id)\
-        .eq("tmdb_id", tmdb_id)\
-        .order("created_at")\
-        .execute().data or []
-
-    data = {
-        "user_id": user_id,
-        "tmdb_id": tmdb_id,
-        "title": title,
-        "region": region,
-        "on_provider": on_provider,
-        "next_air_date": next_air_date,
-        "overview": overview,
-        "poster_path": poster_path,
-        "provider_name": provider_name
-    }
-
-    if existing:
-        keeper = existing[0]  # earliest row wins
-        # Don't let a placeholder / "not on provider" add overwrite better info.
-        if provider_name in PLACEHOLDER_PROVIDERS and keeper.get("provider_name") not in PLACEHOLDER_PROVIDERS:
-            data["provider_name"] = keeper["provider_name"]
-        if not on_provider and keeper.get("on_provider"):
-            data["on_provider"] = True
-        client.table("shows").update(data).eq("id", keeper["id"]).execute()
-        # Converge any stragglers (e.g. legacy duplicate provider rows) to one.
-        for extra in existing[1:]:
-            client.table("shows").delete().eq("id", extra["id"]).execute()
-        # Existing show — no "added" bell notice and no re-run of status detection.
-        return
-
-    # New show: insert, then run finale/cancellation detection from TMDB.
-    client.table("shows").insert(data).execute()
-    show_status.update_show_status(client, user_id, tmdb_id, title)
-
-def delete_show(client: Client, tmdb_id:int, region:str, provider_name:str):
-    """Delete a show from the user's watchlist"""
-    client.table("shows")\
-        .delete()\
-        .eq("user_id", get_user_id())\
-        .eq("tmdb_id", tmdb_id)\
-        .eq("region", region)\
-        .eq("provider_name", provider_name)\
-        .execute()
 
 _SHOW_COLS = ("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, "
               "poster_path, production_status, status_message, status_confidence, "

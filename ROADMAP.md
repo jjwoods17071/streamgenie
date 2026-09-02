@@ -42,10 +42,10 @@ having to paste a traceback.
    run today verifies it. With the anon key we can assert an anon read returns nothing,
    and keep that as a permanent check — RLS was on once before and got silently disabled.
    Needs: the anon key (public by design). Effort: ~30 min.
-3. **Make `upsert_show` / `delete_show` testable.** They live in app.py and read the user
-   from session state, so they are the only write paths the new tests cannot reach. Moving
-   them into a module with an explicit `user_id` closes the gap **and** is the first real
-   step of the API extraction — one job, two payoffs.
+3. ~~Make `upsert_show` / `delete_show` testable.~~ **Done 2026-09-02** — now `watchlist.py`,
+   taking `user_id` explicitly. Four checks exercise the real add/remove path instead of
+   hand-written inserts, and doing it surfaced a latent silent failure in delete (see the
+   module docstring). app.py keeps thin wrappers so the 17 call sites didn't change.
 4. **`notifications.py` is half UI.** `render_notifications_panel` is Streamlit rendering
    inside a module a native client would import. Split data from presentation.
 5. ~~Run the `genre_excludes` migration.~~ **Done differently (2026-09-02).** The table
@@ -67,11 +67,12 @@ to scale we don't have.
 Nothing here is user-visible. It is what turns "a Streamlit app" into "a product with a
 UI attached", and it can be done incrementally while the app keeps running.
 
-1. **Finish decoupling the modules.** 7 of 12 already import no Streamlit
-   (`recs`, `milestones`, `movies`, `tmdb`, `newsletter`, `mailer`, `show_status`).
-   The remaining 5 — `sports`, `watched`, `dismissed`, `genre_prefs`, `notifications` —
+1. **Finish decoupling the modules.** 22 of 29 already import no Streamlit — including
+   `filters`, `providers`, `genre_prefs` and now `watchlist`, the write paths.
+   The remaining ones — `sports`, `watched`, `dismissed`, `notifications`, `discover`,
+   `leaving_soon`, `auth` —
    use `@st.cache_data` or `session_state`. Replace those with a caching interface the
-   caller provides. **That count is the progress bar for this phase: 7/12 → 12/12.**
+   caller provides. **That count is the progress bar for this phase: 22/29 → 29/29.**
 2. **Stand up a small HTTP API** (FastAPI) over the decoupled modules. Endpoints follow
    what the UI already asks for: recommendations, wildcard, release info, milestones,
    search. Deploy alongside the Streamlit app; it stays the only consumer at first, which

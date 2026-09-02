@@ -485,6 +485,64 @@ def main():
         finally:
             sweep()
 
+    @check("the app's own add path keeps one row per show")
+    def _():
+        """Until now these checks inserted rows by hand — which tests the DATABASE, not the
+        code the Add button runs. watchlist.upsert takes user_id as an argument precisely
+        so it can be called here; while it read the user from session state it was
+        untestable, and it is the most destructive function in the app."""
+        import watchlist as _w
+        try:
+            assert _w.upsert(client, SANDBOX, TEST_TV, "Breaking Bad", "US", True, None,
+                             "", None, "Netflix") == "added"
+            # adding the same show again must UPDATE, not make a second row — that is how
+            # the duplicates this invariant exists to prevent used to form
+            assert _w.upsert(client, SANDBOX, TEST_TV, "Breaking Bad", "US", True, None,
+                             "", None, "Max") == "updated"
+            rows = _w.rows_for(client, SANDBOX, TEST_TV)
+            assert len(rows) == 1, f"expected one row, got {len(rows)}"
+            assert rows[0]["provider_name"] == "Max", "a real provider should update"
+        finally:
+            sweep()
+
+    @check("a vaguer add can't degrade what we already know")
+    def _():
+        """A show added from a list that doesn't say where it streams carries "Multiple
+        Providers". Letting that overwrite "Netflix" loses the answer to the app's only
+        question."""
+        import watchlist as _w
+        try:
+            _w.upsert(client, SANDBOX, TEST_TV, "Breaking Bad", "US", True, None,
+                      "", None, "Netflix")
+            _w.upsert(client, SANDBOX, TEST_TV, "Breaking Bad", "US", False, None,
+                      "", None, "Multiple Providers")
+            row = _w.rows_for(client, SANDBOX, TEST_TV)[0]
+            assert row["provider_name"] == "Netflix", \
+                f"placeholder overwrote a known service: {row['provider_name']}"
+            assert row["on_provider"] is True, "a 'not streaming' add cleared on_provider"
+        finally:
+            sweep()
+
+    @check("remove works on a row with no provider recorded")
+    def _():
+        """delete_show used to match on provider_name too, contradicting the
+        one-row-per-(user,tmdb) invariant. provider_name is nullable, and the caller
+        passed `row.get("provider_name", "Sports")` — which returns None for a NULL
+        column, since .get only falls back when the KEY is absent. `.eq(col, None)` never
+        matches SQL NULL, so Remove silently did nothing while looking like it worked.
+        (region is NOT NULL in the schema, so that half can't happen — the database
+        already prevents it.)"""
+        import watchlist as _w
+        try:
+            _w.upsert(client, SANDBOX, TEST_TV, "Breaking Bad", "US", True, None,
+                      "", None, "Netflix")
+            client.table("shows").update({"provider_name": None})\
+                .eq("user_id", SANDBOX).eq("tmdb_id", TEST_TV).execute()
+            assert _w.delete(client, SANDBOX, TEST_TV) == 1, "remove deleted nothing"
+            assert not _w.rows_for(client, SANDBOX, TEST_TV), "row survived the delete"
+        finally:
+            sweep()
+
     @check("the same tmdb_id can be a show AND a film at once")
     def _():
         # The entire reason media_type exists: TMDB reuses ids across media types, so the
