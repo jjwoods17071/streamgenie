@@ -6,6 +6,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import html
+import hashlib
 import json
 import logging
 from typing import Optional, Dict, Any, List
@@ -34,6 +35,28 @@ import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+@st.cache_resource(show_spinner=False)
+def build_id() -> str:
+    """Short hash of every source file, shown on the login page.
+
+    Streamlit Cloud gives no way to see which commit is running, and inferring "it
+    deployed" from the page rendering has been wrong more than once in this project — the
+    server can be alive on week-old code. This is checkable from outside without logging
+    in: compare it to `python -c "import app"`-free local computation of the same hash.
+    """
+    import glob as _glob
+    h = hashlib.sha256()
+    for path in sorted(_glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                               "*.py"))):
+        try:
+            with open(path, "rb") as fh:
+                h.update(os.path.basename(path).encode())
+                h.update(fh.read())
+        except OSError:
+            continue
+    return h.hexdigest()[:8]
 
 st.set_page_config(page_title="StreamGenie - Streaming Tracker", page_icon="🍿", layout="wide")
 
@@ -3304,6 +3327,9 @@ if not auth.is_authenticated():
 if not auth.is_authenticated():
     # Show login/signup page
     auth.render_auth_ui(client)
+    # Rendered HERE, not inside auth.py: under Streamlit app.py is the __main__ script,
+    # so `import app` from auth would execute the whole application a second time.
+    st.caption(f"build {build_id()}")
     st.stop()  # Stop execution until user logs in
 
 # User is authenticated - show user menu and continue with app
