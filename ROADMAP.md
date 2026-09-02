@@ -48,8 +48,12 @@ having to paste a traceback.
    step of the API extraction — one job, two payoffs.
 4. **`notifications.py` is half UI.** `render_notifications_panel` is Streamlit rendering
    inside a module a native client would import. Split data from presentation.
-5. **Run the `genre_excludes` migration.** The table doesn't exist, so hidden genres
-   silently degrade to session-only and reset on reload.
+5. ~~Run the `genre_excludes` migration.~~ **Done differently (2026-09-02).** The table
+   was never created and `filter_prefs` had already replaced it, but Discover's "hide this
+   genre" button was still writing to it behind a bare `except` — so it did nothing at
+   all, not even for the session, while Settings read the other store. Now one store.
+   Lesson: a stale roadmap line described the symptom and hid a live bug; check claims
+   against the database.
 6. **Decide the small open questions** (sidebar, service filter multi-select). They cost
    nothing to answer and block tidying.
 

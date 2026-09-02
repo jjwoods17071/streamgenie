@@ -751,6 +751,25 @@ def main():
             except Exception:
                 pass
 
+    @check("hiding a genre writes where the reader looks")
+    def _():
+        """Discover's "hide this genre" wrote to genre_excludes — a table that was designed
+        but never created — while every reader had moved to filter_prefs. The write was
+        swallowed by a bare except, so the button looked like it worked and did nothing at
+        all, not even for the session. Two stores for one preference is the bug; this
+        asserts the write path is the same one the Settings panel uses."""
+        import ast as _a
+        tree = _a.parse(open("app.py").read())
+        fns = {n.name: _a.unparse(n) for n in _a.walk(tree)
+               if isinstance(n, _a.FunctionDef)}
+        body = fns.get("_exclude_genre", "")
+        assert body, "_exclude_genre is gone — did the Discover button move?"
+        assert "_set_filter" in body, \
+            f"genre hide must go through _set_filter, not a second store: {body}"
+        import genre_prefs as _gp
+        writers = [n for n in dir(_gp) if n in ("exclude", "set_excluded", "get_excluded")]
+        assert not writers, f"dead genre_excludes writers still present: {writers}"
+
     # ---------------- newsletter ----------------
     print("\n\033[1mNewsletter\033[0m")
 

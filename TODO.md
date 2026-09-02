@@ -25,6 +25,9 @@ work on it.
 
 ## Known gaps
 
+- [ ] **`genre_excludes` migration is obsolete** — `filter_prefs` replaced it and carries
+      the data forward. The file stays only as history; don't run it.
+
 - [ ] **`render_notifications_panel` lives in `notifications.py`** but is Streamlit
       rendering. Those modules are the future native API and must stay import-safe;
       presentation belongs in app.py. (Flagged by `review.py`.)

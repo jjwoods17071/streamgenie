@@ -27,7 +27,7 @@ import movies  # movie watchlist + TMDB /movie endpoints
 import providers  # provider resolution: id / name / kind / via / logo
 import dismissed  # "Not interested" dismissals for discovery carousels
 import filters  # suspendable user filters
-import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
+import genre_prefs  # Genre classification for Discover/recs (hides live in filters)
 import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
@@ -3998,8 +3998,13 @@ def _dismiss_discovered(tmdb_id):
 
 
 def _exclude_genre(genre_key):
-    """Hide a whole genre (Kids/Reality/Anime) from Discover for this user."""
-    genre_prefs.exclude(client, get_user_id(), genre_key)
+    """Hide a whole genre (Kids/Reality/Anime) from Discover for this user.
+
+    Goes through _set_filter, the same writer the Settings panel uses, so the hide can
+    later be suspended and shows up where the user manages it. It used to write to
+    genre_excludes, which no reader consults any more.
+    """
+    _set_filter(f"genre:{genre_key}", enabled=True)
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
