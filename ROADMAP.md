@@ -135,6 +135,33 @@ That shapes the integration precisely:
 - **Check their terms before building either.** Not verified as of writing; assume
   competing use may be restricted until confirmed.
 
+### How the incumbent actually does it (researched 2026-09-02)
+
+Worth knowing before costing our own version.
+
+Trakt shipped a first-party **Streaming Scrobbler** in Dec 2024 (iOS/Android) covering
+Netflix, Prime Video, Hulu and Apple TV. You link a service; it syncs ~10 minutes later,
+then polls **every 24 hours**. That cadence gives the mechanism away: it is not live
+playback detection, it periodically reads the service's STORED viewing history — the same
+private endpoints the service's own clients call, using the user's authenticated session.
+The community browser extension (Universal Trakt Scrobbler) does the same plus real-time
+scrobbling, across more services, from inside a logged-in browser.
+
+**This corrects the premise that "only Netflix exposes history".** True of PUBLIC APIs.
+Every service has a private history endpoint its own client uses, readable from within the
+user's session — which is why this can only live in a browser extension or an app with a
+login webview, never on our server.
+
+**And it is a maintenance commitment, not a feature.** The community extension carries open
+issues for Netflix and Prime failing to sync; Trakt's own version warns Prime "may not work
+well in some regions" and that Hulu returns release dates rather than real timestamps for
+older content. Private APIs change without notice, vary by region, and sit in ToS grey
+area. Budget ongoing upkeep, not a project with an end date.
+
+That raises the value of a one-way Trakt import: they have already absorbed that
+maintenance across four services, and importing once inherits the work without inheriting
+the dependency.
+
 Ranked by how much each actually reduces manual entry, and by how independent it leaves us:
 
 | approach | effort | independence | status |
