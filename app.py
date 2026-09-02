@@ -3009,12 +3009,40 @@ def tmdb_provider_logos() -> dict:
             name, logo = p.get("provider_name"), p.get("logo_path")
             if not name or not logo:
                 continue
-            url = f"https://image.tmdb.org/t/p/original{logo}"
-            # prefer the BASE service over its resold channel variants
             key = normalize_provider_name(name).lower()
-            if key not in out or not is_reseller_listing(name):
-                out[key] = url
-    return out
+            cand = (_logo_rank(key, name), f"https://image.tmdb.org/t/p/original{logo}")
+            if key not in out or cand[0] < out[key][0]:
+                out[key] = cand
+    return {k: v[1] for k, v in out.items()}
+
+
+# TMDB's canonical name for the services we consolidate. Several distinct providers
+# normalise to one key — "Netflix", "Netflix Kids" and "Netflix Standard with Ads" all
+# become "Netflix" — and without a preference the last one processed won the logo.
+_CANONICAL_TMDB_NAME = {
+    "netflix": "netflix",
+    "disney+": "disney plus",
+    "prime video": "amazon prime video",
+    "max": "hbo max",
+    # TMDB's US list has no plain "Paramount Plus" (only tier variants), and names
+    # Apple's subscription simply "Apple TV" — "Apple TV Store" is the separate rental
+    # storefront and must not win this key.
+    "paramount+": "paramount plus essential",
+    "apple tv+": "apple tv",
+    "hulu": "hulu",
+    "peacock": "peacock premium",
+}
+
+
+def _logo_rank(key: str, raw_name: str) -> int:
+    """Lower is better. Exact canonical name first, then plain services, then resold
+    channels; length breaks remaining ties so "Netflix" beats "Netflix Kids"."""
+    low = raw_name.strip().lower()
+    if _CANONICAL_TMDB_NAME.get(key) == low:
+        return 0
+    if is_reseller_listing(raw_name):
+        return 200 + len(low)
+    return 100 + len(low)
 
 
 def get_all_provider_logos() -> dict:
@@ -3120,7 +3148,7 @@ def get_provider_logo_url(provider_name: str) -> Optional[str]:
 # etc. Those are the SERVICE's content, merely billed through the reseller — so the
 # reseller name must be stripped before matching, or a generic "amazon" test claims them.
 _RESELLER_SUFFIX = re.compile(
-    r"\s+(amazon channel|apple tv channel|prime video channel|roku premium channel)$",
+    r"\s+(amazon|apple tv|prime video|roku premium)\s+channels?$",
     re.IGNORECASE)
 
 
@@ -3168,8 +3196,9 @@ def normalize_provider_name(provider_name: str) -> str:
     if "paramount" in provider_lower:
         return "Paramount+"
 
-    # Consolidate Disney variations
-    if "disney" in provider_lower:
+    # Consolidate Disney variations. NOT DisneyNOW — that's the live-TV/ABC app, a
+    # different product, and folding it in gave Disney+ the wrong logo.
+    if "disney" in provider_lower and "now" not in provider_lower:
         return "Disney+"
 
     # Consolidate Apple TV variations (but not Apple TV+ the service)

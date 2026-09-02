@@ -590,6 +590,31 @@ def main():
                 continue
             assert n == 0, f"{n} rows left behind in {tbl}"
 
+    @check("a resold channel is not mistaken for the storefront")
+    def _():
+        """"Lionsgate+ Amazon Channels" (plural) slipped past a regex expecting the
+        singular, so the suffix survived, the generic "amazon" rule fired, and Lionsgate+
+        was labelled PRIME VIDEO — a real mislabel, not just a wrong logo."""
+        import re as _re
+        src_ = open("app.py").read()
+        i = src_.index("_RESELLER_SUFFIX = re.compile")
+        j = src_.index("# --------------- EMAIL REMINDERS ---------------")
+        ns = {"re": _re}
+        exec(src_[i:j], ns)
+        norm = ns["normalize_provider_name"]
+
+        cases = {
+            "Lionsgate+ Amazon Channels": "Lionsgate+",   # plural suffix
+            "MGM+ Amazon Channel": "MGM+",                # singular
+            "Starz Apple TV channel": "Starz",
+            "Amazon Prime Video": "Prime Video",          # Amazon's OWN service
+            "DisneyNOW": "DisneyNOW",                     # live-TV app, not Disney+
+            "Disney Plus": "Disney+",
+        }
+        for raw, want in cases.items():
+            got = norm(raw)
+            assert got == want, f"{raw!r} -> {got!r}, wanted {want!r}"
+
     @check("an add-on channel counts as watchable")
     def _():
         """"MGM+" tells you nothing if you've never heard of MGM+. "MGM+ via Prime Video"
