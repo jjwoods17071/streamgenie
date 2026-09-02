@@ -558,6 +558,29 @@ def main():
         finally:
             sweep()
 
+    @check("progress can be recorded to a specific episode")
+    def _():
+        """"I watched season 1 up to episode 3" — the shape a voice command would take.
+        Deterministic: calls the tool directly rather than paying for intent parsing."""
+        import genie as _g
+        try:
+            client.table("shows").insert(
+                {"user_id": SANDBOX, "tmdb_id": 97546, "media_type": "tv",
+                 "title": "Ted Lasso", "region": "US", "on_provider": True}).execute()
+            out = _g._exec_tool(client, SANDBOX, "mark_caught_up",
+                                {"tmdb_id": 97546, "through_season": 1, "through_episode": 3})
+            assert "3 aired episode" in out, out
+            import watched as _w
+            assert _w.watched_counts(client, SANDBOX).get(97546) == 3, "wrong episode count"
+            assert _w.last_watched(client, SANDBOX).get(97546) == (1, 3), "wrong furthest episode"
+            # and the whole-season form must still work
+            out = _g._exec_tool(client, SANDBOX, "mark_caught_up",
+                                {"tmdb_id": 97546, "through_season": 1})
+            assert _w.watched_counts(client, SANDBOX).get(97546, 0) > 3, \
+                "whole-season form regressed"
+        finally:
+            sweep()
+
     @check("the sandbox is left clean")
     def _():
         for tbl in ("shows", "watched_episodes", "dismissed_shows", "rec_feedback"):

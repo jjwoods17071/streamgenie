@@ -245,10 +245,11 @@ GENIE_TOOLS = [
          "provider_name": {"type": "string"}},
          "required": ["tmdb_id", "provider_name"]}},
     {"name": "mark_caught_up",
-     "description": "Mark every already-aired episode of a show as watched (the user says they are caught up). Optionally only through a given season.",
+     "description": "Record how far the user has watched a show. Use for anything of the form \"I'm caught up on X\", \"I watched season 4 of X\", or \"I watched X season 4 up to episode 3\". Marks every aired episode up to the stated point as watched.",
      "input_schema": {"type": "object", "properties": {
          "tmdb_id": {"type": "integer"},
-         "through_season": {"type": "integer", "description": "Optional: last season to mark"}},
+         "through_season": {"type": "integer", "description": "Optional: last season watched. Omit if they mean the whole show."},
+         "through_episode": {"type": "integer", "description": "Optional: last episode watched WITHIN through_season. Use when they say 'up to episode N' or 'through episode N'. Omit if they finished the season."}},
          "required": ["tmdb_id"]}},
 ]
 
@@ -298,6 +299,8 @@ def _exec_tool(client, user_id: str, name: str, inp: Dict[str, Any]) -> str:
         d = _tmdb_get(f"/tv/{tid}")
         today = _dt.date.today().isoformat()
         through = int(inp.get("through_season") or 999)
+        through_ep = inp.get("through_episode")
+        through_ep = int(through_ep) if through_ep else None
         total = 0
         for s in d.get("seasons", []):
             sn = s.get("season_number")
@@ -306,10 +309,17 @@ def _exec_tool(client, user_id: str, name: str, inp: Dict[str, Any]) -> str:
             sd = _tmdb_get(f"/tv/{tid}/season/{sn}")
             eps = [e["episode_number"] for e in sd.get("episodes", [])
                    if e.get("air_date") and e["air_date"] <= today]
+            # "up to episode N" stops PART-WAY through the final season. Without this the
+            # only expressible progress was whole seasons, which is not how anyone
+            # actually stops watching.
+            if through_ep is not None and sn == through:
+                eps = [e for e in eps if e <= through_ep]
             if eps:
                 _watched.set_season(client, user_id, tid, sn, eps, True)
                 total += len(eps)
-        return f"Marked {total} aired episode(s) of '{d.get('name')}' as watched."
+        where = (f" (through S{through}E{through_ep})" if through_ep is not None
+                 else (f" (through season {through})" if through != 999 else ""))
+        return f"Marked {total} aired episode(s) of '{d.get('name')}' as watched{where}."
 
     return f"Unknown tool: {name}"
 
