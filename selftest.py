@@ -611,6 +611,31 @@ def main():
             assert p.name == name, f"{raw!r} displayed as {p.name!r}, wanted {name!r}"
             assert p.via == via, f"{raw!r} via={p.via!r}, wanted {via!r}"
 
+    @check("a service's logo never comes from a resold listing")
+    def _():
+        """TMDB publishes a DIFFERENT image for "AMC+ Amazon Channel" than for "AMC+" —
+        the service badged with the reseller's branding. A service's identity must come
+        from its own listing, never the piggyback one.
+
+        This was a ranking tie: _rank scores the name AFTER the suffix is stripped, so
+        "AMC+ Amazon Channel" reduced to "amc+" and tied with "AMC+" at zero — whichever
+        was processed first won.
+        """
+        import providers as _p
+        fake = {"results": [
+            {"provider_name": "AMC+ Amazon Channel", "logo_path": "/combo.jpg",
+             "provider_id": 528},
+            {"provider_name": "AMC+", "logo_path": "/plain.jpg", "provider_id": 526},
+            # a service that exists ONLY as a resold channel gets no logo, not a combo
+            {"provider_name": "Acorn TV Amazon Channel", "logo_path": "/acorn-combo.jpg",
+             "provider_id": 196},
+        ]}
+        cat = _p.build_catalogue(lambda path: fake)
+        assert cat["amc-plus"].logo.endswith("/plain.jpg"), cat["amc-plus"].raw
+        assert not any(p.kind == _p.CHANNEL for p in cat.values()), \
+            "no catalogue entry may take its logo from a resold listing"
+        assert "acorntv" not in cat, "channel-only service should have no logo entry"
+
     @check("provider facets stay separate")
     def _():
         """The refactor's whole reason: display name, grouping id, kind and route are

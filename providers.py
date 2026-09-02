@@ -172,6 +172,12 @@ def build_catalogue(fetch: Callable[[str], Dict[str, Any]]) -> Dict[str, Provide
             if not name or not logo_path:
                 continue
             base, via = split_reseller(name)
+            if via:
+                # A resold listing carries a COMBO mark — the service badged with the
+                # reseller's branding — and TMDB really does publish a different image for
+                # it. Never a source of a service's identity. If a service exists only as
+                # a channel it simply has no logo, and the UI shows a neutral placeholder.
+                continue
             low = base.lower()
             slug = _BY_MATCH.get(low) or _slugify(base)
             rank = _rank(slug, low, bool(via))
@@ -184,11 +190,18 @@ def build_catalogue(fetch: Callable[[str], Dict[str, Any]]) -> Dict[str, Provide
 
 
 def _rank(slug: str, low_base: str, is_reseller: bool) -> int:
-    """Lower wins. The service's declared canonical listing first, then plain services,
-    then resold channels; length breaks ties so "Netflix" beats "Netflix Kids"."""
+    """Lower wins. Canonical listing first, then plain services; length breaks ties so
+    "Netflix" beats "Netflix Kids".
+
+    A reseller can never score canonical: low_base is the name AFTER the suffix is
+    stripped, so "AMC+ Amazon Channel" reduces to "amc+" and used to tie with "AMC+" at
+    zero — whichever was processed first won, which is how the combo mark got in.
+    """
+    if is_reseller:
+        return 900 + len(low_base)
     if SERVICES.get(slug, {}).get("canonical") == low_base:
         return 0
-    return (200 if is_reseller else 100) + len(low_base)
+    return 100 + len(low_base)
 
 
 def routes(listings: List[str], catalogue=None) -> List[Provider]:
