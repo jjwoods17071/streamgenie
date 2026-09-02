@@ -636,6 +636,24 @@ def main():
             "no catalogue entry may take its logo from a resold listing"
         assert "acorntv" not in cat, "channel-only service should have no logo entry"
 
+    @check("there is exactly one logo lookup, and it never co-brands")
+    def _():
+        """Cleaning build_catalogue did not clean the icons, because a SECOND independent
+        lookup existed that never consulted it — it matched hardcoded TMDB ids and then
+        fell back to the shortest name among everything normalising to a service, which a
+        resold listing often wins. Two implementations of one question is the bug."""
+        import ast as _a
+        tree = _a.parse(open("app.py").read())
+        bodies = {n.name: _a.unparse(n) for n in tree.body
+                  if isinstance(n, _a.FunctionDef) and "logo_url" in n.name}
+        assert "provider_logo_url" in bodies, "the single lookup is missing"
+        # the shim must delegate, not re-implement
+        assert "provider_logo_url(" in bodies.get("get_provider_logo_url", ""), \
+            "get_provider_logo_url must delegate to the single lookup"
+        # and no lookup may reach for raw TMDB listings by name again
+        for name, body in bodies.items():
+            assert "by_name" not in body, f"{name} re-implements a name-keyed logo map"
+
     @check("provider facets stay separate")
     def _():
         """The refactor's whole reason: display name, grouping id, kind and route are

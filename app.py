@@ -1300,53 +1300,23 @@ def render_sports_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                 _game_row(g)
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def _tmdb_provider_logos() -> Dict[str, Any]:
-    """US streaming-provider logos from TMDB, keyed by provider_id AND lowercased name."""
-    try:
-        # No watch_region filter: the US-filtered list omits base providers like
-        # Paramount+ (531), leaving only bundle variants ("...Apple TV Channel"),
-        # whose co-branded logos we must never show for the base service.
-        d = tmdb_get("/watch/providers/tv", {"language": "en-US"})
-        by_id, by_name = {}, {}
-        for p in d.get("results", []):
-            lp = p.get("logo_path")
-            if not lp:
-                continue
-            url = f"https://image.tmdb.org/t/p/w92{lp}"
-            by_id[p.get("provider_id")] = url
-            by_name[(p.get("provider_name") or "").lower()] = url
-        return {"by_id": by_id, "by_name": by_name}
-    except Exception:
-        return {"by_id": {}, "by_name": {}}
-
-
 def provider_logo_url(name: str) -> Optional[str]:
-    """Logo URL for a stored provider_name. Matches by the same TMDB provider IDs the
-    Grow tab uses (exact), then falls back to a name match."""
+    """Logo for a provider name — the ONE lookup. Never returns a co-branded mark.
+
+    A resold listing ("MGM+ Amazon Channel") has its OWN TMDB image: the service badged
+    with the reseller's branding. Those misrepresent which service you're looking at, so a
+    service shows its own mark or none at all. providers.build_catalogue excludes resold
+    listings outright, which is what makes that guarantee hold here.
+
+    This replaced a second, independent implementation that matched hardcoded TMDB ids
+    (one of which points at "Paramount Plus Apple TV channel") and then fell back to the
+    SHORTEST name among everything normalising to the same service — a resold listing
+    often wins that. Two lookups is why cleaning the catalogue didn't clean the icons.
+    """
     if not name:
         return None
-    data = _tmdb_provider_logos()
-    nl = name.lower()
-    norm = normalize_provider_name(name).lower()
-    # Match by our known provider IDs — compare on the normalized name too, so stored
-    # aliases like "Prime Video" line up with TMDB's "Amazon Prime Video" entry.
-    for our_name, ids in discover.PROVIDERS.items():
-        if our_name.lower() in (nl, norm) or normalize_provider_name(our_name).lower() == norm:
-            for i in ids:
-                if i in data["by_id"]:
-                    return data["by_id"][i]
-    # Name fallback: try the raw name, the normalized name, then any TMDB provider whose
-    # name normalizes to the same thing (e.g. "amazon prime video" → "prime video").
-    if data["by_name"].get(nl):
-        return data["by_name"][nl]
-    if data["by_name"].get(norm):
-        return data["by_name"][norm]
-    matches = [(tmdb_name, url) for tmdb_name, url in data["by_name"].items()
-               if normalize_provider_name(tmdb_name).lower() == norm]
-    if matches:
-        return min(matches, key=lambda m: len(m[0]))[1]  # base service beats bundle variants
-    return None
+    entry = provider_catalogue().get(resolve_provider(name).id)
+    return entry.logo if entry else None
 
 
 # National-network / RSN logos (linear TV ESPN reports has no logo for) from the maintained
@@ -3085,55 +3055,13 @@ def get_all_provider_logos() -> dict:
     return provider_logos
 
 def get_provider_logo_url(provider_name: str) -> Optional[str]:
-    """Get logo URL for a specific streaming provider."""
-    provider_lower = provider_name.lower()
-
-    # Initialize logo_overrides in session state if not present
-    if 'logo_overrides' not in st.session_state:
+    """Shim -> provider_logo_url. One lookup now; user overrides still win."""
+    if not provider_name:
+        return None
+    if "logo_overrides" not in st.session_state:
         st.session_state.logo_overrides = load_logo_overrides(client)
-
-    # Check for overrides first (from persistent storage)
-    if provider_lower in st.session_state.logo_overrides:
-        return st.session_state.logo_overrides[provider_lower]
-
-    # The catalogue first: its URLs are live and the logo is chosen from each service's
-    # CANONICAL listing, so "Netflix Kids" can no longer supply Netflix's mark. The
-    # hardcoded map below has rotted (Showtime's JustWatch link 404s).
-    for p in provider_catalogue().values():
-        if p.logo and p.name.lower() == provider_lower:
-            return p.logo
-
-    provider_logos = get_all_provider_logos()
-    if provider_lower in provider_logos:
-        return provider_logos[provider_lower]
-
-    # Partial match only for longer, specific keys to avoid false matches
-    # Only match if key is at least 4 chars and is a clear substring
-    sorted_keys = sorted(provider_logos.keys(), key=len, reverse=True)
-    for key in sorted_keys:
-        if len(key) >= 4 and key in provider_lower:
-            return provider_logos[key]
-
-    return None  # No logo available
-
-# TMDB lists resold add-ons as "<service> Amazon Channel", "<service> Apple TV Channel",
-# etc. Those are the SERVICE's content, merely billed through the reseller — so the
-# reseller name must be stripped before matching, or a generic "amazon" test claims them.
-_RESELLER_SUFFIX = re.compile(
-    r"\s+(amazon|apple tv|prime video|roku premium)\s+channels?$",
-    re.IGNORECASE)
-
-
-# Provider naming, resolution and logos now live in providers.py, where one raw TMDB
-# listing resolves ONCE into a record with separate facets (id / display name / kind /
-# via / logo). These remain as thin shims so the ~60 existing call sites keep working;
-# new code should use providers.resolve() and read the field it actually wants.
-#
-# The bugs that motivated the split, all from reusing one string for four jobs:
-#   "Lionsgate+ Amazon Channels" -> labelled Prime Video (plural suffix missed)
-#   "Netflix Kids" -> supplied Netflix's logo
-#   "DisneyNOW"    -> folded into Disney+, taking its logo
-#   "MGM Plus"     -> displayed as MGM+, then no logo found under that name
+    override = st.session_state.logo_overrides.get(provider_name.lower())
+    return override or provider_logo_url(provider_name)
 
 
 @st.cache_resource(show_spinner=False)
