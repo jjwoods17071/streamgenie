@@ -5025,16 +5025,24 @@ def render_service_filter():
 
 def _service_option(label, count, logo, selected):
     """One service: brand mark above the button. A wall of service NAMES is what made the
-    flat radio unreadable; a logo is recognised without being read."""
+    flat radio unreadable; a logo is recognised without being read.
+
+    Clicking the SELECTED service clears the filter. A filter you can turn on but not off
+    by the same gesture is a trap — the only way back was hunting for "All services".
+    """
     if logo:
         st.markdown(
             f'<div style="display:flex;align-items:center;justify-content:center;'
-            f'height:26px;margin-bottom:-6px">'
-            f'<img src="{logo}" style="height:22px;border-radius:4px;object-fit:contain">'
+            f'height:50px;margin-bottom:-6px">'
+            f'<img src="{logo}" style="height:44px;border-radius:8px;object-fit:contain">'
             f'</div>', unsafe_allow_html=True)
-    if st.button(f"{label} ({count})", key=f"svc_{label}", use_container_width=True,
-                 type="primary" if selected else "secondary"):
-        st.session_state["_facet_provider"] = set() if label == "All services" else {label}
+    if st.button(f"{'✓ ' if selected else ''}{label} ({count})", key=f"svc_{label}",
+                 use_container_width=True, type="primary" if selected else "secondary",
+                 help="Click again to clear this filter" if selected else None):
+        if selected or label == "All services":
+            st.session_state["_facet_provider"] = set()      # toggle off
+        else:
+            st.session_state["_facet_provider"] = {label}
         st.rerun()
 
 

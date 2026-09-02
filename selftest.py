@@ -721,6 +721,26 @@ def main():
         orphans = sorted(defined - called)
         assert not orphans, f"defined but never called: {orphans}"
 
+    @check("selecting the active service again clears the filter")
+    def _():
+        """A filter you can switch on but not off with the same gesture is a trap — the
+        only way back was hunting for "All services"."""
+        at = _render(nav_view="📺 Watch")
+        # find the service buttons rendered inside the popover
+        svc = [b for b in at.button if b.key and b.key.startswith("svc_")
+               and b.key != "svc_All services"]
+        if not svc:
+            return "no service buttons rendered (popover contents not exposed)"
+        first = svc[0]
+        first.click().run()
+        picked = at.session_state["_facet_provider"]
+        assert picked, "first click did not apply a filter"
+        again = [b for b in at.button if b.key == first.key]
+        assert again, "button vanished after selection"
+        again[0].click().run()
+        assert not at.session_state["_facet_provider"], \
+            f"second click did not clear it: {at.session_state['_facet_provider']}"
+
     @check("renders: Wildcard")
     def _():
         at = _render(nav_view="📺 Watch", _wild_on=True)
