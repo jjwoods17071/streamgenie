@@ -91,22 +91,24 @@ on; the self-test keeps the manifest honest.
 
 ## 6. Provider logos — settled, do not re-derive
 
-Brand marks come from **pinned Wikipedia URLs** in `providers.WIKIPEDIA_LOGOS`, chosen and
-eyeballed one at a time. TMDB is only the fallback. This took several rounds to get right;
-the reasons it landed here:
+**TMDB is the source.** `providers.WIKIPEDIA_LOGOS` is a five-entry **exception list**, not
+a replacement: only Max, AMC+, MGM+, Starz and PBS, whose TMDB image was co-branded or
+missing. Every other service keeps the tile it has always had. A self-test pins the list in
+both directions, because the first attempt at this replaced all twelve and changed logos
+that were never broken. **Fix what was reported, not the whole category.**
 
 - TMDB's catalogue is organised around **listings, not brands**. A service sold as an
-  add-on has its own co-branded image ("MGM+ Amazon Channel" is the mark badged with
-  Amazon's), and channel-only services have no mark at all.
+  add-on has a co-branded image (the mark badged with Amazon's); channel-only services have
+  none at all. That is why those five needed replacing and the rest didn't.
 - **Never show a co-branded mark.** A service shows its own logo or none. `build_catalogue`
   excludes resold listings outright.
 - **Do not fetch Wikipedia logos at runtime.** `pageimages` returns the page's lead image,
   which for Prime Video is a 1.6MB screenshot; filename heuristics pick `Commons-logo.svg`
   and the retired "CBS All Access" mark. Pick by hand, verify by LOOKING at the image,
   freeze the URL.
-- **Wikipedia marks are transparent print assets and often solid black** (Max is). They
-  vanish on the dark theme, so they render on a white chip — `logo_img()`. Never place one
-  straight on a dark surface.
+- **Only the Wikipedia marks get the white chip** (`logo_needs_light_tile`). They are
+  transparent print assets, often solid black (Max is), and vanish on the dark theme.
+  TMDB's tiles are already dark-UI artwork and render bare.
 - **One lookup only.** `provider_logo_url` is it; `get_provider_logo_url` is a shim. A
   second implementation is what kept the co-branded icons alive after the first fix.
 

@@ -636,23 +636,31 @@ def main():
             "no catalogue entry may take its logo from a resold listing"
         assert "acorntv" not in cat, "channel-only service should have no logo entry"
 
-    @check("brand marks come from the pinned Wikipedia assets")
+    @check("the Wikipedia pins stay a short exception list")
     def _():
-        """TMDB's catalogue is organised around LISTINGS, not brands — an add-on service
-        often only has a co-branded tile, and channel-only services have none. The
-        Wikipedia marks are hand-picked and frozen; the API's own lead image is unreliable
-        (querying Prime Video returns a 1.6MB screenshot)."""
+        """TMDB's catalogue is organised around LISTINGS, not brands, so a handful of
+        add-on services only had a co-branded tile and PBS had none. Those five are pinned
+        to hand-picked Wikipedia marks. Everything ELSE keeps its TMDB tile — an earlier
+        pass replaced all twelve and changed logos that were never broken, so this check
+        guards the boundary in both directions."""
         import providers as _p
         import requests as _rq
-        for slug in ("max", "amc-plus", "mgm-plus", "starz", "netflix", "prime-video"):
+        broken = {"max", "amc-plus", "mgm-plus", "starz", "pbs-documentaries"}
+        assert set(_p.WIKIPEDIA_LOGOS) == broken, \
+            f"pin list drifted: {set(_p.WIKIPEDIA_LOGOS) ^ broken}"
+        for slug in broken:
             url = _p.logo_for(slug)
-            assert url, f"{slug} lost its pinned mark"
-            assert "wikimedia.org" in url or "wikipedia.org" in url, f"{slug}: {url}"
+            assert url and ("wikimedia.org" in url or "wikipedia.org" in url), f"{slug}: {url}"
+            assert _p.logo_needs_light_tile(slug), f"{slug} must render on a light chip"
+        # ...and the ones that were fine are still served by TMDB, bare
+        for slug in ("netflix", "prime-video", "hulu", "disney-plus"):
+            assert slug not in _p.WIKIPEDIA_LOGOS, f"{slug} was not broken; don't pin it"
+            assert not _p.logo_needs_light_tile(slug), f"{slug} must render bare"
         # pinned URLs must actually resolve — a dead asset is a silently missing logo
-        ua = {"User-Agent": "StreamGenie selftest"}
-        r = _rq.get(_p.WIKIPEDIA_LOGOS["max"], headers=ua, timeout=25)
+        r = _rq.get(_p.WIKIPEDIA_LOGOS["max"],
+                    headers={"User-Agent": "StreamGenie selftest"}, timeout=25)
         assert r.status_code == 200 and len(r.content) > 500, (r.status_code, len(r.content))
-        # falls through to the catalogue when a service has no pinned mark
+        # unpinned services fall through to the catalogue
         fake = {"acorntv": _p.Provider(id="acorntv", name="Acorn TV", logo="http://x/a.png")}
         assert _p.logo_for("acorntv", fake) == "http://x/a.png"
         assert _p.logo_for("nothing-at-all", fake) is None

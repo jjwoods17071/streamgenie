@@ -4993,12 +4993,11 @@ def render_onboarding() -> bool:
     cols = st.columns(4)
     for i, svc in enumerate(options):
         with cols[i % 4]:
-            logo = get_provider_logo_url(svc)
+            mark = provider_logo_html(svc, 76)
             st.markdown(
                 f'<div style="display:flex;justify-content:center;height:84px">'
-                + (logo_img(logo, 76) if logo else
-                   '<div style="height:76px;width:76px;border-radius:15px;'
-                   'background:rgba(255,255,255,.06)"></div>')
+                + (mark or '<div style="height:76px;width:76px;border-radius:15px;'
+                           'background:rgba(255,255,255,.06)"></div>')
                 + '</div>', unsafe_allow_html=True)
             on = svc in chosen
             if st.button(f"{'✓ ' if on else ''}{svc}", key=f"onb_{svc}",
@@ -5086,19 +5085,34 @@ def render_suspension_banner():
     st.info("⏸ Paused: " + " · ".join(bits))
 
 
-def logo_img(url: str, size: int = 44) -> str:
-    """A brand mark on a light chip.
+def logo_img(url: str, size: int = 44, tile: bool = False) -> str:
+    """A brand mark, optionally on a light chip.
 
-    Wikipedia's assets are print-oriented: transparent background, and frequently solid
-    black (Max is). Dropped straight onto our dark surface they disappear. A white tile is
-    what every service picker does, and it works for any mark regardless of colour.
+    TMDB's images are square artwork already built for a dark UI, so they render bare —
+    tile=False — exactly as they always have.
+
+    The Wikipedia replacements are print assets: transparent background, and frequently
+    solid black (Max is). Dropped straight onto our dark surface they vanish, so those get
+    the white chip. Only providers.logo_needs_light_tile() decides which is which.
     """
+    img = (f'<img src="{url}" alt="" style="max-width:100%;max-height:100%;'
+           f'object-fit:contain">')
+    if not tile:
+        return (f'<div style="width:{size}px;height:{size}px;border-radius:{size // 5}px;'
+                f'overflow:hidden;display:flex">{img}</div>')
     pad = max(4, size // 8)
     return (f'<div style="width:{size}px;height:{size}px;border-radius:{size // 5}px;'
             f'background:#fff;display:flex;align-items:center;justify-content:center;'
-            f'padding:{pad}px;box-sizing:border-box">'
-            f'<img src="{url}" alt="" style="max-width:100%;max-height:100%;'
-            f'object-fit:contain"></div>')
+            f'padding:{pad}px;box-sizing:border-box">{img}</div>')
+
+
+def provider_logo_html(name: str, size: int = 44) -> str:
+    """Mark for a service by NAME, ready to drop into markdown. Empty string if we have
+    none — a missing logo is a gap, never a placeholder box."""
+    url = provider_logo_url(name)
+    if not url:
+        return ""
+    return logo_img(url, size, tile=providers.logo_needs_light_tile(resolve_provider(name).id))
 
 
 def render_service_filter():
@@ -5139,20 +5153,20 @@ def render_service_filter():
             cols = st.columns(3)
             for i, p in enumerate(group):
                 with cols[i % 3]:
-                    _service_option(p, counts[p], get_provider_logo_url(p), p == current)
+                    _service_option(p, counts[p], provider_logo_html(p, 44), p == current)
 
 
-def _service_option(label, count, logo, selected):
+def _service_option(label, count, mark, selected):
     """One service: brand mark above the button. A wall of service NAMES is what made the
     flat radio unreadable; a logo is recognised without being read.
 
     Clicking the SELECTED service clears the filter. A filter you can turn on but not off
     by the same gesture is a trap — the only way back was hunting for "All services".
     """
-    if logo:
+    if mark:
         st.markdown(
             f'<div style="display:flex;justify-content:center;height:52px;'
-            f'margin-bottom:-6px">{logo_img(logo, 44)}</div>', unsafe_allow_html=True)
+            f'margin-bottom:-6px">{mark}</div>', unsafe_allow_html=True)
     if st.button(f"{'✓ ' if selected else ''}{label} ({count})", key=f"svc_{label}",
                  use_container_width=True, type="primary" if selected else "secondary",
                  help="Click again to clear this filter" if selected else None):

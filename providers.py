@@ -107,38 +107,43 @@ SERVICES: Dict[str, Dict[str, Any]] = {
 # image, the mark badged with Amazon's), and channel-only services have no mark at all.
 # Wikipedia has the actual brand asset.
 #
+# An EXCEPTION LIST, not a replacement for TMDB. Only the services whose TMDB image was
+# co-branded (sold as an Amazon add-on, so the tile carries Amazon's badge) or missing
+# outright. Every other service keeps the TMDB tile it always had.
+#
 # Why pinned rather than fetched: the Wikipedia API's lead image is not reliably the logo —
 # querying Prime Video returned a 1.6MB SCREENSHOT — and filename heuristics picked
 # "Commons-logo.svg" and the retired "CBS All Access" mark. Choosing each file by hand once
 # and freezing the URL beats guessing correctly at runtime forever.
 #
 # NOTE these are transparent-background wordmarks, frequently BLACK (Max is), so they are
-# invisible on a dark UI unless rendered on a light tile. See LOGO_NEEDS_LIGHT_TILE.
+# invisible on a dark UI unless rendered on a light tile — see logo_needs_light_tile().
+# TMDB's own tiles do NOT get that treatment; they are already dark-UI artwork.
 WIKIPEDIA_LOGOS = {
     "amc-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/AMC%2B_logo.png/330px-AMC%2B_logo.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "apple-tv-plus": "https://upload.wikimedia.org/wikipedia/en/thumb/a/ae/Apple_TV_%28logo%29.svg/330px-Apple_TV_%28logo%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "disney-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Disney%2B_logo.svg/330px-Disney%2B_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "hulu": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Hulu_logo_%282018%29.svg/330px-Hulu_logo_%282018%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
     "max": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Max_2025_logo.svg/330px-Max_2025_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
     "mgm-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/49/MGM%2B_logo.svg/330px-MGM%2B_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "netflix": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Netflix_2015_logo.svg/330px-Netflix_2015_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "paramount-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/330px-Paramount%2B_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
     "pbs-documentaries": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/89/PBS_logo_2019.svg/330px-PBS_logo_2019.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "peacock": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/NBCUniversal_Peacock_Logo_%282026%3B_icon%29.svg/330px-NBCUniversal_Peacock_Logo_%282026%3B_icon%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    "prime-video": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Prime_Video_logo_%282024%29.svg/330px-Prime_Video_logo_%282024%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
     "starz": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Starz_2022.svg/330px-Starz_2022.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
 }
 
-# Wikipedia marks are print assets on transparent backgrounds — render them on a light
-# chip, never straight onto a dark surface.
-LOGO_NEEDS_LIGHT_TILE = True
+def logo_needs_light_tile(slug: str) -> bool:
+    """True only for the Wikipedia marks.
+
+    Those are print assets on transparent backgrounds and often solid black (Max is), so
+    they need a light chip. TMDB's images are square dark-UI tiles that already look right
+    — putting them on a white chip would change logos that were never broken.
+    """
+    return slug in WIKIPEDIA_LOGOS
 
 
 def logo_for(slug: str, catalogue=None) -> Optional[str]:
-    """Brand mark for a service. Wikipedia first, then the TMDB catalogue, then nothing.
+    """Brand mark for a service. TMDB catalogue, EXCEPT where its image is wrong.
 
-    Never returns a co-branded image: build_catalogue excludes resold listings, and the
-    Wikipedia entries are hand-picked brand assets.
+    WIKIPEDIA_LOGOS is deliberately a short exception list, not a replacement: only the
+    services whose TMDB image was co-branded or missing. Everything else keeps the tile it
+    always had. Never returns a co-branded image either way — build_catalogue excludes
+    resold listings.
     """
     url = WIKIPEDIA_LOGOS.get(slug)
     if url:
