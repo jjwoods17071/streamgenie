@@ -46,7 +46,7 @@ TMDB_REGION = "US"
 
 # Supabase Configuration
 SUPABASE_URL = "https://cmmdkvsxvkhbbusfowgr.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNtbWRrdnN4dmtoYmJ1c2Zvd2dyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjE5NzMwMiwiZXhwIjoyMDc3NzczMzAyfQ.sHyQeaQFSm1jKEjPne8KfIUAHmy8SI98zm9vj7cRq8c"
+SUPABASE_KEY = "<YOUR_SERVICE_ROLE_KEY>   # never commit a real key"
 
 # SendGrid Configuration (for email notifications)
 SENDGRID_API_KEY = "YOUR_SENDGRID_API_KEY"
