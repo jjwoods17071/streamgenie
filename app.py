@@ -1447,10 +1447,10 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                         f'margin:6px 8px 0 0">', unsafe_allow_html=True)
                 _route = reachable_via(tmdb_id, get_subscriptions())
                 if _route and _route.get("via"):
-                    # "MGM+" tells you nothing if you've never heard of MGM+. "MGM+ via
-                    # Prime Video" tells you it's already in something you pay for.
-                    st.success(f"✅ Included with your **{_route['via']}** "
-                               f"({_route['service']} channel)")
+                    # NOT "included": an Amazon/Apple/Roku channel is a separate paid
+                    # subscription that merely bills through a service you have.
+                    st.info(f"➕ Available as a **{_route['service']}** channel on your "
+                            f"{_route['via']} — that channel is a separate subscription")
                 elif _route:
                     st.success(f"✅ Included with your **{_route['service']}**")
                 elif get_subscriptions():
@@ -2279,9 +2279,16 @@ def watch_routes(tv_id: int, region: str = "US") -> List[Dict[str, str]]:
 
 
 def reachable_via(tv_id: int, subscribed, region: str = "US"):
-    """How THIS user can watch it, given what they pay for. None = they can't, as far as
-    we know. Empty `subscribed` means they never told us, and the caller must not treat
-    that as "can't watch anything"."""
+    """How THIS user can watch it, given what they pay for.
+
+    A result with `via` set is NOT the same as one without. Without it, the show is
+    included in a subscription they already have. With it, it's on an add-on channel that
+    merely bills through that service — Prime, Apple TV and Roku all resell channels this
+    way, and each is a separate charge. Callers must not present the two identically.
+
+    None = they can't watch it, as far as we know. Empty `subscribed` means they never
+    told us, and the caller must not treat that as "can't watch anything".
+    """
     subs = set(subscribed or ())
     if not subs:
         return None
@@ -2983,6 +2990,33 @@ def save_user_settings(settings: dict):
         st.error(f"Could not save user settings: {e}")
 
 # --------------- UI HELPERS ---------------
+@st.cache_data(ttl=86400, show_spinner=False)
+def tmdb_provider_logos() -> dict:
+    """Every provider TMDB knows, keyed by OUR normalized name.
+
+    The hardcoded map below is keyed by whatever string we happened to think of, so
+    normalization silently broke it: we rename "MGM Plus" to "MGM+", then look up "MGM+",
+    which TMDB has never heard of — no logo. Building the map through the same normalizer
+    means any service TMDB knows resolves, whatever it calls itself.
+    """
+    out = {}
+    for path in ("/watch/providers/tv", "/watch/providers/movie"):
+        try:
+            data = tmdb_get(path, {"watch_region": "US"})
+        except Exception:
+            continue
+        for p in data.get("results", []):
+            name, logo = p.get("provider_name"), p.get("logo_path")
+            if not name or not logo:
+                continue
+            url = f"https://image.tmdb.org/t/p/original{logo}"
+            # prefer the BASE service over its resold channel variants
+            key = normalize_provider_name(name).lower()
+            if key not in out or not is_reseller_listing(name):
+                out[key] = url
+    return out
+
+
 def get_all_provider_logos() -> dict:
     """Get all provider logo mappings."""
     provider_logos = {
@@ -3068,6 +3102,11 @@ def get_provider_logo_url(provider_name: str) -> Optional[str]:
     # Exact match (preferred)
     if provider_lower in provider_logos:
         return provider_logos[provider_lower]
+
+    # Then everything TMDB knows, keyed by the same normalizer we display with.
+    live = tmdb_provider_logos()
+    if provider_lower in live:
+        return live[provider_lower]
 
     # Partial match only for longer, specific keys to avoid false matches
     # Only match if key is at least 4 chars and is a clear substring
@@ -5198,6 +5237,8 @@ def render_service_filter():
         _service_option("All services", total, None, current is None)
         # Services you pay for first. Without the split, MGM+ (2 shows, an add-on you may
         # not have) sits as an equal of Netflix (28), which is not how anyone thinks.
+        # Strictly what they subscribe to. A channel reachable THROUGH Prime is still a
+        # separate purchase, so it belongs under "Not subscribed".
         mine = [p for p in ordered if p in subs] if subs else ordered
         others = [p for p in ordered if p not in subs] if subs else []
         for header, group in (("Your services", mine), ("Not subscribed", others)):

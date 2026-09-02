@@ -617,6 +617,12 @@ def main():
         hit = next((x for x in routes if x["service"] in subs and not x["via"]), None) \
             or next((x for x in routes if x["via"] in subs), None)
         assert hit and hit["service"] == "MGM+" and hit["via"] == "Prime Video", hit
+        # `via` must stay distinguishable from a direct subscription: an Amazon Channel is
+        # a SEPARATE paid subscription, so presenting it as "included" would be false.
+        assert hit["via"] is not None, "add-on route must not look like direct inclusion"
+        direct = next((x for x in routes if x["service"] == "MGM+" and x["via"] is None), None)
+        assert direct is not None and direct is not hit, \
+            "the standalone service and the resold channel must be separate routes"
 
         # and someone who never answered must NOT have everything marked unavailable
         assert not any(x["service"] in set() for x in routes), "empty subs should gate nothing"
