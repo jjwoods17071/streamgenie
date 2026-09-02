@@ -23,6 +23,7 @@ import recs  # shared like-for-like recommendation engine (app + newsletter)
 import milestones  # season premiere / finale classification (app + newsletter)
 import tmdb  # shared TMDB client (retry + parallel fan-out)
 import movies  # movie watchlist + TMDB /movie endpoints
+import providers  # provider resolution: id / name / kind / via / logo
 import dismissed  # "Not interested" dismissals for discovery carousels
 import filters  # suspendable user filters
 import genre_prefs  # Per-user genre hides (Kids/Reality/Anime) for Discover
@@ -60,6 +61,8 @@ _MODULE_CONTRACT = {
     milestones: ("classify", "real_seasons", "real_season_count", "is_returning_undated"),
     movies: ("search", "release_info", "status_label", "media_type_available",
              "fetch_tv_rows", "list_movies", "enrich"),
+    providers: ("resolve", "split_reseller", "build_catalogue", "routes", "watchable",
+                "SERVICE", "CHANNEL", "BUNDLE"),
 }
 
 
@@ -2990,61 +2993,6 @@ def save_user_settings(settings: dict):
         st.error(f"Could not save user settings: {e}")
 
 # --------------- UI HELPERS ---------------
-@st.cache_data(ttl=86400, show_spinner=False)
-def tmdb_provider_logos() -> dict:
-    """Every provider TMDB knows, keyed by OUR normalized name.
-
-    The hardcoded map below is keyed by whatever string we happened to think of, so
-    normalization silently broke it: we rename "MGM Plus" to "MGM+", then look up "MGM+",
-    which TMDB has never heard of — no logo. Building the map through the same normalizer
-    means any service TMDB knows resolves, whatever it calls itself.
-    """
-    out = {}
-    for path in ("/watch/providers/tv", "/watch/providers/movie"):
-        try:
-            data = tmdb_get(path, {"watch_region": "US"})
-        except Exception:
-            continue
-        for p in data.get("results", []):
-            name, logo = p.get("provider_name"), p.get("logo_path")
-            if not name or not logo:
-                continue
-            key = normalize_provider_name(name).lower()
-            cand = (_logo_rank(key, name), f"https://image.tmdb.org/t/p/original{logo}")
-            if key not in out or cand[0] < out[key][0]:
-                out[key] = cand
-    return {k: v[1] for k, v in out.items()}
-
-
-# TMDB's canonical name for the services we consolidate. Several distinct providers
-# normalise to one key — "Netflix", "Netflix Kids" and "Netflix Standard with Ads" all
-# become "Netflix" — and without a preference the last one processed won the logo.
-_CANONICAL_TMDB_NAME = {
-    "netflix": "netflix",
-    "disney+": "disney plus",
-    "prime video": "amazon prime video",
-    "max": "hbo max",
-    # TMDB's US list has no plain "Paramount Plus" (only tier variants), and names
-    # Apple's subscription simply "Apple TV" — "Apple TV Store" is the separate rental
-    # storefront and must not win this key.
-    "paramount+": "paramount plus essential",
-    "apple tv+": "apple tv",
-    "hulu": "hulu",
-    "peacock": "peacock premium",
-}
-
-
-def _logo_rank(key: str, raw_name: str) -> int:
-    """Lower is better. Exact canonical name first, then plain services, then resold
-    channels; length breaks remaining ties so "Netflix" beats "Netflix Kids"."""
-    low = raw_name.strip().lower()
-    if _CANONICAL_TMDB_NAME.get(key) == low:
-        return 0
-    if is_reseller_listing(raw_name):
-        return 200 + len(low)
-    return 100 + len(low)
-
-
 def get_all_provider_logos() -> dict:
     """Get all provider logo mappings."""
     provider_logos = {
@@ -3125,11 +3073,12 @@ def get_provider_logo_url(provider_name: str) -> Optional[str]:
     if provider_lower in st.session_state.logo_overrides:
         return st.session_state.logo_overrides[provider_lower]
 
-    # TMDB first: its URLs are live, and the hardcoded map below has rotted — the
-    # JustWatch link for Showtime 404s and renders as a broken-image icon.
-    live = tmdb_provider_logos()
-    if provider_lower in live:
-        return live[provider_lower]
+    # The catalogue first: its URLs are live and the logo is chosen from each service's
+    # CANONICAL listing, so "Netflix Kids" can no longer supply Netflix's mark. The
+    # hardcoded map below has rotted (Showtime's JustWatch link 404s).
+    for p in provider_catalogue().values():
+        if p.logo and p.name.lower() == provider_lower:
+            return p.logo
 
     provider_logos = get_all_provider_logos()
     if provider_lower in provider_logos:
@@ -3152,110 +3101,46 @@ _RESELLER_SUFFIX = re.compile(
     re.IGNORECASE)
 
 
-# Live-TV bundles and cable storefronts carry lots of shows without being where anyone
-# thinks of a show as living. TMDB lists them in flatrate alongside real subscriptions,
-# and picking one produced "House of the Dragon — Spectrum On Demand".
-_BUNDLE_PROVIDERS = {
-    "fubotv", "spectrum on demand", "directv", "directv stream", "philo", "sling tv",
-    "xfinity", "youtube tv", "hulu live", "dish", "optimum", "verizon fios",
-    "amazon prime video with ads",
-}
+# Provider naming, resolution and logos now live in providers.py, where one raw TMDB
+# listing resolves ONCE into a record with separate facets (id / display name / kind /
+# via / logo). These remain as thin shims so the ~60 existing call sites keep working;
+# new code should use providers.resolve() and read the field it actually wants.
+#
+# The bugs that motivated the split, all from reusing one string for four jobs:
+#   "Lionsgate+ Amazon Channels" -> labelled Prime Video (plural suffix missed)
+#   "Netflix Kids" -> supplied Netflix's logo
+#   "DisneyNOW"    -> folded into Disney+, taking its logo
+#   "MGM Plus"     -> displayed as MGM+, then no logo found under that name
 
 
-def is_bundle_listing(provider_name: str) -> bool:
-    """True for live-TV / cable storefronts that shouldn't be called a show's home."""
-    return (provider_name or "").strip().lower() in _BUNDLE_PROVIDERS
+@st.cache_resource(show_spinner=False)
+def provider_catalogue():
+    """slug -> Provider, with canonical logo and TMDB id. Cached for the process."""
+    return providers.build_catalogue(lambda path: tmdb_get(path, {"watch_region": "US"}))
 
 
-def base_service_name(provider_name: str) -> str:
-    """'HBO Max Amazon Channel' -> 'HBO Max'. Leaves Amazon's own services alone."""
-    out = prev = (provider_name or "").strip()
-    while True:
-        out = _RESELLER_SUFFIX.sub("", out).strip()
-        if out == prev:
-            break
-        prev = out
-    return out or (provider_name or "").strip()
-
-
-def is_reseller_listing(provider_name: str) -> bool:
-    """True for '<service> Amazon Channel' style entries — real but not the base service."""
-    return base_service_name(provider_name).lower() != (provider_name or "").strip().lower()
+def resolve_provider(raw: str):
+    """The one place a raw provider string becomes a Provider record."""
+    return providers.resolve(raw, provider_catalogue())
 
 
 def normalize_provider_name(provider_name: str) -> str:
-    """Normalize provider names to consolidated versions.
+    """Display name for a provider. Shim -> providers.resolve().name"""
+    return resolve_provider(provider_name).name if provider_name else ""
 
-    Strips the reseller suffix FIRST. Without that, "HBO Max Amazon Channel" hit the
-    generic `"amazon" in name` test below and came back as "Prime Video" — the show was
-    labelled with the storefront instead of the service it actually streams on.
-    """
-    provider_lower = base_service_name(provider_name).lower()
 
-    # Consolidate Paramount variations
-    if "paramount" in provider_lower:
-        return "Paramount+"
+def base_service_name(provider_name: str) -> str:
+    """'HBO Max Amazon Channel' -> 'HBO Max'. Shim -> providers.split_reseller()"""
+    return providers.split_reseller(provider_name)[0] or (provider_name or "").strip()
 
-    # Consolidate Disney variations. NOT DisneyNOW — that's the live-TV/ABC app, a
-    # different product, and folding it in gave Disney+ the wrong logo.
-    if "disney" in provider_lower and "now" not in provider_lower:
-        return "Disney+"
 
-    # Consolidate Apple TV variations (but not Apple TV+ the service)
-    if "apple tv" in provider_lower and "apple tv+" not in provider_lower:
-        # Could be "Apple TV", "Apple TV Channels", etc.
-        if "channel" in provider_lower or provider_lower.strip() == "apple tv":
-            return "Apple TV+"
+def is_reseller_listing(provider_name: str) -> bool:
+    return providers.split_reseller(provider_name)[1] is not None
 
-    # Consolidate Amazon variations
-    if "amazon" in provider_lower or "prime video" in provider_lower:
-        return "Prime Video"
 
-    # Consolidate Discovery variations
-    if "discovery" in provider_lower:
-        return "Discovery+"
+def is_bundle_listing(provider_name: str) -> bool:
+    return resolve_provider(provider_name).kind == providers.BUNDLE
 
-    # Consolidate Hulu variations (Hulu, Hulu (No Ads), etc.)
-    if "hulu" in provider_lower:
-        return "Hulu"
-
-    # Consolidate Netflix variations (Netflix, Netflix basic with Ads, etc.)
-    if "netflix" in provider_lower:
-        return "Netflix"
-
-    # Consolidate Peacock variations (Peacock, Peacock Premium, Peacock Premium Plus, etc.)
-    if "peacock" in provider_lower:
-        return "Peacock"
-
-    # Consolidate Fandango variations (and legacy Vudu)
-    if "fandango" in provider_lower and "free" not in provider_lower:
-        return "Fandango At Home"
-    if "vudu" in provider_lower:
-        return "Fandango At Home"
-
-    # TMDB uses both spellings for these
-    if "mgm" in provider_lower:
-        return "MGM+"
-    if "curiosity" in provider_lower:
-        return "Curiosity Stream"
-
-    # Consolidate Max variations
-    if "hbo" in provider_lower and "max" in provider_lower:
-        return "Max"
-    if provider_lower.strip() == "max":
-        return "Max"
-
-    # Consolidate Google Play variations
-    if "google play" in provider_lower:
-        return "Google Play Movies"
-
-    # Consolidate Microsoft Store variations
-    if "microsoft" in provider_lower:
-        return "Microsoft Store"
-
-    # No consolidation rule matched — return the base service, not the raw listing, so
-    # "Starz Apple TV Channel" still reads as "Starz".
-    return base_service_name(provider_name)
 
 # --------------- EMAIL REMINDERS ---------------
 def send_email_reminder(user_email: str, show_title: str, provider_name: str, next_air_date: str, poster_path: Optional[str] = None):

@@ -593,64 +593,47 @@ def main():
     @check("a resold channel is not mistaken for the storefront")
     def _():
         """"Lionsgate+ Amazon Channels" (plural) slipped past a regex expecting the
-        singular, so the suffix survived, the generic "amazon" rule fired, and Lionsgate+
-        was labelled PRIME VIDEO — a real mislabel, not just a wrong logo."""
-        import re as _re
-        src_ = open("app.py").read()
-        i = src_.index("_RESELLER_SUFFIX = re.compile")
-        j = src_.index("# --------------- EMAIL REMINDERS ---------------")
-        ns = {"re": _re}
-        exec(src_[i:j], ns)
-        norm = ns["normalize_provider_name"]
-
+        singular, so the suffix survived, a generic "amazon" rule fired, and Lionsgate+ was
+        labelled PRIME VIDEO — a mislabel in the database, not just a wrong icon."""
+        import providers as _p
         cases = {
-            "Lionsgate+ Amazon Channels": "Lionsgate+",   # plural suffix
-            "MGM+ Amazon Channel": "MGM+",                # singular
-            "Starz Apple TV channel": "Starz",
-            "Amazon Prime Video": "Prime Video",          # Amazon's OWN service
-            "DisneyNOW": "DisneyNOW",                     # live-TV app, not Disney+
-            "Disney Plus": "Disney+",
+            "Lionsgate+ Amazon Channels": ("Lionsgate+", "prime-video"),
+            "MGM+ Amazon Channel":        ("MGM+", "prime-video"),
+            "Starz Apple TV channel":     ("Starz", "apple-tv-plus"),
+            "Amazon Prime Video":         ("Prime Video", None),   # Amazon's OWN service
+            "DisneyNOW":                  ("DisneyNOW", None),     # not Disney+
+            "Disney Plus":                ("Disney+", None),
+            "HBO Max":                    ("Max", None),
+            "Netflix Kids":               ("Netflix", None),
         }
-        for raw, want in cases.items():
-            got = norm(raw)
-            assert got == want, f"{raw!r} -> {got!r}, wanted {want!r}"
+        for raw, (name, via) in cases.items():
+            p = _p.resolve(raw)
+            assert p.name == name, f"{raw!r} displayed as {p.name!r}, wanted {name!r}"
+            assert p.via == via, f"{raw!r} via={p.via!r}, wanted {via!r}"
 
-    @check("an add-on channel counts as watchable")
+    @check("provider facets stay separate")
     def _():
-        """"MGM+" tells you nothing if you've never heard of MGM+. "MGM+ via Prime Video"
-        tells you it's already included in something you pay for. This is the difference
-        between the provider column being a fact and being useful."""
-        import re as _re
-        src_ = open("app.py").read()
-        i = src_.index("_RESELLER_SUFFIX = re.compile")
-        j = src_.index("# --------------- EMAIL REMINDERS ---------------")
-        ns = {"re": _re}
-        exec(src_[i:j], ns)
-        norm, isres = ns["normalize_provider_name"], ns["is_reseller_listing"]
+        """The refactor's whole reason: display name, grouping id, kind and route are
+        different questions, and one string could only answer one of them."""
+        import providers as _p
+        kids, plain = _p.resolve("Netflix Kids"), _p.resolve("Netflix")
+        assert kids.id == plain.id == "netflix", "variants must GROUP together"
+        mgm = _p.resolve("MGM+ Amazon Channel")
+        assert mgm.kind == _p.CHANNEL and mgm.is_extra_cost, \
+            "a resold channel is a separate subscription, not an inclusion"
+        assert _p.resolve("fuboTV").kind == _p.BUNDLE
+        assert _p.resolve("Apple TV Store").kind == _p.STORE
+        assert _p.resolve("Apple TV").id == "apple-tv-plus", "the store must not win the key"
 
-        # a real TMDB listing shape: MGM+ sold as a Prime channel
-        raw = ["fuboTV", "MGM+ Amazon Channel", "MGM Plus", "Philo"]
-        routes = []
-        for r in raw:
-            via = None
-            if isres(r):
-                lo = r.lower()
-                via = "Prime Video" if "amazon" in lo else None
-            routes.append({"service": norm(r), "via": via})
-
-        subs = {"Prime Video"}
-        hit = next((x for x in routes if x["service"] in subs and not x["via"]), None) \
-            or next((x for x in routes if x["via"] in subs), None)
-        assert hit and hit["service"] == "MGM+" and hit["via"] == "Prime Video", hit
-        # `via` must stay distinguishable from a direct subscription: an Amazon Channel is
-        # a SEPARATE paid subscription, so presenting it as "included" would be false.
-        assert hit["via"] is not None, "add-on route must not look like direct inclusion"
-        direct = next((x for x in routes if x["service"] == "MGM+" and x["via"] is None), None)
-        assert direct is not None and direct is not hit, \
-            "the standalone service and the resold channel must be separate routes"
-
-        # and someone who never answered must NOT have everything marked unavailable
-        assert not any(x["service"] in set() for x in routes), "empty subs should gate nothing"
+    @check("watchable prefers a real subscription over a paid channel")
+    def _():
+        import providers as _p
+        rs = _p.routes(["fuboTV", "MGM+ Amazon Channel", "MGM Plus", "Netflix"])
+        assert _p.watchable(rs, {"netflix"}).id == "netflix", "direct subscription first"
+        via = _p.watchable(rs, {"prime-video"})
+        assert via and via.id == "mgm-plus" and via.via == "prime-video", via
+        assert via.is_extra_cost, "must stay distinguishable from an inclusion"
+        assert _p.watchable(rs, set()) is None, "never-answered must gate nothing"
 
     @check("a suspended filter expires by itself")
     def _():
