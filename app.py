@@ -1445,6 +1445,16 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                         f'<img src="{_plogo}" title="{_pname}" alt="{_pname}" '
                         f'style="height:110px;border-radius:14px;vertical-align:middle;'
                         f'margin:6px 8px 0 0">', unsafe_allow_html=True)
+                _route = reachable_via(tmdb_id, get_subscriptions())
+                if _route and _route.get("via"):
+                    # "MGM+" tells you nothing if you've never heard of MGM+. "MGM+ via
+                    # Prime Video" tells you it's already in something you pay for.
+                    st.success(f"✅ Included with your **{_route['via']}** "
+                               f"({_route['service']} channel)")
+                elif _route:
+                    st.success(f"✅ Included with your **{_route['service']}**")
+                elif get_subscriptions():
+                    st.caption("⚠️ Not on any service you've told us about")
                 else:
                     st.markdown(f"✓ On your watchlist  ·  Watch on **{_pname}**")
             def _pdp_remove():
@@ -2230,6 +2240,57 @@ def render_upcoming(rows, as_tab=False):
 
 def tv_watch_providers(tv_id:int) -> Dict[str, Any]:
     return tmdb_get(f"/tv/{tv_id}/watch/providers")
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def watch_routes(tv_id: int, region: str = "US") -> List[Dict[str, str]]:
+    """Every way to watch, keeping the ROUTE as well as the service.
+
+    get_stream_providers normalises "MGM+ Amazon Channel" to "MGM+" and dedupes, which is
+    right for identity and useless for the question people actually ask. Knowing a show is
+    "MGM+" tells you nothing if you've never heard of MGM+; knowing it's "MGM+ via Prime
+    Video" tells you it's already included in something you pay for.
+    """
+    try:
+        block = (tv_watch_providers(tv_id).get("results") or {}).get(region.upper()) or {}
+    except Exception:
+        return []
+    out, seen = [], set()
+    for key in ("flatrate", "ads", "free"):
+        for it in (block.get(key) or []):
+            raw = it.get("provider_name")
+            if not raw:
+                continue
+            service = normalize_provider_name(raw)
+            # "<service> Amazon Channel" -> you reach it THROUGH Prime Video
+            via = None
+            if is_reseller_listing(raw):
+                low = raw.lower()
+                via = ("Prime Video" if "amazon" in low or "prime video" in low
+                       else "Apple TV+" if "apple tv" in low
+                       else "Roku" if "roku" in low else None)
+            k = (service, via)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append({"service": service, "via": via, "raw": raw,
+                        "bundle": is_bundle_listing(raw)})
+    return out
+
+
+def reachable_via(tv_id: int, subscribed, region: str = "US"):
+    """How THIS user can watch it, given what they pay for. None = they can't, as far as
+    we know. Empty `subscribed` means they never told us, and the caller must not treat
+    that as "can't watch anything"."""
+    subs = set(subscribed or ())
+    if not subs:
+        return None
+    for r in watch_routes(tv_id, region):
+        if r["service"] in subs:
+            return {"service": r["service"], "via": None}      # direct subscription
+        if r["via"] and r["via"] in subs:
+            return {"service": r["service"], "via": r["via"]}  # add-on channel
+    return None
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -4947,6 +5008,11 @@ def render_filter_controls():
         st.caption("⚠️ Not saved yet — run `migrations/2026-09-02_filter_prefs.sql`. "
                    "Until then these last only for this session.")
 
+    st.markdown("**Your services**")
+    render_subscription_picker()
+    st.markdown("---")
+    st.markdown("**Hide content**")
+
     for key, (label, helptext) in filters.FILTERS.items():
         entry = state.get(key) or {}
         on = bool(entry.get("enabled"))
@@ -4976,6 +5042,49 @@ def render_filter_controls():
                     _set_filter(key, suspended_until=until)
                     st.session_state[f"fltsus_{key}"] = "—"
                     st.rerun()
+
+
+def get_subscriptions():
+    uid = get_user_id()
+    if filters.table_available(client):
+        return set(filters.get_subscriptions(client, uid))
+    return set(st.session_state.get("_subs_local") or [])
+
+
+def render_subscription_picker():
+    """Which services the user actually pays for.
+
+    Everything else here answers "where does this stream?". This is what turns that into
+    "can I watch it?" — the question the provider column was always standing in for.
+    Never answered is NOT "subscribes to nothing": callers must not gate on an empty set,
+    or someone who skipped this would see their whole library marked unavailable.
+    """
+    uid = get_user_id()
+    known = sorted({normalize_provider_name(r["provider_name"])
+                    for r in list_shows(client)
+                    if (r.get("tmdb_id") or 0) > 0 and r.get("provider_name")} - {""})
+    # the big ones are worth offering even if nothing on the list is currently there
+    for common in ("Netflix", "Prime Video", "Max", "Hulu", "Disney+", "Apple TV+",
+                   "Paramount+", "Peacock"):
+        if common not in known:
+            known.append(common)
+    known = sorted(set(known))
+
+    current = get_subscriptions()
+    st.caption("Tick what you pay for. We'll say when something is included in a service "
+               "you already have — including add-on channels like MGM+ through Prime.")
+    picked = set()
+    cols = st.columns(2)
+    for i, svc in enumerate(known):
+        with cols[i % 2]:
+            if st.checkbox(svc, value=(svc in current), key=f"sub_{svc}"):
+                picked.add(svc)
+    if picked != current:
+        if filters.table_available(client):
+            filters.set_subscriptions(client, uid, picked)
+        else:
+            st.session_state["_subs_local"] = sorted(picked)
+        st.rerun()
 
 
 def render_suspension_banner():
@@ -5014,13 +5123,22 @@ def render_service_filter():
 
     total = sum(counts.values())
     trigger = f"📺 {current} ({counts[current]})" if current else f"📺 All services ({total})"
+    subs = get_subscriptions()
     with st.popover(trigger, help="Show only what's on one service"):
         _service_option("All services", total, None, current is None)
-        st.markdown("---")
-        cols = st.columns(3)
-        for i, p in enumerate(ordered):
-            with cols[i % 3]:
-                _service_option(p, counts[p], get_provider_logo_url(p), p == current)
+        # Services you pay for first. Without the split, MGM+ (2 shows, an add-on you may
+        # not have) sits as an equal of Netflix (28), which is not how anyone thinks.
+        mine = [p for p in ordered if p in subs] if subs else ordered
+        others = [p for p in ordered if p not in subs] if subs else []
+        for header, group in (("Your services", mine), ("Not subscribed", others)):
+            if not group:
+                continue
+            if subs:
+                st.markdown(f"**{header}**")
+            cols = st.columns(3)
+            for i, p in enumerate(group):
+                with cols[i % 3]:
+                    _service_option(p, counts[p], get_provider_logo_url(p), p == current)
 
 
 def _service_option(label, count, logo, selected):

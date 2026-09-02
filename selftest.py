@@ -590,6 +590,37 @@ def main():
                 continue
             assert n == 0, f"{n} rows left behind in {tbl}"
 
+    @check("an add-on channel counts as watchable")
+    def _():
+        """"MGM+" tells you nothing if you've never heard of MGM+. "MGM+ via Prime Video"
+        tells you it's already included in something you pay for. This is the difference
+        between the provider column being a fact and being useful."""
+        import re as _re
+        src_ = open("app.py").read()
+        i = src_.index("_RESELLER_SUFFIX = re.compile")
+        j = src_.index("# --------------- EMAIL REMINDERS ---------------")
+        ns = {"re": _re}
+        exec(src_[i:j], ns)
+        norm, isres = ns["normalize_provider_name"], ns["is_reseller_listing"]
+
+        # a real TMDB listing shape: MGM+ sold as a Prime channel
+        raw = ["fuboTV", "MGM+ Amazon Channel", "MGM Plus", "Philo"]
+        routes = []
+        for r in raw:
+            via = None
+            if isres(r):
+                lo = r.lower()
+                via = "Prime Video" if "amazon" in lo else None
+            routes.append({"service": norm(r), "via": via})
+
+        subs = {"Prime Video"}
+        hit = next((x for x in routes if x["service"] in subs and not x["via"]), None) \
+            or next((x for x in routes if x["via"] in subs), None)
+        assert hit and hit["service"] == "MGM+" and hit["via"] == "Prime Video", hit
+
+        # and someone who never answered must NOT have everything marked unavailable
+        assert not any(x["service"] in set() for x in routes), "empty subs should gate nothing"
+
     @check("a suspended filter expires by itself")
     def _():
         """The whole point: "hide kids" is right 360 days a year and wrong the evening a

@@ -127,3 +127,41 @@ def _upsert(client, user_id: str, key: str, fields: Dict[str, Any]) -> bool:
         return True
     except Exception:
         return False
+
+
+# ---------------- subscriptions ----------------
+# Which services the user actually pays for. Everything else in this app answers "where
+# does this stream?"; this is what turns that into "can I watch it?".
+
+SUBSCRIPTIONS_KEY = "services:subscribed"
+
+
+def get_subscriptions(client, user_id: str) -> list:
+    """Services the user says they have. Empty list = never answered, which is NOT the
+    same as "subscribes to nothing" — callers must treat unknown as "don't gate anything",
+    or a user who skipped the question would see their whole library greyed out.
+    """
+    try:
+        rows = (client.table(TABLE).select("value")
+                .eq("user_id", user_id).eq("filter_key", SUBSCRIPTIONS_KEY)
+                .execute().data or [])
+    except Exception:
+        return []
+    val = (rows[0].get("value") if rows else None) or []
+    return [str(v) for v in val] if isinstance(val, list) else []
+
+
+def set_subscriptions(client, user_id: str, services) -> bool:
+    return _upsert(client, user_id, SUBSCRIPTIONS_KEY,
+                   {"enabled": True, "value": sorted(set(services))})
+
+
+def has_answered(client, user_id: str) -> bool:
+    """True once the user has answered at all — including answering "none of these"."""
+    try:
+        rows = (client.table(TABLE).select("filter_key")
+                .eq("user_id", user_id).eq("filter_key", SUBSCRIPTIONS_KEY)
+                .execute().data or [])
+        return bool(rows)
+    except Exception:
+        return False
