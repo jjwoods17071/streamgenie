@@ -89,7 +89,28 @@ A guard at the top of app.py checks `_MODULE_CONTRACT` and shows that instructio
 of a raw AttributeError. Add to the contract when a module gains a function app.py depends
 on; the self-test keeps the manifest honest.
 
-## 6. Gotchas that have bitten us
+## 6. Provider logos — settled, do not re-derive
+
+Brand marks come from **pinned Wikipedia URLs** in `providers.WIKIPEDIA_LOGOS`, chosen and
+eyeballed one at a time. TMDB is only the fallback. This took several rounds to get right;
+the reasons it landed here:
+
+- TMDB's catalogue is organised around **listings, not brands**. A service sold as an
+  add-on has its own co-branded image ("MGM+ Amazon Channel" is the mark badged with
+  Amazon's), and channel-only services have no mark at all.
+- **Never show a co-branded mark.** A service shows its own logo or none. `build_catalogue`
+  excludes resold listings outright.
+- **Do not fetch Wikipedia logos at runtime.** `pageimages` returns the page's lead image,
+  which for Prime Video is a 1.6MB screenshot; filename heuristics pick `Commons-logo.svg`
+  and the retired "CBS All Access" mark. Pick by hand, verify by LOOKING at the image,
+  freeze the URL.
+- **Wikipedia marks are transparent print assets and often solid black** (Max is). They
+  vanish on the dark theme, so they render on a white chip — `logo_img()`. Never place one
+  straight on a dark surface.
+- **One lookup only.** `provider_logo_url` is it; `get_provider_logo_url` is a shim. A
+  second implementation is what kept the co-branded icons alive after the first fix.
+
+## 7. Gotchas that have bitten us
 
 - `set_page_config` must be the FIRST Streamlit call. `st.secrets` *renders* an element
   before it raises, so a try/except around it doesn't stop it claiming that slot.
@@ -106,7 +127,7 @@ on; the self-test keeps the manifest honest.
   `get_show_seasons` end identically). Prefer line-addressed edits; syntax-check after.
 - Never `git add -A` without reading `git status` — a screenshot got committed that way.
 
-## 7. Reviewing alignment
+## 8. Reviewing alignment
 
 `python review.py` asks a model whether recent changes serve the product objective, and
 what QA is missing. **Advisory only — it never fails a build.** Use it before a batch of

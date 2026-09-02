@@ -636,6 +636,27 @@ def main():
             "no catalogue entry may take its logo from a resold listing"
         assert "acorntv" not in cat, "channel-only service should have no logo entry"
 
+    @check("brand marks come from the pinned Wikipedia assets")
+    def _():
+        """TMDB's catalogue is organised around LISTINGS, not brands — an add-on service
+        often only has a co-branded tile, and channel-only services have none. The
+        Wikipedia marks are hand-picked and frozen; the API's own lead image is unreliable
+        (querying Prime Video returns a 1.6MB screenshot)."""
+        import providers as _p
+        import requests as _rq
+        for slug in ("max", "amc-plus", "mgm-plus", "starz", "netflix", "prime-video"):
+            url = _p.logo_for(slug)
+            assert url, f"{slug} lost its pinned mark"
+            assert "wikimedia.org" in url or "wikipedia.org" in url, f"{slug}: {url}"
+        # pinned URLs must actually resolve — a dead asset is a silently missing logo
+        ua = {"User-Agent": "StreamGenie selftest"}
+        r = _rq.get(_p.WIKIPEDIA_LOGOS["max"], headers=ua, timeout=25)
+        assert r.status_code == 200 and len(r.content) > 500, (r.status_code, len(r.content))
+        # falls through to the catalogue when a service has no pinned mark
+        fake = {"acorntv": _p.Provider(id="acorntv", name="Acorn TV", logo="http://x/a.png")}
+        assert _p.logo_for("acorntv", fake) == "http://x/a.png"
+        assert _p.logo_for("nothing-at-all", fake) is None
+
     @check("there is exactly one logo lookup, and it never co-brands")
     def _():
         """Cleaning build_catalogue did not clean the icons, because a SECOND independent

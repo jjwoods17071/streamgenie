@@ -1315,8 +1315,7 @@ def provider_logo_url(name: str) -> Optional[str]:
     """
     if not name:
         return None
-    entry = provider_catalogue().get(resolve_provider(name).id)
-    return entry.logo if entry else None
+    return providers.logo_for(resolve_provider(name).id, provider_catalogue())
 
 
 # National-network / RSN logos (linear TV ESPN reports has no logo for) from the maintained
@@ -4996,11 +4995,9 @@ def render_onboarding() -> bool:
         with cols[i % 4]:
             logo = get_provider_logo_url(svc)
             st.markdown(
-                f'<div style="display:flex;align-items:center;justify-content:center;'
-                f'height:84px">'
-                + (f'<img src="{logo}" alt="" style="height:76px;border-radius:12px;'
-                   f'object-fit:contain">' if logo else
-                   '<div style="height:76px;width:76px;border-radius:12px;'
+                f'<div style="display:flex;justify-content:center;height:84px">'
+                + (logo_img(logo, 76) if logo else
+                   '<div style="height:76px;width:76px;border-radius:15px;'
                    'background:rgba(255,255,255,.06)"></div>')
                 + '</div>', unsafe_allow_html=True)
             on = svc in chosen
@@ -5089,6 +5086,21 @@ def render_suspension_banner():
     st.info("⏸ Paused: " + " · ".join(bits))
 
 
+def logo_img(url: str, size: int = 44) -> str:
+    """A brand mark on a light chip.
+
+    Wikipedia's assets are print-oriented: transparent background, and frequently solid
+    black (Max is). Dropped straight onto our dark surface they disappear. A white tile is
+    what every service picker does, and it works for any mark regardless of colour.
+    """
+    pad = max(4, size // 8)
+    return (f'<div style="width:{size}px;height:{size}px;border-radius:{size // 5}px;'
+            f'background:#fff;display:flex;align-items:center;justify-content:center;'
+            f'padding:{pad}px;box-sizing:border-box">'
+            f'<img src="{url}" alt="" style="max-width:100%;max-height:100%;'
+            f'object-fit:contain"></div>')
+
+
 def render_service_filter():
     """Service filter that collapses when you're not using it.
 
@@ -5139,10 +5151,8 @@ def _service_option(label, count, logo, selected):
     """
     if logo:
         st.markdown(
-            f'<div style="display:flex;align-items:center;justify-content:center;'
-            f'height:50px;margin-bottom:-6px">'
-            f'<img src="{logo}" style="height:44px;border-radius:8px;object-fit:contain">'
-            f'</div>', unsafe_allow_html=True)
+            f'<div style="display:flex;justify-content:center;height:52px;'
+            f'margin-bottom:-6px">{logo_img(logo, 44)}</div>', unsafe_allow_html=True)
     if st.button(f"{'✓ ' if selected else ''}{label} ({count})", key=f"svc_{label}",
                  use_container_width=True, type="primary" if selected else "secondary",
                  help="Click again to clear this filter" if selected else None):

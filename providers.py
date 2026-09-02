@@ -100,6 +100,53 @@ SERVICES: Dict[str, Dict[str, Any]] = {
                        "match": ["discovery+", "discovery plus"]},
 }
 
+# Official brand marks from Wikipedia, chosen and eyeballed one by one, then PINNED.
+#
+# Why not TMDB alone: its catalogue is organised around listings, not brands, so a service
+# sold as an add-on often has only a co-branded tile ("MGM+ Amazon Channel" has its own
+# image, the mark badged with Amazon's), and channel-only services have no mark at all.
+# Wikipedia has the actual brand asset.
+#
+# Why pinned rather than fetched: the Wikipedia API's lead image is not reliably the logo —
+# querying Prime Video returned a 1.6MB SCREENSHOT — and filename heuristics picked
+# "Commons-logo.svg" and the retired "CBS All Access" mark. Choosing each file by hand once
+# and freezing the URL beats guessing correctly at runtime forever.
+#
+# NOTE these are transparent-background wordmarks, frequently BLACK (Max is), so they are
+# invisible on a dark UI unless rendered on a light tile. See LOGO_NEEDS_LIGHT_TILE.
+WIKIPEDIA_LOGOS = {
+    "amc-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/AMC%2B_logo.png/330px-AMC%2B_logo.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "apple-tv-plus": "https://upload.wikimedia.org/wikipedia/en/thumb/a/ae/Apple_TV_%28logo%29.svg/330px-Apple_TV_%28logo%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "disney-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Disney%2B_logo.svg/330px-Disney%2B_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "hulu": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Hulu_logo_%282018%29.svg/330px-Hulu_logo_%282018%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "max": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Max_2025_logo.svg/330px-Max_2025_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "mgm-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/49/MGM%2B_logo.svg/330px-MGM%2B_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "netflix": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Netflix_2015_logo.svg/330px-Netflix_2015_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "paramount-plus": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/330px-Paramount%2B_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "pbs-documentaries": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/89/PBS_logo_2019.svg/330px-PBS_logo_2019.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "peacock": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/NBCUniversal_Peacock_Logo_%282026%3B_icon%29.svg/330px-NBCUniversal_Peacock_Logo_%282026%3B_icon%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "prime-video": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Prime_Video_logo_%282024%29.svg/330px-Prime_Video_logo_%282024%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "starz": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Starz_2022.svg/330px-Starz_2022.svg.png?utm_source=en.wikipedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+}
+
+# Wikipedia marks are print assets on transparent backgrounds — render them on a light
+# chip, never straight onto a dark surface.
+LOGO_NEEDS_LIGHT_TILE = True
+
+
+def logo_for(slug: str, catalogue=None) -> Optional[str]:
+    """Brand mark for a service. Wikipedia first, then the TMDB catalogue, then nothing.
+
+    Never returns a co-branded image: build_catalogue excludes resold listings, and the
+    Wikipedia entries are hand-picked brand assets.
+    """
+    url = WIKIPEDIA_LOGOS.get(slug)
+    if url:
+        return url
+    entry = (catalogue or {}).get(slug)
+    return entry.logo if entry else None
+
+
 _BY_MATCH = {m: slug for slug, spec in SERVICES.items() for m in spec["match"]}
 
 
