@@ -421,13 +421,17 @@ def render_user_menu(client: Client):
     if not user:
         return
 
-    with st.sidebar:
-        st.markdown("---")
+    # Header popover, not the sidebar — the sidebar is gone. Collapsed to an avatar
+    # because identity is reference material: you check it rarely and act on it more
+    # rarely still, so it shouldn't hold a permanent column of the window.
+    email = user["email"] or ""
+    with st.popover(f"👤 {email.split('@')[0][:14]}" if email else "👤",
+                    use_container_width=True):
         # NOT st.markdown: it auto-links anything that looks like an address, turning the
         # signed-in user's own email into a mailto we have no reason to offer.
         st.caption("Signed in as")
         st.markdown(f'<div style="font-weight:600;margin:-8px 0 6px">'
-                    f'{html.escape(user["email"] or "")}</div>', unsafe_allow_html=True)
+                    f'{html.escape(email)}</div>', unsafe_allow_html=True)
 
         if st.button("🚪 Logout", use_container_width=True):
             logout_user(client)

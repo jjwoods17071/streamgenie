@@ -344,13 +344,6 @@ def render_notifications_panel(client: Client, user_id: str, key_prefix: str = "
                     st.rerun()
 
 
-def render_notifications_ui(client: Client, user_id: str):
-    """Render the notifications UI in the sidebar"""
-    with st.sidebar:
-        st.markdown("---")
-        render_notifications_panel(client, user_id, key_prefix="sb_")
-
-
 def format_notification_time(timestamp_str: str) -> str:
     """Format notification timestamp for display"""
     try:

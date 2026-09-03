@@ -717,6 +717,10 @@ def main():
         # pinned URLs must actually resolve — a dead asset is a silently missing logo
         r = _rq.get(_p.WIKIPEDIA_LOGOS["max"],
                     headers={"User-Agent": "StreamGenie selftest"}, timeout=25)
+        if r.status_code in (403, 429):
+            # Wikimedia throttles repeat runs. That says nothing about our code, and a
+            # suite that goes red for someone else's rate limit stops being believed.
+            return f"wikimedia returned {r.status_code} (rate limit), asset not verified"
         assert r.status_code == 200 and len(r.content) > 500, (r.status_code, len(r.content))
         # unpinned services fall through to the catalogue
         fake = {"acorntv": _p.Provider(id="acorntv", name="Acorn TV", logo="http://x/a.png")}
@@ -927,14 +931,25 @@ def main():
         """The Watch/All Shows merge left render_catch_up defined but never called — and
         it owned the "last watched S2E10" marker, so that feature silently disappeared.
         Dead UI code is how a merge loses a feature without anything going red."""
-        import ast as _a
-        src_ = open("app.py").read()
-        tree = _a.parse(src_)
-        defined = {n.name for n in tree.body
-                   if isinstance(n, _a.FunctionDef) and n.name.startswith("render_")}
-        called = {n.func.id for n in _a.walk(tree)
-                  if isinstance(n, _a.Call) and isinstance(n.func, _a.Name)}
-        orphans = sorted(defined - called)
+        import ast as _a, pathlib as _p
+        files = [f for f in _p.Path(".").glob("*.py") if f.name != "selftest.py"]
+        trees = {f.name: _a.parse(f.read_text()) for f in files}
+        # every call made anywhere, by bare name or as module.attr
+        called = set()
+        for t in trees.values():
+            for n in _a.walk(t):
+                if isinstance(n, _a.Call):
+                    f = n.func
+                    if isinstance(f, _a.Name):
+                        called.add(f.id)
+                    elif isinstance(f, _a.Attribute):
+                        called.add(f.attr)
+        orphans = sorted(f"{fn}.{n.name}" for fn, t in trees.items()
+                         for n in t.body
+                         if isinstance(n, _a.FunctionDef)
+                         and n.name.startswith("render_") and n.name not in called)
+        # Scanning app.py alone missed render_notifications_ui, a dead sidebar renderer
+        # that survived the sidebar itself and would have brought it back on any call.
         assert not orphans, f"defined but never called: {orphans}"
 
     @check("the service filter takes several services in one redraw")
@@ -1039,6 +1054,23 @@ def main():
     def _():
         at = _render(nav_view="📺 Watch", _wild_on=False, find_q="Sicario")
         assert not at.exception, str(at.exception[0].value)[:300]
+
+    @check("nothing renders into the sidebar")
+    def _():
+        """The sidebar had shrunk to branding, a settings toggle, logout and the TMDB
+        credit — none of them things you look at while deciding what to watch — and it was
+        costing the poster grids a fixed slice of every screen. Streamlit only draws a
+        sidebar if something is put in one, so this stays true only while nothing is."""
+        import pathlib as _p
+        offenders = [f.name for f in _p.Path(".").glob("*.py")
+                     if f.name != "selftest.py" and "st.sidebar" in f.read_text()]
+        assert not offenders, f"st.sidebar is back in {offenders}"
+        at = _render(nav_view="📺 Watch")
+        assert not at.exception, str(at.exception[0].value)[:300]
+        # the required TMDB credit moved to the footer; losing it breaks their terms
+        blob = " ".join(str(getattr(e, "value", "")) for e in at.markdown) + \
+               " ".join(str(getattr(e, "value", "")) for e in at.caption)
+        assert "not endorsed or certified by TMDB" in blob, "TMDB attribution vanished"
 
     @check("the logo returns you home from anywhere")
     def _():

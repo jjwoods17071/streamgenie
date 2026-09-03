@@ -3235,12 +3235,20 @@ def go_home():
     st.session_state["_genie_on"] = False
 
 
-with st.sidebar:
-    st.button("🎬 StreamGenie", use_container_width=True, on_click=go_home,
-              help="Back to Watch")
+# ── Header. There is no sidebar any more: it had shrunk to branding, a settings
+#    toggle, logout and the TMDB credit, and it was costing the poster grids a
+#    fixed slice of every screen. Renders here, ABOVE the settings block below, so
+#    the toggle's value is current on the same run rather than one behind. ──
+_hdr = st.columns([6, 1.4, 1.6], vertical_alignment="bottom")
+with _hdr[0]:
+    st.button("🎬 StreamGenie", on_click=go_home, help="Back to Watch")
     st.caption("Everything you're watching, and what's on next.")
-
-auth.render_user_menu(client)
+with _hdr[1]:
+    st.session_state["_show_settings"] = st.toggle(
+        "⚙️", value=bool(st.session_state.get("_show_settings")),
+        help="App settings")
+with _hdr[2]:
+    auth.render_user_menu(client)
 auth.flush_pending_session()  # write the post-login cookie now that rendering is stable
 
 # 👍/👎 from the newsletter: ?rec_vote=up|down&rec_title=...&rec_id=... — record the
@@ -3430,8 +3438,7 @@ st.markdown("""
 # Account-level controls belong beside Logout, not in a full-width header row. This also
 # frees the top of the page: content now starts near the top of the viewport instead of
 # below ~350px of banner + spacer.
-with st.sidebar:
-    show_settings = st.toggle("⚙️ Settings", value=False, help="Show app settings")
+show_settings = bool(st.session_state.get("_show_settings"))
 
 # Collapsible settings section
 if show_settings:
@@ -4797,24 +4804,18 @@ VIEWS = {
 }
 
 
-def render_sidebar_account():
-    """Left margin: identity and at-a-glance only. Navigation and filters moved ABOVE the
-    content (see render_top_nav) — a filter hidden in a sidebar dropdown is a filter
-    nobody uses."""
-    with st.sidebar:
-        # Developer escape hatch: it drops every cache for the session. Nothing a normal
-        # user should be offered, or could interpret.
-        if auth.is_admin(client, get_user_id()):
-            st.markdown("---")
-            if st.button("♻️ Rebuild caches", use_container_width=True,
-                         help="Admin: force fresh TMDB + recommendation data"):
-                st.cache_data.clear()
-                st.session_state.pop("_meta_store", None)
-                st.rerun()
+def render_footer():
+    """Attribution and the admin escape hatch, at the foot of the page.
 
+    These were the last things left in the sidebar. Neither is something you look at
+    while deciding what to watch, and keeping them cost the poster grids a fixed slice
+    of every screen — so they moved down here and the sidebar went away.
+    """
+    st.divider()
+    _foot = st.columns([3, 1])
+    with _foot[0]:
         # REQUIRED by the TMDB API terms — logo plus this exact disclaimer — even for
         # non-commercial use, which is what we are (see PRODUCT.md). Don't remove it.
-        st.markdown("---")
         st.markdown(
             '<a href="https://www.themoviedb.org/" target="_blank" rel="noopener">'
             '<img src="https://www.themoviedb.org/assets/2/v4/logos/v2/'
@@ -4823,6 +4824,15 @@ def render_sidebar_account():
             unsafe_allow_html=True)
         st.caption("This product uses the TMDB API but is not endorsed or certified by TMDB. "
                    "Sports data from ESPN.")
+    with _foot[1]:
+        # Developer escape hatch: it drops every cache for the session. Nothing a normal
+        # user should be offered, or could interpret.
+        if auth.is_admin(client, get_user_id()):
+            if st.button("♻️ Rebuild caches", use_container_width=True,
+                         help="Admin: force fresh TMDB + recommendation data"):
+                st.cache_data.clear()
+                st.session_state.pop("_meta_store", None)
+                st.rerun()
 
 
 def active_genre_hides():
@@ -5212,10 +5222,11 @@ def apply_provider_facet(rows):
             or normalize_provider_name(r.get("provider_name") or "") in picked]
 
 
-render_sidebar_account()
-
-# First run takes over the main pane before any of the app is drawn.
+# First run takes over the main pane before any of the app is drawn. The footer still
+# renders: the TMDB credit is required wherever their data is on screen, and onboarding
+# shows provider logos.
 if render_onboarding():
+    render_footer()
     st.stop()
 
 _view = render_top_nav()
@@ -5627,3 +5638,5 @@ if _pdp_open_sid is not None:
             "else if(n>0){setTimeout(function(){go(n-1);},120);}"
             "}catch(e){}}setTimeout(function(){go(8);},120);})();</script>",
             height=0)
+
+render_footer()

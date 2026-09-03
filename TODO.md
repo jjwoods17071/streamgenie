@@ -8,9 +8,6 @@ work on it.
 
 ## Waiting on a decision
 
-- [ ] **Collapse the sidebar?** Since nav moved above the content it holds only At a
-      glance, Rebuild caches, the settings toggle, login and the TMDB attribution.
-      Dropping it gives the poster grids the full window width.
 - [ ] **Trust `/Users/jjwoods/oks`** in Claude Code — the last directory still prompting.
 
 ## Parked deliberately
@@ -27,7 +24,8 @@ work on it.
 
 - [ ] **`render_notifications_panel` lives in `notifications.py`** but is Streamlit
       rendering. Those modules are the future native API and must stay import-safe;
-      presentation belongs in app.py. (Flagged by `review.py`.)
+      presentation belongs in app.py. (Flagged by `review.py`.) Its dead sibling
+      `render_notifications_ui` is gone — the orphan check now scans every module.
 - [ ] **Deploys that change an imported module need a manual reboot** (Manage app → ⋮ →
       Reboot). Streamlit Cloud caches imports; only app.py re-executes. A guard now
       detects it and says so, but the reboot is still manual. Worth checking whether the
