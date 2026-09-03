@@ -738,6 +738,19 @@ def main():
         bodies = {n.name: _a.unparse(n) for n in tree.body
                   if isinstance(n, _a.FunctionDef) and "logo_url" in n.name}
         assert "provider_logo_url" in bodies, "the single lookup is missing"
+        # A logo must never come from stored state. A `logo_overrides` table sat FIRST in
+        # this chain for ten months and silently outranked everything — five rows meant
+        # Peacock showed one mark on a card and another in the filter. THIS check passed
+        # the whole time, because it only compared the two functions to each other.
+        whole = _a.parse(open("app.py").read())
+        for n in _a.walk(whole):
+            if not (isinstance(n, _a.FunctionDef) and "logo" in n.name.lower()):
+                continue
+            src_ = _a.unparse(n)
+            assert ".table(" not in src_, \
+                f"{n.name} reads a table — a logo must not come from stored state"
+            assert "session_state" not in src_, \
+                f"{n.name} reads session_state — that is a second source of truth"
         # the shim must delegate, not re-implement
         assert "provider_logo_url(" in bodies.get("get_provider_logo_url", ""), \
             "get_provider_logo_url must delegate to the single lookup"

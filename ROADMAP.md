@@ -1,6 +1,6 @@
 # StreamGenie — Now / Near / Next
 
-Written 2026-09-02. `PRODUCT.md` says what this is for; this says in what order.
+Written 2026-09-02, revised the same day after a session that changed the priorities. `PRODUCT.md` says what this is for; this says in what order.
 
 The objective hasn't changed: **"what do I watch tonight, and where is it?"** Everything
 below is judged against whether it makes that faster to answer, on more devices.
@@ -35,30 +35,52 @@ closer to a native client than the Streamlit UI suggests.**
 The goal is that we can change things confidently and hear about failures without you
 having to paste a traceback.
 
-1. **Sentry.** The single highest-leverage item. Today production failures are discovered
-   by you, by hand, and a truncated traceback once cost a full wrong-root-cause round.
-   Needs: a DSN. Effort: ~30 min.
+**What one session actually found (2026-09-02).** Five fixes shipped, and four of them
+were the same bug wearing different clothes: **a second implementation whose failure was
+silent.** Two logo lookups. Two genre stores. Two definitions of "which row is this
+show". A dead renderer nobody called. None of them showed up as an error — they were
+hidden by a bare `except`, a `.get()` default, or simply never being called. This is the
+project's characteristic defect, and the checks that pass while it happens are the reason
+it survives. **Treat "is there a second one?" as the first question in any bug hunt here.**
+
+1. **Sentry.** The single highest-leverage item, and more so after the above: every one of
+   those bugs was invisible precisely because nothing reported. Today production failures
+   are discovered by Joe, by hand, and a truncated traceback once cost a full
+   wrong-root-cause round. Needs: a DSN. Effort: ~30 min.
 2. **Prove RLS actually closed the hole.** `service_role` bypasses RLS, so nothing we can
-   run today verifies it. With the anon key we can assert an anon read returns nothing,
-   and keep that as a permanent check — RLS was on once before and got silently disabled.
-   Needs: the anon key (public by design). Effort: ~30 min.
-3. ~~Make `upsert_show` / `delete_show` testable.~~ **Done 2026-09-02** — now `watchlist.py`,
-   taking `user_id` explicitly. Four checks exercise the real add/remove path instead of
-   hand-written inserts, and doing it surfaced a latent silent failure in delete (see the
-   module docstring). app.py keeps thin wrappers so the 17 call sites didn't change.
+   run today verifies it — the suite would pass identically if RLS were off, which is the
+   same shape of problem as everything above. With the anon key we can assert an anon read
+   returns nothing and keep it as a permanent check. RLS was on once before and got
+   silently disabled. Needs: the anon key (public by design). Effort: ~30 min.
+3. **Finish the silent-failure sweep.** The audit is done; the work isn't:
+   - `logo_overrides` — **code removed 2026-09-02**; run
+     `migrations/2026-09-02_drop_logo_overrides.sql` to drop the tables.
+   - **Five writes whose failure is swallowed entirely** (`app.py` 1624/2383/2418,
+     `dismissed.py:40`, `movies.py:294`) — `except: pass` around an insert or update.
+     `dismissed.py` is the exact shape that hid the genre bug. They should at least
+     return a success flag the caller can surface.
+   - Every table the code references now exists — that half is clean.
 4. **`notifications.py` is half UI.** `render_notifications_panel` is Streamlit rendering
-   inside a module a native client would import. Split data from presentation.
-5. ~~Run the `genre_excludes` migration.~~ **Done differently (2026-09-02).** The table
-   was never created and `filter_prefs` had already replaced it, but Discover's "hide this
-   genre" button was still writing to it behind a bare `except` — so it did nothing at
-   all, not even for the session, while Settings read the other store. Now one store.
-   Lesson: a stale roadmap line described the symptom and hid a live bug; check claims
-   against the database.
-6. **Decide the small open questions** (sidebar, service filter multi-select). They cost
-   nothing to answer and block tidying.
+   inside a module a native client would import. The last one; splitting it takes the
+   module count to 23/29 and leaves a clean API boundary.
+5. ~~Make `upsert_show` / `delete_show` testable.~~ **Done 2026-09-02** — now
+   `watchlist.py`, taking `user_id` explicitly. Four checks exercise the real add/remove
+   path instead of hand-written inserts, and writing them surfaced a latent silent failure
+   in delete. app.py keeps thin wrappers so the 17 call sites didn't change.
+6. ~~The small open questions.~~ **Both answered 2026-09-02.** The sidebar is gone
+   (branding and settings to a header, TMDB credit and admin tools to a footer); the
+   service filter is multi-select and batches into one redraw.
 
 Deliberately NOT now: `show_cache`, preview environments, feature flags. All are answers
 to scale we don't have.
+
+### A rule this session earned
+
+**A check that has never failed has not been tested** was already in CLAUDE.md. Add its
+sharper form: *a check can pass for the wrong reason.* "There is exactly one logo lookup"
+passed for ten months while a third lookup sat in a database table, because it only
+compared two functions to each other and never asked where a logo may come FROM. Write
+checks against the invariant, not against the shape of the last bug.
 
 ---
 

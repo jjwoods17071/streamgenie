@@ -46,6 +46,11 @@ The suite has three layers and they exist for specific reasons:
 | engine | recs, milestones, movies, newsletter | logic regressions against real data |
 | **render** | anything Streamlit raises at draw time | three crashes reached the user before this existed |
 
+**A check can pass for the wrong reason.** "There is exactly one logo lookup" passed for
+ten months while a third lookup sat in a database table, because it only compared two
+functions to each other and never asked where a logo may come FROM. Write the check
+against the invariant, not against the shape of the last bug.
+
 **Prove a new check can fail before trusting it.** Twice in this project a green result
 came from a broken harness rather than working code — once from an exec slice that left a
 helper undefined (silently "all clear" on 82 rows), once from a bug reintroduction that
@@ -90,6 +95,11 @@ of a raw AttributeError. Add to the contract when a module gains a function app.
 on; the self-test keeps the manifest honest.
 
 ## 6. Provider logos — settled, do not re-derive
+
+**One lookup: `providers.logo_for`.** A logo never comes from stored state — no table, no
+session_state. A `logo_overrides` table sat FIRST in the chain until 2026-09-02 and
+silently outranked everything; a self-test now fails if any function with "logo" in its
+name reads a table or session_state.
 
 **TMDB is the source.** `providers.WIKIPEDIA_LOGOS` is a five-entry **exception list**, not
 a replacement: only Max, AMC+, MGM+, Starz and PBS, whose TMDB image was co-branded or

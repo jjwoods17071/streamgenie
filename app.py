@@ -120,8 +120,6 @@ TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_BASE = "https://api.themoviedb.org/3"
 DEFAULT_REGION = os.getenv("TMDB_REGION", "US").upper()
 DEFAULT_PROVIDER = "Netflix"
-LOGO_OVERRIDES_FILE = "logo_overrides.json"
-DELETED_PROVIDERS_FILE = "deleted_providers.json"
 USER_SETTINGS_FILE = "user_settings.json"
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
 SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "notifications@streamgenie.app").strip()
@@ -2883,50 +2881,6 @@ def get_top_rated_shows(limit: int = 10) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching top rated shows: {e}")
         return []
 
-# --------------- LOGO OVERRIDE PERSISTENCE ---------------
-def load_logo_overrides(client: Client) -> dict:
-    """Load logo URL overrides from Supabase."""
-    try:
-        result = client.table("logo_overrides").select("*").execute()
-        return {row["provider_name"]: row["logo_url"] for row in result.data}
-    except Exception as e:
-        st.warning(f"Could not load logo overrides: {e}")
-        return {}
-
-def save_logo_overrides(client: Client, overrides: dict):
-    """Save logo URL overrides to Supabase."""
-    try:
-        # Upsert each override (insert or update)
-        for provider_name, logo_url in overrides.items():
-            client.table("logo_overrides").upsert({
-                "provider_name": provider_name,
-                "logo_url": logo_url
-            }, on_conflict="provider_name").execute()
-    except Exception as e:
-        st.error(f"Could not save logo overrides: {e}")
-
-def load_deleted_providers(client: Client) -> list:
-    """Load list of deleted providers from Supabase."""
-    try:
-        result = client.table("deleted_providers").select("provider_name").execute()
-        return [row["provider_name"] for row in result.data]
-    except Exception as e:
-        st.warning(f"Could not load deleted providers: {e}")
-        return []
-
-def save_deleted_providers(client: Client, deleted: list):
-    """Save list of deleted providers to Supabase."""
-    try:
-        # First, clear all existing deleted providers
-        client.table("deleted_providers").delete().neq("provider_name", "").execute()
-
-        # Then insert the new list
-        if deleted:
-            data = [{"provider_name": provider} for provider in deleted]
-            client.table("deleted_providers").insert(data).execute()
-    except Exception as e:
-        st.error(f"Could not save deleted providers: {e}")
-
 def load_user_settings() -> dict:
     """Load user settings from JSON file."""
     if os.path.exists(USER_SETTINGS_FILE):
@@ -2947,82 +2901,16 @@ def save_user_settings(settings: dict):
         st.error(f"Could not save user settings: {e}")
 
 # --------------- UI HELPERS ---------------
-def get_all_provider_logos() -> dict:
-    """Get all provider logo mappings."""
-    provider_logos = {
-        # Major Streaming Services
-        "netflix": "https://images.justwatch.com/icon/207360008/s100/netflix.webp",
-        "amazon prime video": "https://images.justwatch.com/icon/322992749/s100/amazonprime.webp",
-        "prime video": "https://images.justwatch.com/icon/322992749/s100/amazonprime.webp",
-        "hulu": "https://images.justwatch.com/icon/116305230/s100/hulu.webp",
-        "disney plus": "https://images.justwatch.com/icon/313118777/s100/disneyplus.webp",
-        "disney+": "https://images.justwatch.com/icon/313118777/s100/disneyplus.webp",
-        "max": "https://images.justwatch.com/icon/332884837/s100/max.webp",
-        "hbo max": "https://images.justwatch.com/icon/332884837/s100/max.webp",
-        "paramount plus": "https://images.justwatch.com/icon/242706661/s100/paramountplus.webp",
-        "paramount+": "https://images.justwatch.com/icon/242706661/s100/paramountplus.webp",
-        "peacock": "https://images.justwatch.com/icon/194173870/s100/peacocktv.webp",
-        "peacock premium": "https://images.justwatch.com/icon/194173870/s100/peacocktv.webp",
-        "apple tv plus": "https://images.justwatch.com/icon/338253870/s100/appletvplus.webp",
-        "apple tv+": "https://images.justwatch.com/icon/338253870/s100/appletvplus.webp",
-
-        # Premium Channels
-        "showtime": "https://images.justwatch.com/icon/430999/s100/showtime.webp",
-        "starz": "https://images.justwatch.com/icon/301254735/s100/starz.webp",
-        "mgm plus": "https://images.justwatch.com/icon/302467394/s100/epix.webp",
-        "amc+": "https://images.justwatch.com/icon/277399832/s100/amcplus.webp",
-        "bet+": "https://images.justwatch.com/icon/248153957/s100/bet-plus.webp",
-        "espn+": "https://images.justwatch.com/icon/147638348/s100/espn-plus.webp",
-
-        # Specialty Streaming
-        "crunchyroll": "https://images.justwatch.com/icon/324213205/s100/crunchyroll.webp",
-        "shudder": "https://images.justwatch.com/icon/2562359/s100/shudder.webp",
-        "acorn tv": "https://images.justwatch.com/icon/151881328/s100/acorntv.webp",
-        "sundance now": "https://images.justwatch.com/icon/5676163/s100/sundancenow.webp",
-        "criterion channel": "https://images.justwatch.com/icon/308609719/s100/criterionchannel.webp",
-
-        # Discovery/Learning
-        "youtube premium": "https://images.justwatch.com/icon/70189310/s100/youtubered.webp",
-        "discovery plus": "https://images.justwatch.com/icon/240558410/s100/discoveryplusus.webp",
-        "discovery+": "https://images.justwatch.com/icon/240558410/s100/discoveryplusus.webp",
-
-        # Free Ad-Supported
-        "tubi": "https://images.justwatch.com/icon/313528601/s100/tubitv.webp",
-        "pluto tv": "https://images.justwatch.com/icon/312204955/s100/plutotv.webp",
-        "freevee": "https://images.justwatch.com/icon/300557484/s100/freevee.webp",
-        "amazon freevee": "https://images.justwatch.com/icon/300557484/s100/freevee.webp",
-        "the roku channel": "https://images.justwatch.com/icon/76972041/s100/rokuchannel.webp",
-        "roku channel": "https://images.justwatch.com/icon/76972041/s100/rokuchannel.webp",
-        "plex": "https://images.justwatch.com/icon/301832745/s100/plex.webp",
-        "xumo play": "https://images.justwatch.com/icon/308802886/s100/xumoplay.webp",
-
-        # Live TV / Cable
-        "fubotv": "https://images.justwatch.com/icon/316727345/s100/fubotv.webp",
-        "fubo tv": "https://images.justwatch.com/icon/316727345/s100/fubotv.webp",
-        "sling tv": "https://images.justwatch.com/icon/430998/s100/sling-tv.webp",
-        "directv stream": "https://images.justwatch.com/icon/257197350/s100/directv-stream.webp",
-        "spectrum on demand": "https://images.justwatch.com/icon/305635208/s100/spectrumondemand.webp",
-
-        # Rental/Purchase
-        "fandango at home": "https://images.justwatch.com/icon/322380782/s100/vudu.webp",
-        "vudu": "https://images.justwatch.com/icon/322380782/s100/vudu.webp",
-        "amazon video": "https://images.justwatch.com/icon/430993/s100/amazon.webp",
-        "apple tv": "https://images.justwatch.com/icon/338253243/s100/itunes.webp",
-        "google play movies": "https://images.justwatch.com/icon/169478387/s100/play.webp",
-        "google play movies & tv": "https://images.justwatch.com/icon/169478387/s100/play.webp",
-        "microsoft store": "https://images.justwatch.com/icon/820542/s100/microsoft-store.webp",
-    }
-
-    return provider_logos
-
 def get_provider_logo_url(provider_name: str) -> Optional[str]:
-    """Shim -> provider_logo_url. One lookup now; user overrides still win."""
-    if not provider_name:
-        return None
-    if "logo_overrides" not in st.session_state:
-        st.session_state.logo_overrides = load_logo_overrides(client)
-    override = st.session_state.logo_overrides.get(provider_name.lower())
-    return override or provider_logo_url(provider_name)
+    """Shim -> provider_logo_url. Delegates; never decides.
+
+    This used to consult a `logo_overrides` table FIRST, which made it a third source of
+    truth that silently outranked everything else — five rows written in Nov 2025 meant
+    Peacock and Paramount+ showed one mark on a card and another in the filter, and any
+    logo fix was overridden for them without a word. The overrides existed to work around
+    logos we didn't have; we have them now.
+    """
+    return provider_logo_url(provider_name) if provider_name else None
 
 
 @st.cache_resource(show_spinner=False)
@@ -3575,151 +3463,6 @@ if show_settings:
 
         if user_is_admin:
             with tab2:
-                st.markdown("**Provider Logo Assignments**")
-
-                # Get all logo assignments
-                all_logos = get_all_provider_logos()
-
-                # Initialize session state
-                if 'logo_overrides' not in st.session_state:
-                    st.session_state.logo_overrides = load_logo_overrides(client)
-
-                if 'deleted_providers' not in st.session_state:
-                    st.session_state.deleted_providers = load_deleted_providers(client)
-
-                # Filter out deleted providers
-                active_logos = {k: v for k, v in all_logos.items() if k not in st.session_state.deleted_providers}
-
-                override_count = len(st.session_state.logo_overrides)
-                deleted_count = len(st.session_state.deleted_providers)
-
-                status_parts = [f"Total providers: {len(active_logos)}"]
-                if override_count > 0:
-                    status_parts.append(f"**🔧 {override_count} modified**")
-                if deleted_count > 0:
-                    status_parts.append(f"**🗑️ {deleted_count} deleted**")
-
-                st.caption(" | ".join(status_parts))
-
-                # Group by category
-                categories = {
-                    "Major Streaming Services": [],
-                    "Premium Channels": [],
-                    "Specialty Streaming": [],
-                    "Discovery/Learning": [],
-                    "Free Ad-Supported": [],
-                    "Live TV / Cable": [],
-                    "Rental/Purchase": []
-                }
-
-                # Categorize providers (simple keyword matching)
-                for provider in sorted(active_logos.keys()):
-                    if provider in ["netflix", "prime video", "amazon prime video", "hulu", "disney plus", "disney+",
-                                   "max", "hbo max", "paramount plus", "paramount+", "peacock", "peacock premium",
-                                   "apple tv plus", "apple tv+"]:
-                        categories["Major Streaming Services"].append(provider)
-                    elif provider in ["showtime", "starz", "mgm plus", "amc+", "bet+", "espn+"]:
-                        categories["Premium Channels"].append(provider)
-                    elif provider in ["crunchyroll", "shudder", "acorn tv", "sundance now", "criterion channel"]:
-                        categories["Specialty Streaming"].append(provider)
-                    elif provider in ["youtube premium", "discovery plus", "discovery+"]:
-                        categories["Discovery/Learning"].append(provider)
-                    elif provider in ["tubi", "pluto tv", "freevee", "amazon freevee", "the roku channel", "roku channel", "plex", "xumo play"]:
-                        categories["Free Ad-Supported"].append(provider)
-                    elif provider in ["fubotv", "fubo tv", "sling tv", "directv stream", "spectrum on demand"]:
-                        categories["Live TV / Cable"].append(provider)
-                    else:
-                        categories["Rental/Purchase"].append(provider)
-
-                # Display by category
-                for category, providers in categories.items():
-                    if providers:
-                        with st.expander(f"**{category}** ({len(providers)} providers)"):
-                            for provider in providers:
-                                # Add border container for each row
-                                with st.container(border=True):
-                                    logo_url = get_provider_logo_url(provider)
-
-                                    col1, col2, col3, col4 = st.columns([1, 5, 0.5, 0.5])
-                                    with col1:
-                                        if logo_url:
-                                            st.image(logo_url, width=40)
-                                        else:
-                                            st.write(f"{ICONS['error']}")
-
-                                    with col2:
-                                        # Show if this provider has an override
-                                        has_override = 'logo_overrides' in st.session_state and provider in st.session_state.logo_overrides
-                                        if has_override:
-                                            st.caption(f"**{provider}** 🔧 _(modified)_")
-                                        else:
-                                            st.caption(f"**{provider}**")
-
-                                        if logo_url:
-                                            st.caption(f"`{logo_url}`")
-                                        else:
-                                            st.caption("_No logo URL assigned_")
-
-                                    with col3:
-                                        if st.button("✏️", key=f"edit_{provider}", help=f"Edit {provider} logo URL"):
-                                            st.session_state[f"editing_{provider}"] = True
-                                            st.rerun()
-
-                                    with col4:
-                                        if st.button(ICONS["delete"], key=f"delete_{provider}", help=f"Delete {provider} from system"):
-                                            # Initialize session state if needed
-                                            if 'logo_overrides' not in st.session_state:
-                                                st.session_state.logo_overrides = load_logo_overrides(client)
-                                            if 'deleted_providers' not in st.session_state:
-                                                st.session_state.deleted_providers = load_deleted_providers(client)
-
-                                            # Add to deleted list
-                                            if provider not in st.session_state.deleted_providers:
-                                                st.session_state.deleted_providers.append(provider)
-                                                save_deleted_providers(client, st.session_state.deleted_providers)
-
-                                            # Also remove any override if it exists
-                                            if provider in st.session_state.logo_overrides:
-                                                del st.session_state.logo_overrides[provider]
-                                                save_logo_overrides(client, st.session_state.logo_overrides)
-
-                                            st.toast(f"{ICONS['check']} Deleted {provider}")
-                                            st.rerun()
-
-                                # Edit mode
-                                if st.session_state.get(f"editing_{provider}", False):
-                                    st.markdown(f"**Edit logo URL for: {provider}**")
-                                    new_url = st.text_input(
-                                        "Logo URL",
-                                        value=logo_url or "",
-                                        key=f"url_{provider}",
-                                        placeholder="https://images.justwatch.com/icon/..."
-                                    )
-
-                                    col_save, col_cancel = st.columns(2)
-                                    with col_save:
-                                        if st.button("💾 Save", key=f"save_{provider}"):
-                                            # Initialize logo_overrides if it doesn't exist
-                                            if 'logo_overrides' not in st.session_state:
-                                                st.session_state.logo_overrides = load_logo_overrides(client)
-
-                                            # Store the new URL in session state and persist to file
-                                            st.session_state.logo_overrides[provider] = new_url
-                                            save_logo_overrides(client, st.session_state.logo_overrides)
-
-                                            st.session_state[f"editing_{provider}"] = False
-                                            st.success(f"{ICONS['check']} Logo URL updated for {provider} and saved to {LOGO_OVERRIDES_FILE}!")
-                                            st.rerun()
-
-                                    with col_cancel:
-                                        if st.button(f"{ICONS['error']} Cancel", key=f"cancel_{provider}"):
-                                            st.session_state[f"editing_{provider}"] = False
-                                            st.rerun()
-
-                                    st.write("---")
-
-                st.write("---")
-
                 # Scheduled Tasks Section with border
                 with st.container(border=True):
                     st.markdown("**⏰ Scheduled Tasks**")
