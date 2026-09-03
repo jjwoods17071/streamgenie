@@ -19,6 +19,18 @@ work on it.
 
 ## Known gaps
 
+- [ ] **`logo_overrides` is a THIRD logo source and it wins.** 5 rows written Nov 2025
+      (peacock ×2, paramount+ ×2, fandango at home) pointing at JustWatch. The URLs still
+      resolve, but `get_provider_logo_url` checks that table FIRST, so those services show
+      a different mark on show cards than in the filter — and any future logo fix is
+      silently overridden for them. Decide: delete the rows and the admin UI, or make it
+      the documented top of the chain in `providers.logo_for`. The "one lookup" self-test
+      missed it because it only inspects functions with `logo_url` in the name.
+- [ ] **5 database writes whose failure is invisible** (`app.py` 1624/2383/2418,
+      `dismissed.py:40`, `movies.py:294`) — `except: pass` around an insert/update. This
+      is the exact shape that hid the genre bug for weeks. At minimum they should return
+      a success flag the caller can surface.
+
 - [ ] **`genre_excludes` migration is obsolete** — `filter_prefs` replaced it and carries
       the data forward. The file stays only as history; don't run it.
 
