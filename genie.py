@@ -21,6 +21,8 @@ from typing import Any, Dict, Optional
 
 import requests
 
+import watchlist
+
 CLAUDE_MODEL = os.getenv("GENIE_CLAUDE_MODEL", "claude-haiku-4-5")
 GEMINI_MODEL = os.getenv("GENIE_GEMINI_MODEL", "gemini-2.5-flash")
 
@@ -267,31 +269,38 @@ def _exec_tool(client, user_id: str, name: str, inp: Dict[str, Any]) -> str:
                for x in r.get("results", [])[:5]]
         return json.dumps(out) if out else "No matches found."
 
+    # Watchlist writes go through watchlist.py, not inline. Genie had its own copy of all
+    # three, and add_show named on_conflict="user_id,tmdb_id,provider_name" — columns with
+    # no matching unique constraint since the one-row-per-show migration — so asking Genie
+    # to add anything failed outright with Postgres 42P10.
     if name == "add_show":
         d = _tmdb_get(f"/tv/{tid}")
         nxt = d.get("next_episode_to_air") or {}
-        row = {"user_id": user_id, "tmdb_id": tid, "title": d.get("name") or f"Show {tid}",
-               "region": "US", "on_provider": True,
-               "next_air_date": nxt.get("air_date"),
-               "overview": d.get("overview") or "",
-               "poster_path": d.get("poster_path"),
-               "provider_name": inp.get("provider_name") or "Multiple Providers"}
-        client.table("shows").upsert(row, on_conflict="user_id,tmdb_id,provider_name").execute()
-        return f"Added '{row['title']}' on {row['provider_name']}."
+        title = d.get("name") or f"Show {tid}"
+        prov = inp.get("provider_name") or "Multiple Providers"
+        what = watchlist.upsert(client, user_id, tid, title, "US", True,
+                                nxt.get("air_date"), d.get("overview") or "",
+                                d.get("poster_path"), prov)
+        return (f"Added '{title}' on {prov}." if what == "added"
+                else f"'{title}' was already on the watchlist — updated it.")
 
     if name == "remove_show":
-        got = client.table("shows").select("title").eq("user_id", user_id).eq("tmdb_id", tid).execute().data
+        got = client.table("shows").select("title").eq("user_id", user_id)\
+            .eq("tmdb_id", tid).execute().data
         if not got:
             return "That show isn't in the watchlist."
-        client.table("shows").delete().eq("user_id", user_id).eq("tmdb_id", tid).execute()
+        if not watchlist.delete(client, user_id, tid):
+            return f"Couldn't remove '{got[0]['title']}' — nothing was deleted."
         return f"Removed '{got[0]['title']}' from the watchlist."
 
     if name == "set_provider":
         prov = inp.get("provider_name") or ""
-        got = client.table("shows").select("title").eq("user_id", user_id).eq("tmdb_id", tid).execute().data
+        got = client.table("shows").select("title").eq("user_id", user_id)\
+            .eq("tmdb_id", tid).execute().data
         if not got:
             return "That show isn't in the watchlist."
-        client.table("shows").update({"provider_name": prov}).eq("user_id", user_id).eq("tmdb_id", tid).execute()
+        if not watchlist.set_provider(client, user_id, tid, prov):
+            return f"Couldn't update '{got[0]['title']}'."
         return f"'{got[0]['title']}' is now tracked on {prov}."
 
     if name == "mark_caught_up":

@@ -12,7 +12,6 @@ Runtime-agnostic (no streamlit) — see ROADMAP.md on the module count.
 from typing import Any, Dict, List, Optional
 
 import movies
-import show_status
 
 TABLE = "shows"
 
@@ -91,6 +90,9 @@ def upsert(client, user_id: str, tmdb_id: int, title: str, region: str,
         return "updated"
 
     client.table(TABLE).insert(data).execute()
+    # Imported here, not at module scope: show_status writes back through update_fields
+    # below, so a top-level import would be a cycle.
+    import show_status
     show_status.update_show_status(client, user_id, tmdb_id, title)
     return "added"
 
@@ -115,6 +117,32 @@ def delete(client, user_id: str, tmdb_id: int,
     return len(q.execute().data or [])
 
 
+def update_fields(client, user_id: str, tmdb_id: int, fields: Dict[str, Any],
+                  media_type: Optional[str] = None) -> bool:
+    """Update one show's columns. True if a row actually changed.
+
+    The single update. Six surfaces used to write to `shows` directly, each with its own
+    answer to "which columns identify a show" — that is why the same predicate existed in
+    six forms and a fix in one never reached the others.
+    """
+    q = _scoped(client.table(TABLE).update(fields),
+                client, user_id, tmdb_id, kind_of(tmdb_id, media_type))
+    return bool(q.execute().data or [])
+
+
+def set_provider(client, user_id: str, tmdb_id: int, provider_name: str,
+                 media_type: Optional[str] = None) -> bool:
+    """Record where a show streams. True if a row actually changed."""
+    return update_fields(client, user_id, tmdb_id, {"provider_name": provider_name},
+                         media_type)
+
+
+def set_pinned(client, user_id: str, tmdb_id: int, value: bool,
+               media_type: Optional[str] = None) -> bool:
+    """Pin or unpin. True if a row actually changed."""
+    return update_fields(client, user_id, tmdb_id, {"pinned": bool(value)}, media_type)
+
+
 def set_next_air_date(client, user_id: str, tmdb_id: int, when: Optional[str],
                       media_type: Optional[str] = None) -> bool:
     """Write a refreshed air/streaming date. True if a row actually changed.
@@ -126,6 +154,4 @@ def set_next_air_date(client, user_id: str, tmdb_id: int, when: Optional[str],
     showed it, the database kept the old one, and TMDB was re-queried on every single run
     forever. A write that reports how many rows it touched cannot hide like that.
     """
-    q = _scoped(client.table(TABLE).update({"next_air_date": when}),
-                client, user_id, tmdb_id, kind_of(tmdb_id, media_type))
-    return bool(q.execute().data or [])
+    return update_fields(client, user_id, tmdb_id, {"next_air_date": when}, media_type)

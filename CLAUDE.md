@@ -58,7 +58,27 @@ didn't actually reintroduce the bug. A check that has never failed has not been 
 
 **Every user-reported bug gets a regression test in the same commit as the fix.**
 
-## 3. Keep logic out of the UI
+## 3. One owner per table
+
+**Only `watchlist.py` writes to `shows`.** A self-test enforces it (migration and
+maintenance scripts are exempt; `movies.py` owns the movie rows).
+
+This is the fix for the defect that has produced every bug worth naming here. Six surfaces
+each had their own answer to *which columns identify a show* — app.py, genie.py,
+movies.py, show_status.py, dismissed.py and watchlist.py — so the same predicate existed in
+six forms, and a fix in one never reached the others:
+
+- `delete_show` matched region + provider_name: too NARROW, silently matched nothing.
+- Replacing that with `(user_id, tmdb_id)`: too WIDE, would delete the film sharing a
+  series' id.
+- `genie.add_show` named `on_conflict="user_id,tmdb_id,provider_name"` — no such
+  constraint since the one-row-per-show migration — so "add Ted Lasso" had been failing
+  with Postgres 42P10, untested, because the tests exercised app.py's path.
+
+When you find a bug here, the first question is **"is there a second implementation?"**,
+and the fix is usually to delete one rather than correct both.
+
+## 4. Keep logic out of the UI
 
 Native iOS/Android is the direction (PRODUCT.md). `recs.py`, `milestones.py`, `movies.py`,
 `tmdb.py`, `newsletter.py` are UI-agnostic and import no streamlit — they are the future
@@ -68,7 +88,7 @@ New behaviour goes in a module and is called from `app.py`, not written inline. 
 needs `st.` to work, it's presentation; if it doesn't, it belongs in a module where the
 self-test can reach it.
 
-## 4. Environment facts
+## 5. Environment facts
 
 - **The hosted app IS the dev environment.** `git push` to main auto-deploys to Streamlit
   Cloud. There is no staging.
@@ -77,7 +97,7 @@ self-test can reach it.
 - Streamlit is **pinned at 1.39.0** — check a widget's signature against the installed
   version, not against current docs.
 
-## 5. Deploying
+## 6. Deploying
 
 `git push` to main auto-deploys, but **Streamlit Cloud caches imported modules**. `app.py`
 is the script and re-executes every run; `tmdb.py`, `recs.py` and the rest are imports,
@@ -94,7 +114,7 @@ A guard at the top of app.py checks `_MODULE_CONTRACT` and shows that instructio
 of a raw AttributeError. Add to the contract when a module gains a function app.py depends
 on; the self-test keeps the manifest honest.
 
-## 6. Provider logos — settled, do not re-derive
+## 7. Provider logos — settled, do not re-derive
 
 **One lookup: `providers.logo_for`.** A logo never comes from stored state — no table, no
 session_state. A `logo_overrides` table sat FIRST in the chain until 2026-09-02 and
@@ -122,7 +142,7 @@ that were never broken. **Fix what was reported, not the whole category.**
 - **One lookup only.** `provider_logo_url` is it; `get_provider_logo_url` is a shim. A
   second implementation is what kept the co-branded icons alive after the first fix.
 
-## 7. Gotchas that have bitten us
+## 8. Gotchas that have bitten us
 
 - `set_page_config` must be the FIRST Streamlit call. `st.secrets` *renders* an element
   before it raises, so a try/except around it doesn't stop it claiming that slot.
@@ -155,7 +175,7 @@ that were never broken. **Fix what was reported, not the whole category.**
 - `.get(key, default)` falls back only when the KEY IS ABSENT. For a column that is present
   and NULL it returns None, and `.eq(col, None)` never matches SQL NULL.
 
-## 8. Reviewing alignment
+## 9. Reviewing alignment
 
 `python review.py` asks a model whether recent changes serve the product objective, and
 what QA is missing. **Advisory only — it never fails a build.** Use it before a batch of

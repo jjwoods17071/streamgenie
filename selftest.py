@@ -641,6 +641,55 @@ def main():
         import dismissed as _d
         assert _d.dismiss(None, None, 1) is False, "dismiss with no user must report False"
 
+    @check("Genie's add/remove/set-provider actually work")
+    def _():
+        """These were a sixth private copy of the watchlist CRUD, and add_show named
+        on_conflict="user_id,tmdb_id,provider_name" — columns with no matching unique
+        constraint since the one-row-per-show migration. So "add Ted Lasso" had been
+        failing with Postgres 42P10 the whole time, and nothing tested it because the
+        tests exercised app.py's path instead."""
+        import ast as _a, genie as _g
+        # unparse, so the explanatory COMMENT about on_conflict doesn't trip this
+        code = _a.unparse(_a.parse(open("genie.py").read()))
+        assert "on_conflict" not in code, \
+            "genie names its own conflict target again — that is how 42P10 happened"
+        try:
+            for tool, args in (("add_show", {"tmdb_id": TEST_TV}),
+                               ("set_provider", {"tmdb_id": TEST_TV,
+                                                 "provider_name": "Hulu"}),
+                               ("remove_show", {"tmdb_id": TEST_TV})):
+                out = _g._exec_tool(client, SANDBOX, tool, args)
+                assert "Couldn't" not in out and "isn't in the watchlist" not in out, \
+                    f"{tool} reported failure: {out}"
+            assert not client.table("shows").select("tmdb_id")\
+                .eq("user_id", SANDBOX).execute().data, "remove_show left the row behind"
+        finally:
+            sweep()
+
+    @check("only watchlist.py writes to the shows table")
+    def _():
+        """The root cause behind six bugs: every surface had its own answer to "which
+        columns identify a show", so the same predicate got written six different ways and
+        a fix in one never reached the others. One owner means the question is answered
+        once. Migration and maintenance scripts are exempt — they are deliberate one-offs
+        run by hand, not app code."""
+        import ast as _a, pathlib as _p
+        EXEMPT = {"watchlist.py", "selftest.py", "movies.py",
+                  "dedupe_shows.py", "migrate_to_supabase.py", "migrate_shows_to_user.py"}
+        bad = []
+        for f in _p.Path(".").glob("*.py"):
+            if f.name in EXEMPT:
+                continue
+            tree = _a.parse(f.read_text())
+            for n in _a.walk(tree):
+                if not (isinstance(n, _a.Call) and isinstance(n.func, _a.Attribute)):
+                    continue
+                if n.func.attr not in ("insert", "update", "upsert", "delete"):
+                    continue
+                if '.table(\'shows\')' in _a.unparse(n) or '.table("shows")' in _a.unparse(n):
+                    bad.append(f"{f.name}:{n.lineno}")
+        assert not bad, f"writes to shows outside watchlist.py: {bad}"
+
     @check("the same tmdb_id can be a show AND a film at once")
     def _():
         # The entire reason media_type exists: TMDB reuses ids across media types, so the

@@ -1385,10 +1385,10 @@ def render_show_page(show: Dict[str, Any], client=None, user_id=None) -> None:
                     with st.popover("📌 Set the app you'll use"):
                         _pick = st.selectbox("Which app will you watch on?", _tmdb_provs,
                                              key=f"pdp_setprov_{tmdb_id}")
-                        if st.button("Save", key=f"pdp_setprov_btn_{tmdb_id}", type="primary"):
-                            client.table("shows").update({"provider_name": _pick})\
-                                .eq("user_id", user_id).eq("tmdb_id", tmdb_id).execute()
-                            st.rerun()
+                        if st.button("Save", key=f"pdp_setprov_btn_{tmdb_id}",
+                                     type="primary"):
+                            if not watchlist.set_provider(client, user_id, tmdb_id, _pick):
+                                st.toast("Couldn't save that — nothing changed.", icon="⚠️")
                 else:
                     st.caption("✓ On your watchlist")
             else:
@@ -1623,9 +1623,7 @@ def set_pin(tmdb_id, value: bool) -> bool:
     that silently doesn't persist looks identical to one that did until the next reload.
     """
     try:
-        r = (client.table("shows").update({"pinned": bool(value)})
-             .eq("user_id", get_user_id()).eq("tmdb_id", tmdb_id).execute())
-        return bool(r.data)
+        return watchlist.set_pinned(client, get_user_id(), tmdb_id, value)
     except Exception as e:
         logger.warning("set_pin(%s, %s) failed: %s", tmdb_id, value, e)
         return False

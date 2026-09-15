@@ -52,7 +52,12 @@ it survives. **Treat "is there a second one?" as the first question in any bug h
    same shape of problem as everything above. With the anon key we can assert an anon read
    returns nothing and keep it as a permanent check. RLS was on once before and got
    silently disabled. Needs: the anon key (public by design). Effort: ~30 min.
-3. **Finish the silent-failure sweep.** The audit is done; the work isn't:
+3. ~~Finish the silent-failure sweep.~~ **Done 2026-09-14.** Zero swallowing writes
+   remain, and the root cause is closed structurally: `watchlist.py` is the only writer to
+   `shows`, enforced by a check. Doing that found `genie.add_show` had been failing with
+   Postgres 42P10 since the one-row-per-show migration — a live broken feature nothing
+   tested. **The API extraction in NEAR is no longer just portability work; it is the
+   correctness fix, and it should be treated as such.** Historical detail:
    - `logo_overrides` — **code removed 2026-09-02**; run
      `migrations/2026-09-02_drop_logo_overrides.sql` to drop the tables.
    - **Five writes whose failure is swallowed entirely** (`app.py` 1624/2383/2418,

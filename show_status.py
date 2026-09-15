@@ -120,11 +120,8 @@ def update_show_status(client: Client, user_id: str, tmdb_id: int, show_title: s
         if "web_intel" in enhanced:
             update_data["web_intel"] = str(enhanced["web_intel"])
 
-        client.table("shows")\
-            .update(update_data)\
-            .eq("user_id", user_id)\
-            .eq("tmdb_id", tmdb_id)\
-            .execute()
+        import watchlist            # deferred: watchlist calls us on insert
+        watchlist.update_fields(client, user_id, tmdb_id, update_data)
 
         logger.info(f"Updated status for {show_title} (ID: {tmdb_id}): {old_status} -> {new_status} | Enhanced: {enhanced['category']}")
 
