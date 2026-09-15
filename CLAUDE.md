@@ -145,6 +145,15 @@ that were never broken. **Fix what was reported, not the whole category.**
 - In a 5,000-line file, "unique-looking" text anchors often aren't (`get_show_meta` and
   `get_show_seasons` end identically). Prefer line-addressed edits; syntax-check after.
 - Never `git add -A` without reading `git status` — a screenshot got committed that way.
+- **A Supabase write that matches no rows does not raise.** `except: pass` around one hides
+  nothing, because there was no exception — the write simply did nothing. Check the
+  returned rows (`bool(r.data)`), and never mirror the new value into an in-memory dict
+  before confirming the row changed, or the UI shows a value the database doesn't have.
+- **A row's identity is `(user_id, tmdb_id, media_type)`.** Matching on less deletes the
+  film sharing a series' id; matching on more (region, provider_name) silently matches
+  nothing. Both mistakes have shipped here, in the same function, three days apart.
+- `.get(key, default)` falls back only when the KEY IS ABSENT. For a column that is present
+  and NULL it returns None, and `.eq(col, None)` never matches SQL NULL.
 
 ## 8. Reviewing alignment
 

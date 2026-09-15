@@ -34,12 +34,20 @@ def get_dismissed(client, user_id) -> set:
     return ids
 
 
-def dismiss(client, user_id, tmdb_id):
+def dismiss(client, user_id, tmdb_id) -> bool:
+    """Hide a show from Discover. True if it will still be hidden after a reload.
+
+    The session set is updated either way, so the click always LOOKS right; returning the
+    database result is the only way a caller can tell the difference between "hidden" and
+    "hidden until you refresh".
+    """
     _session_set().add(tmdb_id)
-    if user_id and _table_available(client):
-        try:
-            client.table("dismissed_shows").upsert(
-                {"user_id": user_id, "tmdb_id": tmdb_id}, on_conflict="user_id,tmdb_id"
-            ).execute()
-        except Exception:
-            pass
+    if not (user_id and _table_available(client)):
+        return False
+    try:
+        client.table("dismissed_shows").upsert(
+            {"user_id": user_id, "tmdb_id": tmdb_id}, on_conflict="user_id,tmdb_id"
+        ).execute()
+        return True
+    except Exception:
+        return False

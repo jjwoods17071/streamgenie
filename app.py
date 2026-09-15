@@ -1616,18 +1616,24 @@ def get_pinned_ids() -> set:
         return set()
 
 
-def set_pin(tmdb_id, value: bool) -> None:
-    """Pin/unpin a show (all provider rows for that tmdb_id). No-op if the
-    column doesn't exist yet."""
+def set_pin(tmdb_id, value: bool) -> bool:
+    """Pin/unpin a show. True if it stuck.
+
+    Returns a result instead of swallowing one: the user just clicked something, and a pin
+    that silently doesn't persist looks identical to one that did until the next reload.
+    """
     try:
-        (client.table("shows").update({"pinned": bool(value)})
-         .eq("user_id", get_user_id()).eq("tmdb_id", tmdb_id).execute())
-    except Exception:
-        pass
+        r = (client.table("shows").update({"pinned": bool(value)})
+             .eq("user_id", get_user_id()).eq("tmdb_id", tmdb_id).execute())
+        return bool(r.data)
+    except Exception as e:
+        logger.warning("set_pin(%s, %s) failed: %s", tmdb_id, value, e)
+        return False
 
 
 def _toggle_pin(tmdb_id, value: bool) -> None:
-    set_pin(tmdb_id, value)
+    if not set_pin(tmdb_id, value):
+        st.toast("Couldn't save that pin — it won't survive a reload.", icon="⚠️")
 
 
 def aired_episode_count(meta: dict) -> int:
@@ -2382,14 +2388,14 @@ def refresh_stale_air_dates(client: Client, shows: List[Dict[str, Any]]) -> List
                 details = tv_details(show["tmdb_id"])
                 new_next_air = discover_next_air_date(details)
 
-                # Update in database
-                client.table("shows")\
-                    .update({"next_air_date": new_next_air})\
-                    .eq("user_id", get_user_id())\
-                    .eq("tmdb_id", show["tmdb_id"])\
-                    .eq("region", show["region"])\
-                    .eq("provider_name", show.get("provider_name", "Netflix"))\
-                    .execute()
+                # Was matched on region AND provider_name — the same over-narrow predicate
+                # delete_show carried, and it could match zero rows without raising. The
+                # in-memory date below was then set regardless, so the UI looked fresh, the
+                # database stayed stale, and TMDB was re-queried every run forever.
+                if not watchlist.set_next_air_date(
+                        client, get_user_id(), show["tmdb_id"], new_next_air):
+                    logger.warning("next_air_date not written for tmdb_id=%s",
+                                   show["tmdb_id"])
 
                 # Update in the current list
                 show["next_air_date"] = new_next_air
@@ -2417,11 +2423,12 @@ def refresh_sports_air_dates(client: Client, shows: List[Dict[str, Any]]) -> Lis
             ng = sports.next_game(sports.get_team_schedule(league, team_id))
             nd = _game_local_date(ng) if ng else None
             if nd and nd != show.get("next_air_date"):
-                client.table("shows").update({"next_air_date": nd})\
-                    .eq("user_id", get_user_id()).eq("tmdb_id", tid).execute()
-                show["next_air_date"] = nd
-        except Exception:
-            pass
+                if watchlist.set_next_air_date(client, get_user_id(), tid, nd):
+                    show["next_air_date"] = nd
+                else:
+                    logger.warning("sports next_air_date not written for id=%s", tid)
+        except Exception as e:
+            logger.warning("sports refresh failed for id=%s: %s", tid, e)
     return shows
 
 
@@ -3705,8 +3712,14 @@ def _add_discovered(tmdb_id, title, overview, poster_path, provider="Multiple Pr
 
 
 def _dismiss_discovered(tmdb_id):
-    """Mark a discovered show 'Not interested' so it stops appearing in Discover."""
-    dismissed.dismiss(client, get_user_id(), tmdb_id)
+    """Mark a show 'Not interested' so it stops appearing in Discover.
+
+    The single dismiss path. It was five identical inline calls, which is how a fix lands
+    in one place and not the other four — the same shape as the two logo lookups.
+    """
+    if not _dismiss_discovered(tmdb_id):
+        st.toast("Hidden for now — but that didn't save, so it'll be back on reload.",
+                 icon="⚠️")
 
 
 def _exclude_genre(genre_key):
@@ -4526,7 +4539,7 @@ def _render_wildcard():
             if st.button("👎 Not for me", key=f"wild_no_{pick['tmdb_id']}",
                          use_container_width=True, help="Teaches Genie and rolls on"):
                 _vote_rec(pick["tmdb_id"], pick["title"], "down", rerun=False)
-                dismissed.dismiss(client, get_user_id(), pick["tmdb_id"])
+                _dismiss_discovered(pick["tmdb_id"])
                 st.session_state["_wild_roll"] = st.session_state.get("_wild_roll", 0) + 1
                 st.rerun()
         with b[2]:
@@ -5027,7 +5040,7 @@ if _view == "discover" and not _find_active:
                     except Exception as e:
                         st.error(f"Error")
                 if st.button(":material/block:", key=f"dis_new_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
-                    dismissed.dismiss(client, get_user_id(), tmdb_id)
+                    _dismiss_discovered(tmdb_id)
                     st.rerun()
     else:
         st.info("No new shows in the last 30 days")
@@ -5082,7 +5095,7 @@ if _view == "discover" and not _find_active:
                     except Exception as e:
                         st.error(f"Error")
                 if st.button(":material/block:", key=f"dis_trend_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
-                    dismissed.dismiss(client, get_user_id(), tmdb_id)
+                    _dismiss_discovered(tmdb_id)
                     st.rerun()
     else:
         st.info("No trending shows available")
@@ -5137,7 +5150,7 @@ if _view == "discover" and not _find_active:
                     except Exception as e:
                         st.error(f"Error")
                 if st.button(":material/block:", key=f"dis_top_{tmdb_id}", use_container_width=True, help="Not interested — hide this"):
-                    dismissed.dismiss(client, get_user_id(), tmdb_id)
+                    _dismiss_discovered(tmdb_id)
                     st.rerun()
     else:
         st.info("No top rated shows available")

@@ -11,6 +11,7 @@ Runtime-agnostic (no streamlit) — see ROADMAP.md on the module count.
 """
 from typing import Any, Dict, List, Optional
 
+import movies
 import show_status
 
 TABLE = "shows"
@@ -20,31 +21,61 @@ TABLE = "shows"
 PLACEHOLDER_PROVIDERS = (None, "", "Multiple Providers")
 
 
-def rows_for(client, user_id: str, tmdb_id: int) -> List[Dict[str, Any]]:
+def kind_of(tmdb_id: int, media_type: Optional[str] = None) -> str:
+    """The media_type for a row, derived from the id unless stated.
+
+    Sports follows are namespaced by NEGATIVE tmdb_id (sports.encode_id) — the same rule
+    the media_type migration used to backfill them. Defaulting to a literal "tv" instead
+    would mislabel every sports follow added from here on, and a mislabelled row is
+    invisible to the surface that owns it.
+    """
+    if media_type:
+        return media_type
+    return "sports" if (tmdb_id or 0) < 0 else "tv"
+
+
+def _scoped(q, client, user_id: str, tmdb_id: int, media_type: str):
+    """Narrow a query to exactly one show for one user.
+
+    (user_id, tmdb_id) is NOT enough: TMDB reuses ids across media types, which is the
+    entire reason the media_type column exists — 550 is both Fight Club and an unrelated
+    series. Leaving it out lets removing a show delete the film with the same id.
+    """
+    q = q.eq("user_id", user_id).eq("tmdb_id", tmdb_id)
+    return q.eq("media_type", media_type) if movies.media_type_available(client) else q
+
+
+def rows_for(client, user_id: str, tmdb_id: int,
+             media_type: Optional[str] = None) -> List[Dict[str, Any]]:
     """Every row this user has for this show, oldest first.
 
-    Ownership is per (user_id, tmdb_id). The table permits several provider rows per show
-    and that is how duplicates used to form, so every caller resolves through here rather
-    than assuming one row exists.
+    Ownership is per (user_id, tmdb_id, media_type). The table permits several provider
+    rows per show and that is how duplicates used to form, so every caller resolves
+    through here rather than assuming one row exists.
     """
-    return (client.table(TABLE)
-            .select("id, provider_name, on_provider, created_at")
-            .eq("user_id", user_id).eq("tmdb_id", tmdb_id)
-            .order("created_at").execute().data or [])
+    q = _scoped(client.table(TABLE).select("id, provider_name, on_provider, created_at"),
+                client, user_id, tmdb_id, kind_of(tmdb_id, media_type))
+    return q.order("created_at").execute().data or []
 
 
 def upsert(client, user_id: str, tmdb_id: int, title: str, region: str,
            on_provider: bool, next_air_date: Optional[str], overview: str,
-           poster_path: Optional[str], provider_name: str) -> str:
+           poster_path: Optional[str], provider_name: str,
+           media_type: Optional[str] = None) -> str:
     """Add or update one show. Returns "added" or "updated".
 
-    Invariant: ONE row per (user_id, tmdb_id), whatever the provider.
+    Invariant: ONE row per (user_id, tmdb_id, media_type), whatever the provider.
     """
-    existing = rows_for(client, user_id, tmdb_id)
+    media_type = kind_of(tmdb_id, media_type)
+    existing = rows_for(client, user_id, tmdb_id, media_type)
     data = {"user_id": user_id, "tmdb_id": tmdb_id, "title": title, "region": region,
             "on_provider": on_provider, "next_air_date": next_air_date,
             "overview": overview, "poster_path": poster_path,
             "provider_name": provider_name}
+    if movies.media_type_available(client):
+        # Explicit rather than trusting the column default: an add that relies on a
+        # default is an add that changes meaning if the default ever does.
+        data["media_type"] = media_type
 
     if existing:
         keeper = existing[0]                      # earliest row wins
@@ -64,19 +95,37 @@ def upsert(client, user_id: str, tmdb_id: int, title: str, region: str,
     return "added"
 
 
-def delete(client, user_id: str, tmdb_id: int) -> int:
+def delete(client, user_id: str, tmdb_id: int,
+           media_type: Optional[str] = None) -> int:
     """Remove a show from this user's watchlist. Returns how many rows went.
 
-    Matches on (user_id, tmdb_id) ONLY. It used to also require region and provider_name,
-    which contradicted the upsert invariant. provider_name is nullable and the caller
-    passed `row.get("provider_name", "Sports")` — which yields None for a NULL column,
-    because .get only falls back when the KEY is absent — and `.eq(col, None)` never
-    matches SQL NULL. So Remove did nothing, silently, while looking like it worked.
+    Scoped to (user_id, tmdb_id, media_type) — the same key upsert maintains.
 
-    No row in the data has a NULL provider today, so this was latent rather than live.
-    The predicate should still state the invariant instead of happening to agree with it.
+    It used to match on region and provider_name instead, which was too NARROW:
+    provider_name is nullable and the caller passed `row.get("provider_name", "Sports")`,
+    which yields None for a NULL column because .get only falls back when the KEY is
+    absent, and `.eq(col, None)` never matches SQL NULL. Remove did nothing, silently.
+
+    Dropping those exposed the opposite error — too WIDE. Without media_type, removing a
+    series would also delete the film sharing its TMDB id. Both are the same mistake:
+    matching on a set of columns that isn't the identity of the thing.
     """
-    gone = (client.table(TABLE).delete()
-            .eq("user_id", user_id).eq("tmdb_id", tmdb_id)
-            .execute().data or [])
-    return len(gone)
+    q = _scoped(client.table(TABLE).delete(), client, user_id, tmdb_id,
+                kind_of(tmdb_id, media_type))
+    return len(q.execute().data or [])
+
+
+def set_next_air_date(client, user_id: str, tmdb_id: int, when: Optional[str],
+                      media_type: Optional[str] = None) -> bool:
+    """Write a refreshed air/streaming date. True if a row actually changed.
+
+    Three copies of this update existed inline — for TV, for sports and for films — each
+    with its own predicate, each wrapped in `except: pass`. The TV one carried the same
+    over-narrow region/provider match as delete did, so it could match ZERO rows while
+    raising nothing: the caller then set the new date on its in-memory dict, so the UI
+    showed it, the database kept the old one, and TMDB was re-queried on every single run
+    forever. A write that reports how many rows it touched cannot hide like that.
+    """
+    q = _scoped(client.table(TABLE).update({"next_air_date": when}),
+                client, user_id, tmdb_id, kind_of(tmdb_id, media_type))
+    return bool(q.execute().data or [])

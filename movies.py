@@ -9,6 +9,7 @@ row's identity is (tmdb_id, media_type). See migrations/2026-08-24_media_type.sq
 
 Runtime-agnostic (no streamlit import) so selftest and the cron path can use it.
 """
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,8 @@ import requests
 import tmdb
 
 TMDB_BASE = "https://api.themoviedb.org/3"
+log = logging.getLogger(__name__)
+
 MEDIA_TYPE = "movie"
 
 
@@ -291,13 +294,20 @@ def enrich(client, user_id: str, region: str = "US") -> List[Dict[str, Any]]:
     for m in list_movies(client, user_id):
         info = release_info(m["tmdb_id"], region)
         if info.get("streaming") and info["streaming"] != m.get("next_air_date"):
+            # Only mirror into the dict if the row actually changed. Setting it regardless
+            # is what let the TV copy of this show a fresh date over a stale database and
+            # re-query TMDB on every run.
             try:
-                (client.table("shows").update({"next_air_date": info["streaming"]})
-                 .eq("user_id", user_id).eq("tmdb_id", m["tmdb_id"])
-                 .eq("media_type", MEDIA_TYPE).execute())
-                m["next_air_date"] = info["streaming"]
-            except Exception:
-                pass
+                r = (client.table("shows").update({"next_air_date": info["streaming"]})
+                     .eq("user_id", user_id).eq("tmdb_id", m["tmdb_id"])
+                     .eq("media_type", MEDIA_TYPE).execute())
+                if r.data:
+                    m["next_air_date"] = info["streaming"]
+                else:
+                    log.warning("streaming date not written for tmdb_id=%s", m["tmdb_id"])
+            except Exception as e:
+                log.warning("streaming date write failed for tmdb_id=%s: %s",
+                            m["tmdb_id"], e)
         out.append({**m, "info": info})
     return out
 

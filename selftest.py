@@ -543,6 +543,104 @@ def main():
         finally:
             sweep()
 
+    @check("removing a series doesn't delete the film with the same id")
+    def _():
+        """My own fix from earlier got this wrong in the other direction. delete used to
+        match on region AND provider_name (too narrow, so it silently matched nothing);
+        replacing that with (user_id, tmdb_id) was too WIDE, because TMDB reuses ids across
+        media types — which is the entire reason the media_type column exists. Both are the
+        same mistake: matching on a set of columns that isn't the identity of the thing."""
+        import watchlist as _w, movies as _m
+        if not _m.media_type_available(client):
+            return "media_type migration not run"
+        try:
+            _w.upsert(client, SANDBOX, TEST_MOVIE, "tv-550", "US", True, None, "", None,
+                      "Netflix")
+            client.table("shows").insert({
+                "user_id": SANDBOX, "tmdb_id": TEST_MOVIE, "media_type": "movie",
+                "title": "movie-550", "region": "US", "on_provider": True}).execute()
+            assert _w.delete(client, SANDBOX, TEST_MOVIE) == 1, "should remove only the series"
+            left = client.table("shows").select("media_type,title")\
+                .eq("user_id", SANDBOX).eq("tmdb_id", TEST_MOVIE).execute().data
+            assert [r["media_type"] for r in left] == ["movie"], \
+                f"the film should survive, got {left}"
+        finally:
+            sweep()
+
+    @check("a sports follow is never labelled as tv")
+    def _():
+        """Sports follows are namespaced by NEGATIVE tmdb_id, and the media_type migration
+        was a one-time backfill with no trigger behind it — the column just defaults to
+        'tv'. Hardcoding that default in the write path would mislabel every follow added
+        from here on, and a mislabelled row is invisible to the surface that owns it."""
+        import watchlist as _w, movies as _m, sports as _s
+        assert _w.kind_of(-1234) == "sports", "negative ids are sports follows"
+        assert _w.kind_of(1396) == "tv"
+        assert _w.kind_of(550, "movie") == "movie", "an explicit type must win"
+        if not _m.media_type_available(client):
+            return "media_type migration not run"
+        fake_id = _s.encode_id("nfl", "99999")
+        assert fake_id < 0, "sports ids must be negative for this to hold"
+        try:
+            _w.upsert(client, SANDBOX, fake_id, "Test Team", "US", True, None, "", None,
+                      "Sports")
+            row = client.table("shows").select("media_type")\
+                .eq("user_id", SANDBOX).eq("tmdb_id", fake_id).execute().data
+            assert row and row[0]["media_type"] == "sports", \
+                f"sports follow stored as {row and row[0]['media_type']}"
+            # ...and it can be removed again, which needs the same derivation
+            assert _w.delete(client, SANDBOX, fake_id) == 1, "sports follow wouldn't delete"
+        finally:
+            sweep()
+
+    @check("a write that changes nothing reports it instead of pretending")
+    def _():
+        """Three copies of the air-date update existed inline, each wrapped in
+        `except: pass`. The TV one carried the over-narrow predicate, so it could match
+        ZERO rows while raising nothing — the caller then set the date on its in-memory
+        dict, so the UI looked fresh, the database stayed stale, and TMDB was re-queried
+        every run forever. A write that returns a row count cannot hide like that."""
+        import watchlist as _w
+        try:
+            _w.upsert(client, SANDBOX, TEST_TV, "Breaking Bad", "US", True, None,
+                      "", None, "Netflix")
+            assert _w.set_next_air_date(client, SANDBOX, TEST_TV, "2030-01-01") is True
+            row = client.table("shows").select("next_air_date")\
+                .eq("user_id", SANDBOX).eq("tmdb_id", TEST_TV).execute().data
+            assert row[0]["next_air_date"] == "2030-01-01", row
+            # a show this user doesn't have must report False, not silently succeed
+            assert _w.set_next_air_date(client, SANDBOX, 999999, "2030-01-01") is False, \
+                "writing to a row that isn't there reported success"
+        finally:
+            sweep()
+
+    @check("user-initiated writes report failure instead of swallowing it")
+    def _():
+        """Five writes sat behind `except: pass`. For the two the user triggers directly —
+        pinning and 'Not interested' — that means the click looks like it worked and is
+        gone on reload. This asserts no swallowing write comes back anywhere."""
+        import ast as _a, pathlib as _p
+        bad = []
+        for f in _p.Path(".").glob("*.py"):
+            if f.name == "selftest.py":
+                continue
+            for n in _a.walk(_a.parse(f.read_text())):
+                if not isinstance(n, _a.Try):
+                    continue
+                src_ = _a.unparse(n)
+                if not any(w in src_ for w in (".insert(", ".update(", ".upsert(",
+                                               ".delete(")):
+                    continue
+                for h in n.handlers:
+                    if all(isinstance(b, _a.Pass)
+                           or (isinstance(b, _a.Return) and b.value is None)
+                           for b in h.body):
+                        bad.append(f"{f.name}:{n.lineno}")
+        assert not bad, f"writes whose failure is invisible: {bad}"
+        # dismiss must report, since the session set makes the click look right regardless
+        import dismissed as _d
+        assert _d.dismiss(None, None, 1) is False, "dismiss with no user must report False"
+
     @check("the same tmdb_id can be a show AND a film at once")
     def _():
         # The entire reason media_type exists: TMDB reuses ids across media types, so the

@@ -23,10 +23,6 @@ work on it.
       `logo_overrides` / `deleted_providers` is gone, so the tables are inert; this just
       drops them. Backup of the 5 rows is in the migration header and in
       `~/backups/streamgenie/2026-09-02-221407-logo_overrides.json`.
-- [ ] **5 database writes whose failure is invisible** (`app.py` 1624/2383/2418,
-      `dismissed.py:40`, `movies.py:294`) — `except: pass` around an insert/update. This
-      is the exact shape that hid the genre bug for weeks. At minimum they should return
-      a success flag the caller can surface.
 
 - [ ] **`genre_excludes` migration is obsolete** — `filter_prefs` replaced it and carries
       the data forward. The file stays only as history; don't run it.
