@@ -734,6 +734,42 @@ def main():
         if notes:
             return " / ".join(notes)
 
+    @check("the Netflix chart parses, merges and decodes correctly")
+    def _():
+        """Netflix's own weekly Top 10 — real viewing on the service holding 36 of the 89
+        titles in the library. Three things this guards, each of which bit during the
+        build:
+
+        1. The file is sorted by WEEK newest-first, so streaming stops at the first week
+           change. The per-country file is sorted by COUNTRY instead, which is why a
+           first attempt returned Argentina and then nothing.
+        2. requests' charset guess mangles titles — "Schumacher '94" arrived as mojibake
+           through iter_lines(decode_unicode=True). Decoded as UTF-8 explicitly now.
+        3. Netflix ranks within each language split, so a naive read yields two #1s.
+           Merged and re-ordered by hours viewed."""
+        import netflix_top10 as _n
+        wk = _n.fetch_week()
+        if not wk["week"]:
+            return "Netflix feed unreachable (see the source health check)"
+        import re as _re
+        assert _re.fullmatch(r"\d{4}-\d{2}-\d{2}", wk["week"]), f"week={wk['week']!r}"
+        assert len(wk["tv"]) >= 10 and len(wk["films"]) >= 10, \
+            f"expected 10+ each, got {len(wk['films'])} films / {len(wk['tv'])} TV"
+
+        for rail in ("films", "tv"):
+            hrs = [e["hours_viewed"] for e in wk[rail]]
+            assert hrs == sorted(hrs, reverse=True), \
+                f"{rail} not ordered by hours viewed — the language split leaked through"
+            assert hrs[0] > 0, f"{rail} top entry has no hours viewed"
+            assert all(e["title"] for e in wk[rail]), f"{rail} has a blank title"
+            # mojibake check: a correctly decoded feed has no replacement chars
+            assert not any("\ufffd" in e["title"] for e in wk[rail]), \
+                f"{rail} contains undecodable characters — charset handling regressed"
+
+        # and it must not be mistaken for an availability source
+        assert "films" in wk and "tv" in wk and "provider" not in wk, \
+            "this is a popularity chart, not a catalogue"
+
     @check("the portable modules import with no Streamlit at all")
     def _():
         """These modules are the future API (ROADMAP.md NEAR). A module that imports
@@ -750,7 +786,7 @@ def main():
                 "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
                 "genre_prefs", "notifications", "mailer", "show_status", "preferences",
                 "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter", "discover", "show_cache",
-                "sources"]
+                "sources", "netflix_top10"]
         # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
         # find_module blocker silently blocks nothing and this check passes for the wrong
         # reason — which it did, until putting streamlit back into sports.py failed to
