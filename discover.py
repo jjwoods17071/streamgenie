@@ -17,9 +17,8 @@ import datetime as dt
 from typing import List, Dict, Any, Callable, Set, Optional
 
 import requests
-import streamlit as st
 
-import genre_prefs
+import cache
 
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_BASE = "https://api.themoviedb.org/3"
@@ -56,7 +55,7 @@ def poster(p: Optional[str], size="w185") -> Optional[str]:
 
 
 # ---------------- provider discovery ----------------
-@st.cache_data(ttl=3600, show_spinner=False)
+@cache.memoize(ttl=3600)
 def discover_returning(provider_ids: tuple, region: str = "US", pages: int = 2) -> List[Dict[str, Any]]:
     """Popular *returning* series available on the given providers (deduped)."""
     if not provider_ids:
@@ -89,7 +88,7 @@ def discover_returning(provider_ids: tuple, region: str = "US", pages: int = 2) 
     return out
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@cache.memoize(ttl=86400)
 def stream_providers(tmdb_id: int, region: str = "US"):
     """[(provider_name, logo_path)] of subscription services a show is on (US)."""
     try:
@@ -105,103 +104,6 @@ def stream_providers(tmdb_id: int, region: str = "US"):
         return out[:4]
     except Exception:
         return []
-
-
-def _provider_chips(provs) -> None:
-    imgs = "".join(
-        f'<img src="{IMG}/w45{lp}" title="{nm}" alt="{nm}" '
-        f'style="height:22px;border-radius:4px;margin-right:5px;vertical-align:middle">'
-        for nm, lp in provs if lp)
-    if imgs:
-        st.markdown("📺&nbsp;" + imgs, unsafe_allow_html=True)
-
-
-def render_discover_section(region: str, watchlist_ids: Set[int], add_fn: Callable,
-                            dismissed_ids: Set[int] = frozenset(),
-                            dismiss_fn: Callable = None,
-                            excluded_genres: Set[str] = frozenset(),
-                            exclude_genre_fn: Callable = None) -> None:
-    st.caption("Pick your services and we'll surface **returning** shows on them — the ones with new episodes coming.")
-    default = [p for p in ["Max", "Netflix", "Apple TV+", "Paramount+", "Amazon Prime Video", "Hulu"]
-               if p in PROVIDERS]
-    picks = st.multiselect("Your streaming services", list(PROVIDERS.keys()),
-                           default=st.session_state.get("disc_providers", default),
-                           key="disc_providers")
-    # Run the search on click; persist results so the list stays put after each add.
-    if st.button("🔎 Find new & returning shows", key="disc_go"):
-        ids = tuple(i for p in picks for i in PROVIDERS[p])
-        st.session_state["disc_results"] = discover_returning(ids, region)
-
-    found = st.session_state.get("disc_results")
-    if not found:
-        return
-
-    owned = {int(x) for x in watchlist_ids if x is not None}
-    dismissed_set = {int(x) for x in dismissed_ids if x is not None}
-    excluded = set(excluded_genres or ())
-
-    def _hidden_reason(s):
-        if int(s["tmdb_id"]) in owned:
-            return "owned"
-        if int(s["tmdb_id"]) in dismissed_set:
-            return "dismissed"
-        if genre_prefs.show_genre_keys(s) & excluded:
-            return "genre"
-        return None
-
-    # Hide watchlisted shows, "Not interested" shows, and excluded genres — Discover is
-    # for new shows you might actually want.
-    visible = [s for s in found if _hidden_reason(s) is None]
-    _reasons = [_hidden_reason(s) for s in found]
-    hidden_owned = _reasons.count("owned")
-    hidden_dismissed = _reasons.count("dismissed")
-    hidden_genre = _reasons.count("genre")
-    note = f"**{len(visible)}** returning shows on your services not yet tracked"
-    extra = []
-    if hidden_owned:
-        extra.append(f"{hidden_owned} on your watchlist")
-    if hidden_dismissed:
-        extra.append(f"{hidden_dismissed} not interested")
-    if hidden_genre:
-        extra.append(f"{hidden_genre} hidden genre")
-    if extra:
-        note += "  ·  " + ", ".join(extra) + " (hidden)"
-    st.success(note + ".")
-
-    for s in visible[:30]:
-        with st.container(border=True):
-            c = st.columns([1, 5, 2])
-            with c[0]:
-                pu = poster(s["poster_path"])
-                if pu:
-                    st.image(pu, use_column_width=True)
-            with c[1]:
-                st.markdown(f"**{s['title']}** ({s['year']})  ⭐ {s['vote']:.1f}")
-                if s["overview"]:
-                    st.caption(s["overview"])
-                _provider_chips(stream_providers(s["tmdb_id"], region))
-            with c[2]:
-                # on_click keeps the results in place; the show drops off the list after
-                # adding/dismissing (next rerun recomputes the hidden sets).
-                _pv = stream_providers(s["tmdb_id"], region)
-                _pname = _pv[0][0] if _pv else "Multiple Providers"
-                st.button("➕ Add", key=f"disc_add_{s['tmdb_id']}", use_container_width=True,
-                          type="primary",
-                          on_click=add_fn,
-                          args=(s["tmdb_id"], s["title"], s["overview"], s["poster_path"], _pname))
-                if dismiss_fn is not None:
-                    st.button("🚫 Not interested", key=f"disc_dis_{s['tmdb_id']}",
-                              use_container_width=True,
-                              help="Hide this and stop suggesting it",
-                              on_click=dismiss_fn, args=(s["tmdb_id"],))
-                # Per-show genre exclude: hide every show of a genre this one belongs to.
-                if exclude_genre_fn is not None:
-                    for _gk in sorted(genre_prefs.show_genre_keys(s) - excluded):
-                        _glabel = genre_prefs.EXCLUDABLE_GENRES[_gk][0]
-                        st.button(f"🙈 Hide all {_glabel}", key=f"disc_gx_{_gk}_{s['tmdb_id']}",
-                                  use_container_width=True,
-                                  help=f"Stop showing {_glabel} shows in Discover (change in your profile)",
-                                  on_click=exclude_genre_fn, args=(_gk,))
 
 
 # ---------------- Netflix history import ----------------
@@ -222,7 +124,7 @@ def parse_netflix_titles(raw: bytes) -> List[str]:
     return sorted(titles)
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@cache.memoize(ttl=86400)
 def match_title(title: str) -> Optional[Dict[str, Any]]:
     """Best TMDB TV match for a title, with current status.
     Filters out movie→TV false positives (e.g. the film 'Damsel' matching an
@@ -283,54 +185,3 @@ def match_title(title: str) -> Optional[Dict[str, Any]]:
         }
     except Exception:
         return None
-
-
-def render_netflix_import(watchlist_ids: Set[int], add_fn: Callable) -> None:
-    st.caption("Export from **netflix.com/viewingactivity → Download all** (per-profile, on the website), "
-               "then upload `NetflixViewingHistory.csv` here. We'll add the still-returning series.")
-    up = st.file_uploader("Netflix viewing history (.csv)", type=["csv"], key="nflx_csv")
-    if not up:
-        return
-    titles = parse_netflix_titles(up.getvalue())
-    st.write(f"Found **{len(titles)}** unique titles in your history. Matching to TMDB…")
-
-    owned = {int(x) for x in watchlist_ids if x is not None}
-    returning, ended, already, seen = [], 0, 0, set()
-    prog = st.progress(0.0)
-    for i, t in enumerate(titles[:200]):  # cap to keep it responsive
-        m = match_title(t)
-        prog.progress((i + 1) / min(len(titles), 200))
-        if not m:
-            continue
-        tid = int(m["tmdb_id"])
-        if tid in owned:                 # already on the watchlist → filter out
-            already += 1
-            continue
-        if tid in seen:                  # duplicate match within this import
-            continue
-        seen.add(tid)
-        if m["status"] in ("Returning Series", "In Production", "Planned"):
-            returning.append(m)
-        else:
-            ended += 1
-    prog.empty()
-
-    if not returning:
-        st.info(f"No new still-returning series found — filtered out {already} already on your watchlist and {ended} ended.")
-        return
-
-    st.success(f"{len(returning)} still-returning series not yet on your watchlist "
-               f"(filtered out {already} already tracked + {ended} ended).")
-    if st.button(f"➕ Add all {len(returning)} returning series", key="nflx_add_all", type="primary"):
-        n = 0
-        for m in returning:
-            try:
-                add_fn(m["tmdb_id"], m["title"], m["overview"], m["poster_path"], "Netflix")
-                n += 1
-            except Exception:
-                pass
-        st.success(f"Added {n} shows to your watchlist!")
-        st.rerun()
-
-    for m in returning[:30]:
-        st.markdown(f"• **{m['title']}** — _{m['status']}_")

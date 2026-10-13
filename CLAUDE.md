@@ -88,6 +88,19 @@ New behaviour goes in a module and is called from `app.py`, not written inline. 
 needs `st.` to work, it's presentation; if it doesn't, it belongs in a module where the
 self-test can reach it.
 
+## 4a. The modules are portable — keep them that way
+
+**30 of 31 import no streamlit** (only `auth.py`, which a native client replaces outright).
+A self-test imports each one in a process where streamlit is **unavailable**; adding a
+module to that list is a decision, and `import streamlit` in any of them now fails the
+suite.
+
+**A grep for `import streamlit` is not the measure.** It called `newsletter` portable for
+months while `newsletter` imported `leaving_soon`, which imported streamlit — so the
+newsletter cron carried a UI framework. Transitive imports are the whole point.
+
+New UI goes in `app.py`. New logic goes in a module.
+
 ## 4b. No `@st.cache_data` in a portable module
 
 Use `cache.memoize(ttl=...)`. A module that imports streamlit cannot be loaded by a

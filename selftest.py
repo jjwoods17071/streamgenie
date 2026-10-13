@@ -525,7 +525,7 @@ def main():
         mods = ["cache", "observability", "sports", "watched", "dismissed", "filters",
                 "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
                 "genre_prefs", "notifications", "mailer", "show_status", "preferences",
-                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter"]
+                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter", "discover"]
         # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
         # find_module blocker silently blocks nothing and this check passes for the wrong
         # reason — which it did, until putting streamlit back into sports.py failed to
