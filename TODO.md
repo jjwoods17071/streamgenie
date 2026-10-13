@@ -41,10 +41,6 @@ work on it.
 - [ ] **`genre_excludes` migration is obsolete** — `filter_prefs` replaced it and carries
       the data forward. The file stays only as history; don't run it.
 
-- [ ] **`render_notifications_panel` lives in `notifications.py`** but is Streamlit
-      rendering. Those modules are the future native API and must stay import-safe;
-      presentation belongs in app.py. (Flagged by `review.py`.) Its dead sibling
-      `render_notifications_ui` is gone — the orphan check now scans every module.
 - [ ] **Deploys that change an imported module need a manual reboot** (Manage app → ⋮ →
       Reboot). Streamlit Cloud caches imports; only app.py re-executes. A guard now
       detects it and says so, but the reboot is still manual. Worth checking whether the
