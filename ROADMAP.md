@@ -94,18 +94,27 @@ checks against the invariant, not against the shape of the last bug.
 Nothing here is user-visible. It is what turns "a Streamlit app" into "a product with a
 UI attached", and it can be done incrementally while the app keeps running.
 
-1. **Finish decoupling the modules — 26 of 30** (was 22/29; `cache.py` is new).
+1. **Finish decoupling the modules — 20 verified portable** by import, with 3 still
+   streamlit-bound and `newsletter` blocked behind one of them.
    Done 2026-10-12: `sports`, `watched` and `dismissed` moved off `@st.cache_data` onto
-   `cache.memoize`, and `dismissed`'s optimistic set moved to the caller.
+   `cache.memoize`, `dismissed`'s optimistic set moved to the caller, and
+   `notifications` lost its one renderer.
    **Remaining four, and they are not equal work:**
    - `auth.py` (690L) — **needs no porting at all.** Supabase's own client SDKs do auth
      and session persistence natively; a phone replaces this file rather than importing
      it. It is the biggest name on the list and it is free.
-   - `notifications.py` (482L, 12 `st.` calls), `discover.py` (336L, 17),
-     `leaving_soon.py` (247L, 35 — mostly an admin panel). These need UI split from data,
-     which is real work, unlike the three just done.
+   - ~~`notifications.py`~~ **done 2026-10-12** — `render_notifications_panel` moved to
+     app.py (13 of its 14 functions were already pure) and its three
+     `st.button(): work(); st.rerun()` pairs became `on_click`.
+   - `discover.py` (336L, 17 `st.` calls) and `leaving_soon.py` (247L, 35 — mostly an
+     admin panel) still need UI split from data.
 
-   So the honest remaining figure is ~1,065 lines across three files, not four modules.
+   **The grep overstates this.** `newsletter.py` imports no streamlit itself but imports
+   `leaving_soon`, which does — so it is not portable, and the newsletter CRON has been
+   carrying a UI framework for no reason. The self-test now measures portability by
+   importing each module in a process where streamlit is unavailable, which is the only
+   honest version. **`leaving_soon` is therefore the higher-value of the two remaining
+   splits: it frees `newsletter` as well.**
 
 2. **Stand up a small HTTP API** (FastAPI) over the decoupled modules. Endpoints follow
    what the UI already asks for: recommendations, wildcard, release info, milestones,

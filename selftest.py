@@ -517,9 +517,15 @@ def main():
         so "does it import streamlit" is the actual acceptance test, and it has to be run
         in a process where streamlit is UNAVAILABLE, not merely unused."""
         import subprocess, sys as _sys
+        # Deliberately a list of modules that are portable TODAY, so adding one is a
+        # decision. newsletter is NOT here: it imports leaving_soon, which imports
+        # streamlit — so the "imports no streamlit" grep overstates portability, and this
+        # subprocess import is the honest measure. newsletter joins when leaving_soon
+        # splits, which also stops the cron carrying a UI framework.
         mods = ["cache", "observability", "sports", "watched", "dismissed", "filters",
                 "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
-                "genre_prefs"]
+                "genre_prefs", "notifications", "mailer", "show_status", "preferences",
+                "production_intel", "calendar_ics", "genie"]
         # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
         # find_module blocker silently blocks nothing and this check passes for the wrong
         # reason — which it did, until putting streamlit back into sports.py failed to

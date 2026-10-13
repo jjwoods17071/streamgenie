@@ -98,6 +98,9 @@ _MODULE_CONTRACT = {
     watchlist: ("upsert", "delete", "rows_for", "PLACEHOLDER_PROVIDERS"),
     cache: ("memoize", "clear", "stats"),
     observability: ("init", "capture", "enabled"),
+    notifications: ("get_unread_count", "get_user_notifications", "create_notification",
+                    "mark_notification_read", "mark_all_notifications_read",
+                    "delete_notification", "format_notification_time"),
     dismissed: ("get_dismissed", "dismiss", "table_available"),
     watched: ("table_available", "get_watched", "set_watched"),
     filters: ("get_state", "active_keys", "set_enabled", "suspend", "resume",
@@ -4947,6 +4950,106 @@ def render_service_filter():
                 st.session_state["_facet_provider"] = want
 
 
+def _notif_mark_all(client, user_id):
+    notifications.mark_all_notifications_read(client, user_id)
+
+
+def _notif_read(client, notification_id):
+    notifications.mark_notification_read(client, notification_id)
+
+
+def _notif_delete(client, notification_id):
+    notifications.delete_notification(client, notification_id)
+
+
+def render_notifications_panel(client: Client, user_id: str, key_prefix: str = ""):
+    """The notifications list — header, mark-all, items — drawn into the current container.
+
+    Lived in notifications.py until 2026-10-12, which is what stopped that module being
+    importable by a cron job, a FastAPI worker or a phone's backend. 13 of its 14
+    functions were already pure; this was the only one that wasn't, so it moved here and
+    the module became portable. See ROADMAP.md on the module count.
+
+    Container-agnostic, so it works in a popover or anywhere else. key_prefix keeps widget
+    keys unique if it is ever drawn twice on one page.
+    """
+    unread_count = notifications.get_unread_count(client, user_id)
+
+    # Notifications header with badge
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### 🔔 Notifications")
+    with col2:
+        if unread_count > 0:
+            st.markdown(f"<span style='background-color: #ff4b4b; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;'>{unread_count}</span>", unsafe_allow_html=True)
+
+    # NOT named `notifications` — that shadowed the module. It was harmless while this
+    # function lived inside notifications.py and never referred to it by name.
+    items = notifications.get_user_notifications(client, user_id, unread_only=False,
+                                                 limit=10)
+    if not items:
+        st.info("No notifications yet")
+        return
+
+    # Mark all as read button
+    if unread_count > 0:
+        st.button("✓ Mark all as read", use_container_width=True,
+                  key=f"{key_prefix}mark_all",
+                  on_click=_notif_mark_all, args=(client, user_id))
+
+    # Display notifications
+    for notification in items:
+        with st.container():
+            # Theme-relative, not hardcoded light. These were #f0f2f6 / #e3f2fd with
+            # #666 body text, which read as bright slabs once the app went dark.
+            bg_color = ("rgba(255,255,255,.04)" if notification["is_read"]
+                        else "rgba(102,126,234,.16)")
+            type_emoji = {
+                "new_episode": "🎬",
+                "reminder": "⏰",
+                "status_change": "🔄",
+                "system": "ℹ️"
+            }.get(notification["notification_type"], "📢")
+
+            # Escape dynamic text so titles/messages can't break the layout or inject markup.
+            title_html = html.escape(notification['title'] or "")
+            message_html = html.escape(notification['message'] or "")
+            time_html = html.escape(notifications.format_notification_time(notification['created_at']))
+            show_line = ""
+            if notification.get("related_show_title"):
+                show_title_html = html.escape(notification["related_show_title"])
+                show_line = (
+                    f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #667eea;">'
+                    f'📺 {show_title_html}</p>'
+                )
+
+            # Single-line HTML rendered via st.html() — no Markdown pass, so an empty
+            # optional line can't terminate the block early and leak raw tags as text.
+            card_html = (
+                f'<div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; '
+                f'margin-bottom: 8px; border-left: 4px solid #667eea; font-size:15px;">'
+                f'<div style="display: flex; align-items: start; justify-content: space-between;">'
+                f'<div style="flex: 1;">'
+                f'<strong style="font-size:15px">{type_emoji} {title_html}</strong>'
+                f'<p style="margin: 4px 0 0 0; font-size: 14px; opacity: .85;">{message_html}</p>'
+                f'{show_line}'
+                f'<p style="margin: 4px 0 0 0; font-size: 12px; opacity: .6;">{time_html}</p>'
+                f'</div></div></div>'
+            )
+            st.html(card_html)
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if not notification["is_read"]:
+                    st.button("✓ Read", use_container_width=True,
+                              key=f"{key_prefix}read_{notification['id']}",
+                              on_click=_notif_read, args=(client, notification["id"]))
+            with col2:
+                st.button("🗑️ Delete", use_container_width=True,
+                          key=f"{key_prefix}delete_{notification['id']}",
+                          on_click=_notif_delete, args=(client, notification["id"]))
+
+
 def render_top_nav():
     """Category bar + visible facets above the content, the way a product listing page
     does it. Returns the selected view key.
@@ -4973,7 +5076,7 @@ def render_top_nav():
         with st.popover(f"🔔 {unread}" if unread else "🔔",
                         use_container_width=True,
                         help=f"{unread} unread" if unread else "Notifications"):
-            notifications.render_notifications_panel(client, uid, key_prefix="hdr_")
+            render_notifications_panel(client, uid, key_prefix="hdr_")
     view = VIEWS[label]
 
     if view == "watch":

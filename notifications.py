@@ -2,7 +2,6 @@
 Notifications module for StreamGenie
 Handles in-app notifications, email notifications, and realtime updates
 """
-import streamlit as st
 from supabase import Client
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -264,84 +263,6 @@ def get_unread_count(client: Client, user_id: str) -> int:
         print(f"Error getting unread count: {e}")
         return 0
 
-
-def render_notifications_panel(client: Client, user_id: str, key_prefix: str = ""):
-    """Render the notifications list (header, mark-all, items) into the current container.
-    Container-agnostic so it works in the sidebar OR a header popover. key_prefix keeps
-    widget keys unique when the panel is rendered in more than one place."""
-    unread_count = get_unread_count(client, user_id)
-
-    # Notifications header with badge
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("### 🔔 Notifications")
-    with col2:
-        if unread_count > 0:
-            st.markdown(f"<span style='background-color: #ff4b4b; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold;'>{unread_count}</span>", unsafe_allow_html=True)
-
-    notifications = get_user_notifications(client, user_id, unread_only=False, limit=10)
-
-    if not notifications:
-        st.info("No notifications yet")
-        return
-
-    # Mark all as read button
-    if unread_count > 0:
-        if st.button("✓ Mark all as read", use_container_width=True, key=f"{key_prefix}mark_all"):
-            mark_all_notifications_read(client, user_id)
-            st.rerun()
-
-    # Display notifications
-    for notification in notifications:
-        with st.container():
-            # Theme-relative, not hardcoded light. These were #f0f2f6 / #e3f2fd with
-            # #666 body text, which read as bright slabs once the app went dark.
-            bg_color = ("rgba(255,255,255,.04)" if notification["is_read"]
-                        else "rgba(102,126,234,.16)")
-            type_emoji = {
-                "new_episode": "🎬",
-                "reminder": "⏰",
-                "status_change": "🔄",
-                "system": "ℹ️"
-            }.get(notification["notification_type"], "📢")
-
-            # Escape dynamic text so titles/messages can't break the layout or inject markup.
-            title_html = html.escape(notification['title'] or "")
-            message_html = html.escape(notification['message'] or "")
-            time_html = html.escape(format_notification_time(notification['created_at']))
-            show_line = ""
-            if notification.get("related_show_title"):
-                show_title_html = html.escape(notification["related_show_title"])
-                show_line = (
-                    f'<p style="margin: 4px 0 0 0; font-size: 12px; color: #667eea;">'
-                    f'📺 {show_title_html}</p>'
-                )
-
-            # Single-line HTML rendered via st.html() — no Markdown pass, so an empty
-            # optional line can't terminate the block early and leak raw tags as text.
-            card_html = (
-                f'<div style="background-color: {bg_color}; padding: 12px; border-radius: 8px; '
-                f'margin-bottom: 8px; border-left: 4px solid #667eea; font-size:15px;">'
-                f'<div style="display: flex; align-items: start; justify-content: space-between;">'
-                f'<div style="flex: 1;">'
-                f'<strong style="font-size:15px">{type_emoji} {title_html}</strong>'
-                f'<p style="margin: 4px 0 0 0; font-size: 14px; opacity: .85;">{message_html}</p>'
-                f'{show_line}'
-                f'<p style="margin: 4px 0 0 0; font-size: 12px; opacity: .6;">{time_html}</p>'
-                f'</div></div></div>'
-            )
-            st.html(card_html)
-
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                if not notification["is_read"]:
-                    if st.button("✓ Read", key=f"{key_prefix}read_{notification['id']}", use_container_width=True):
-                        mark_notification_read(client, notification["id"])
-                        st.rerun()
-            with col2:
-                if st.button("🗑️ Delete", key=f"{key_prefix}delete_{notification['id']}", use_container_width=True):
-                    delete_notification(client, notification["id"])
-                    st.rerun()
 
 
 def format_notification_time(timestamp_str: str) -> str:
