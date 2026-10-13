@@ -101,18 +101,37 @@ def shape_show(d: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def fetch_shows(tv_ids) -> Dict[int, Dict[str, Any]]:
+def fetch_shows(tv_ids, cache=None) -> Dict[int, Dict[str, Any]]:
     """THE source of shaped show records. Every caller goes through here.
 
-    Today this is TMDB. The intended next step is a shared `show_cache` table read first
-    with TMDB as the miss path — see SCALING.md. It lives HERE rather than in app.py so a
-    native client can use it: business logic outside the Streamlit layer is the whole
-    reason the modules are import-safe.
+    Pass `cache` (a show_cache.Store) and it is read first, with TMDB as the miss path and
+    a write-back of whatever TMDB returned. Injected rather than imported so this module
+    keeps no Supabase dependency and stays importable by anything — and so there is still
+    exactly ONE function that answers "give me show records". A second entry point is how
+    this project's worst bugs have started.
 
     Fetches concurrently and skips ids that fail, so one bad id never loses the batch.
     """
     ids = list(tv_ids)
     if not ids:
         return {}
-    records = parallel_map(lambda t: get(f"/tv/{t}"), ids)
-    return {tid: shape_show(d) for tid, d in zip(ids, records) if d}
+
+    out: Dict[int, Dict[str, Any]] = {}
+    if cache is not None:
+        try:
+            out = dict(cache.get_many(ids))
+        except Exception:
+            out = {}                      # a broken cache must only cost speed
+    missing = [t for t in ids if t not in out]
+    if not missing:
+        return out
+
+    records = parallel_map(lambda t: get(f"/tv/{t}"), missing)
+    fresh = {tid: shape_show(d) for tid, d in zip(missing, records) if d}
+    out.update(fresh)
+    if cache is not None and fresh:
+        try:
+            cache.put_many(fresh)
+        except Exception:
+            pass
+    return out

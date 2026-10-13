@@ -12,7 +12,10 @@ work on it.
 
 ## Parked deliberately
 
-- [ ] **`show_cache` table.** Design, measurements and limits are in SCALING.md; the swap
+- [ ] **Run `migrations/2026-10-12_show_cache.sql`**, then add `--job showcache` to the
+      GitHub Actions cron. The code is built and tested but is a deliberate no-op until
+      the table exists.
+- [x] ~~**`show_cache` table.**~~ Built 2026-10-12. Design, measurements and limits in SCALING.md; the swap
       point is `tmdb.fetch_shows`. Build it when a second real user appears, or when cold
       loads become annoying. It will NOT reduce AI token use — that was measured and is a
       separate system.

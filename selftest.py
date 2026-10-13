@@ -569,6 +569,141 @@ def main():
         assert "SUPABASE_KEY" not in src, \
             "api.py reads the service key; it must act as the user so RLS still applies"
 
+    @check("show_cache refreshes by volatility, not on a blanket schedule")
+    def _():
+        """Of 25 shows sampled for SCALING.md, 9 were Ended or Canceled — records that
+        will never change again. Refreshing those nightly is the difference between a job
+        that scales and one that doesn't."""
+        import datetime as _dt
+        import show_cache as _sc
+        now = _dt.datetime(2026, 10, 12, tzinfo=_dt.timezone.utc)
+        soon = (now.date() + _dt.timedelta(days=3)).isoformat()
+        far = (now.date() + _dt.timedelta(days=90)).isoformat()
+        cases = [
+            ({"status": "Ended"}, _sc.TIER_MONTHLY, "ended shows never change"),
+            ({"status": "Canceled"}, _sc.TIER_MONTHLY, "canceled shows never change"),
+            ({"status": "Returning Series",
+              "next_episode_to_air": {"air_date": soon}}, _sc.TIER_DAILY,
+             "an episode this week is volatile"),
+            ({"status": "Returning Series",
+              "next_episode_to_air": {"air_date": far}}, _sc.TIER_DAILY,
+             "dated at all means it is moving"),
+            ({"status": "Returning Series"}, _sc.TIER_WEEKLY,
+             "returning but undated changes slowly"),
+            ({}, _sc.TIER_WEEKLY, "unknown status must not get the monthly tier"),
+        ]
+        for payload, expected, why in cases:
+            got = _sc.refresh_delay(payload, now)
+            assert got == expected, f"{why}: expected {expected}, got {got} for {payload}"
+        # a malformed date must not raise — TMDB sends odd values
+        _sc.refresh_delay({"status": "Returning Series",
+                           "next_episode_to_air": {"air_date": "not-a-date"}}, now)
+
+    @check("fetch_shows reads the cache, writes back, and survives a broken one")
+    def _():
+        """tmdb.fetch_shows is the ONE source of show records; the cache is injected so
+        tmdb.py keeps no Supabase dependency and there is still only one function that
+        answers "give me show records". These assert the contract with a fake store, so
+        they need neither the table nor the network."""
+        import tmdb as _t
+
+        class Fake:
+            def __init__(self, holding=None, explode=False):
+                self.holding = holding or {}
+                self.written = {}
+                self.explode = explode
+                self.reads = 0
+            def get_many(self, ids):
+                self.reads += 1
+                if self.explode:
+                    raise RuntimeError("cache is down")
+                return {i: self.holding[i] for i in ids if i in self.holding}
+            def put_many(self, records):
+                if self.explode:
+                    raise RuntimeError("cache is down")
+                self.written.update(records)
+                return len(records)
+
+        # a full hit must not touch TMDB at all
+        hit = Fake({1396: {"name": "Breaking Bad", "status": "Ended"}})
+        calls = []
+        real_get = _t.get
+        _t.get = lambda path, params=None: calls.append(path) or {"id": 1, "name": "x"}
+        try:
+            got = _t.fetch_shows([1396], cache=hit)
+            assert got[1396]["name"] == "Breaking Bad", got
+            assert not calls, f"a cache hit still called TMDB: {calls}"
+
+            # a miss fetches and writes back
+            miss = Fake()
+            calls.clear()
+            got = _t.fetch_shows([99], cache=miss)
+            assert calls, "a miss should have called TMDB"
+            assert 99 in miss.written, f"nothing written back: {miss.written}"
+
+            # a broken cache must cost speed, never correctness
+            broken = Fake(explode=True)
+            calls.clear()
+            got = _t.fetch_shows([77], cache=broken)
+            assert got and 77 in got, f"a broken cache lost the result: {got}"
+            assert calls, "should have fallen through to TMDB"
+
+            # and no cache at all still works, exactly as before
+            calls.clear()
+            assert _t.fetch_shows([55]) , "the uncached path regressed"
+            assert _t.fetch_shows([], cache=hit) == {}, "empty in, empty out"
+        finally:
+            _t.get = real_get
+
+    @check("show_cache is a no-op before its migration runs")
+    def _():
+        """PRODUCT.md principle 6: no migration means the feature gets quieter, not
+        broken. Every read must fall through to TMDB and every write must do nothing."""
+        import show_cache as _sc
+        store = _sc.Store(client)
+        if _sc.table_available(client):
+            st_ = _sc.stats(client)
+            assert st_["available"] and st_["cached"] is not None, st_
+            return f"table exists ({st_['cached']} cached) — no-op path not exercised"
+        assert store.get_many([1396]) == {}, "a missing table should read as empty"
+        assert store.put_many({1396: {"name": "x"}}) == 0, "a missing table wrote anyway"
+        assert _sc.due_for_refresh(client) == [], "due_for_refresh should be empty"
+        assert _sc.stats(client) == {"available": False}, _sc.stats(client)
+
+    @check("the refresh job stops at its time budget")
+    def _():
+        """Time-boxed so the job is never all-or-nothing: at any scale it refreshes what
+        it can and resumes next run, instead of timing out and refreshing nothing."""
+        import show_cache as _sc
+        ids = list(range(1, 201))
+        seen = []
+
+        class FakeClient:
+            pass
+
+        def fake_fetch(batch):
+            seen.extend(batch)
+            import time as _tm
+            _tm.sleep(0.05)
+            return {b: {"status": "Ended"} for b in batch}
+
+        # drive refresh_due with the lookup and store stubbed out
+        real_due, real_store, real_avail = (_sc.due_for_refresh, _sc.Store,
+                                            _sc.table_available)
+        _sc.due_for_refresh = lambda c, limit=400, media_type="tv": ids
+        _sc.Store = lambda c, media_type="tv": type(
+            "S", (), {"put_many": staticmethod(lambda r: len(r))})()
+        try:
+            out = _sc.refresh_due(FakeClient(), fake_fetch, limit=200, chunk=10,
+                                  budget_seconds=0.12, log_fn=lambda m: None)
+        finally:
+            _sc.due_for_refresh, _sc.Store, _sc.table_available = (real_due, real_store,
+                                                                   real_avail)
+        assert out["due"] == 200, out
+        assert out["refreshed"] < 200, \
+            f"budget ignored — refreshed all {out['refreshed']} of 200"
+        assert out["refreshed"] > 0, f"budget too tight to do any work: {out}"
+
     @check("the portable modules import with no Streamlit at all")
     def _():
         """These modules are the future API (ROADMAP.md NEAR). A module that imports
@@ -584,7 +719,7 @@ def main():
         mods = ["cache", "observability", "sports", "watched", "dismissed", "filters",
                 "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
                 "genre_prefs", "notifications", "mailer", "show_status", "preferences",
-                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter", "discover"]
+                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter", "discover", "show_cache"]
         # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
         # find_module blocker silently blocks nothing and this check passes for the wrong
         # reason — which it did, until putting streamlit back into sports.py failed to

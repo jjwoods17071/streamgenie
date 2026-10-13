@@ -25,6 +25,8 @@ load_dotenv()
 from supabase import create_client
 import notifications
 import scheduled_tasks
+import tmdb
+import show_cache
 import show_status
 import leaving_soon
 
@@ -133,11 +135,33 @@ def run_status(client, dry: bool):
     log(f"  status: {changed} status change(s) across {len(users)} users")
 
 
+def run_showcache(client, dry: bool):
+    """Refresh expired show_cache rows, oldest first, inside a wall-clock budget.
+
+    Time-boxed on purpose: the job is never all-or-nothing, so at any scale it refreshes
+    what it can and resumes next run. Staleness grows gradually instead of the whole job
+    timing out and refreshing nothing (SCALING.md).
+    """
+    log("JOB showcache: refresh expired TMDB records")
+    if not show_cache.table_available(client):
+        log("  showcache: table not present — run migrations/2026-10-12_show_cache.sql")
+        return
+    st_ = show_cache.stats(client)
+    log(f"  cached={st_.get('cached')} stale={st_.get('stale')}")
+    if dry:
+        due = show_cache.due_for_refresh(client, limit=400)
+        log(f"  [dry-run] would refresh {len(due)} expired record(s)")
+        return
+    result = show_cache.refresh_due(client, tmdb.fetch_shows, log_fn=log)
+    log(f"  showcache: {result}")
+
+
 # ---------------- main ----------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--job", default="all",
-                    choices=["all", "daily", "leaving", "status", "weekly"])
+                    choices=["all", "daily", "leaving", "status", "weekly",
+                             "showcache"])
     ap.add_argument("--leaving-window", type=int, default=7)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -153,6 +177,8 @@ def main():
         run_leaving(client, args.leaving_window, dry)
     if job in ("all", "status"):
         run_status(client, dry)
+    if job in ("all", "showcache"):
+        run_showcache(client, dry)
     # weekly preview: explicit --job weekly, or Sundays under --job all
     if job == "weekly" or (job == "all" and dt.date.today().weekday() == 6):
         run_weekly(client, dry)

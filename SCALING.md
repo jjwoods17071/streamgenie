@@ -1,4 +1,20 @@
-# Scaling notes — the show cache we deliberately did NOT build
+# Scaling notes — the show cache (BUILT 2026-10-12)
+
+> **Status: built, not yet live.** Code is in `show_cache.py`, wired through
+> `tmdb.fetch_shows(ids, cache=...)`, with a `cron_runner.py --job showcache` refresher.
+> It is a **no-op until `migrations/2026-10-12_show_cache.sql` is run** — every read
+> falls through to TMDB exactly as before, so nothing changes until you run it.
+>
+> Built when the trigger below was met from the other direction: not a second user, but
+> a second *consumer*. `api.py` and a future phone client multiply the same fan-out one
+> Streamlit session used to absorb alone.
+>
+> One design change from the plan: `get_many` returns only FRESH rows, so an expired row
+> is a miss and the caller re-fetches and writes it back. The cache self-heals even if
+> the cron never runs, which makes the cron a latency optimisation rather than
+> load-bearing.
+
+## Original notes (the case for deferring)
 
 Measured 2026-08-31, at 3 users / 99 watchlist rows. Written down so the next person
 (or the next me) doesn't re-derive it.

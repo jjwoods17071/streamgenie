@@ -31,6 +31,7 @@ import genre_prefs  # Genre classification for Discover/recs (hides live in filt
 import watchlist  # add/update/remove a show — the write paths, testable
 import cache  # TTL memoization for the streamlit-free modules
 import observability  # error reporting; no-op without SENTRY_DSN
+import show_cache  # shared TMDB record cache (no-op before its migration)
 import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
@@ -99,6 +100,7 @@ _MODULE_CONTRACT = {
                 "set_next_air_date", "set_provider", "update_fields", "kind_of"),
     cache: ("memoize", "clear", "stats"),
     observability: ("init", "capture", "enabled"),
+    show_cache: ("Store", "refresh_due", "due_for_refresh", "stats", "table_available"),
     discover: ("discover_returning", "stream_providers", "match_title",
                "parse_netflix_titles", "poster", "PROVIDERS"),
     leaving_soon: ("get_active", "list_entries", "add_entry", "delete_entry",
@@ -447,11 +449,21 @@ def get_milestone(tv_id:int) -> Optional[Dict[str, Any]]:
         return None
 
 
+@st.cache_resource(show_spinner=False)
+def _show_store():
+    """The shared show_cache, as one object for the process.
+
+    A no-op until migrations/2026-10-12_show_cache.sql is run: it reports nothing cached
+    and every read falls through to TMDB, exactly as before.
+    """
+    return show_cache.Store(client)
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_show_meta(tv_id:int) -> Dict[str, Any]:
     """Cached high-level show metadata for the detail panel (6h TTL)."""
     try:
-        return tmdb.fetch_shows([tv_id]).get(tv_id, {})
+        return tmdb.fetch_shows([tv_id], cache=_show_store()).get(tv_id, {})
     except Exception:
         return {}
 
@@ -478,7 +490,7 @@ def get_show_meta_many(tv_ids: tuple) -> Dict[int, Dict[str, Any]]:
 
     missing = [t for t in tv_ids if t not in store]
     if missing:
-        fetched = tmdb.fetch_shows(missing) or {}
+        fetched = tmdb.fetch_shows(missing, cache=_show_store()) or {}
         store.update(fetched)
         st.session_state["_meta_store"] = store    # re-assign, don't assume by-reference
     return {t: store[t] for t in tv_ids if t in store}
