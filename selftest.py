@@ -704,6 +704,36 @@ def main():
             f"budget ignored — refreshed all {out['refreshed']} of 200"
         assert out["refreshed"] > 0, f"budget too tight to do any work: {out}"
 
+    @check("every external data source still answers the shape we expect")
+    def _():
+        """External sources change silently. Two found drifted on 2026-10-13 while
+        investigating whether availability could be sourced per streaming service:
+        Apple's media=tvShow filter now returns zero (the rows are still indexed, just
+        unreachable through the filter), and Netflix's Top 10 feed moved host.
+
+        Neither was load-bearing, and neither would have been noticed. So the sources we
+        DO depend on fail this check, and the ones we don't are reported."""
+        import sources as _s
+        results = _s.check_all(os.environ["TMDB_API_KEY"])
+        by = {r["source"]: r for r in results}
+
+        # load-bearing: these failing is our problem
+        for name in ("TMDB /search/tv", "TMDB /watch/providers", "ESPN scoreboard"):
+            r = by[name]
+            assert r["ok"], f"{name} is broken: {r['detail']}"
+
+        # not load-bearing. Apple is EXPECTED to fail; the interesting signal is if it
+        # ever starts working, because then it is worth re-evaluating as a source.
+        notes = []
+        apple = by["Apple iTunes Search (video)"]
+        if apple["ok"]:
+            notes.append("Apple video search WORKS again — re-evaluate it as a source")
+        nf = by["Netflix Top 10 feed"]
+        if not nf["ok"]:
+            notes.append(f"Netflix Top 10 drifted: {nf['detail']}")
+        if notes:
+            return " / ".join(notes)
+
     @check("the portable modules import with no Streamlit at all")
     def _():
         """These modules are the future API (ROADMAP.md NEAR). A module that imports
@@ -719,7 +749,8 @@ def main():
         mods = ["cache", "observability", "sports", "watched", "dismissed", "filters",
                 "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
                 "genre_prefs", "notifications", "mailer", "show_status", "preferences",
-                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter", "discover", "show_cache"]
+                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter", "discover", "show_cache",
+                "sources"]
         # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
         # find_module blocker silently blocks nothing and this check passes for the wrong
         # reason — which it did, until putting streamlit back into sports.py failed to
