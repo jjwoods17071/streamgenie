@@ -15,6 +15,13 @@ import movies
 
 TABLE = "shows"
 
+# The columns every surface reads. Lives here because watchlist.py owns this table — it
+# was a private constant in app.py, which meant the API would have needed a second copy,
+# and a second copy of "which columns matter" is this project's signature bug.
+COLUMNS = ("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, "
+           "poster_path, production_status, status_message, status_confidence, "
+           "in_production, created_at, show_status")
+
 # A show added from a list that doesn't say WHERE it streams carries one of these. They
 # must never overwrite a real service name already on the row.
 PLACEHOLDER_PROVIDERS = (None, "", "Multiple Providers")

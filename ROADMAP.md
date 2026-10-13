@@ -112,13 +112,22 @@ UI attached", and it can be done incrementally while the app keeps running.
    layer; everything else is now importable by a FastAPI worker, a cron, or a phone's
    backend.
 
-2. **Stand up a small HTTP API** (FastAPI) over the decoupled modules. Endpoints follow
-   what the UI already asks for: recommendations, wildcard, release info, milestones,
-   search. Deploy alongside the Streamlit app; it stays the only consumer at first, which
-   is how you find out whether the boundary is right before betting a phone app on it.
+2. ~~**Stand up a small HTTP API**~~ **DONE 2026-10-12 — `api.py`**, 11 routes over the
+   portable modules, importing neither streamlit nor app.py.
+
+   Two decisions worth keeping: it authenticates with the user's **Supabase JWT** and then
+   acts **as that user**, so RLS is a second line of defence — a handler that passed the
+   wrong user_id would still be refused by the database. And it does NOT hold the service
+   key; a check enforces that. Deps live in a separate `requirements-api.txt` so the
+   Streamlit deploy stays lean.
+
+   **Deployment is not solved.** Streamlit Cloud hosts one process, so this needs its own
+   home (Railway / Fly / Render) before any client can reach it. That is the next concrete
+   task, and it is also the first thing in this project that costs money.
 3. **Point the Streamlit app at the API.** Same behaviour, one consumer, no new surface.
    If this is painful, the API is wrong — far better to learn that now than from a
-   half-built mobile client.
+   half-built mobile client. Blocked on hosting the API somewhere the app can reach it;
+   until then `api.py` is exercised only by the self-test.
 4. **`show_cache`** (SCALING.md) becomes genuinely necessary here: multiple clients
    multiply the TMDB fan-out that one Streamlit session currently absorbs.
 5. **Catch-up nudges.** Worth building in this phase specifically because the same

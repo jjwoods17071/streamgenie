@@ -19,6 +19,13 @@ work on it.
 
 ## Known gaps
 
+- [ ] **The API has nowhere to run.** `api.py` works and is tested, but Streamlit Cloud
+      hosts one process. Needs Railway / Fly / Render — the first recurring cost in this
+      project. Until then nothing can consume it.
+- [ ] **No API test uses a real token.** Every route is proven CLOSED (401 without a valid
+      one), but the authenticated paths are unverified end-to-end. Needs a signed-in
+      user's JWT; set `SUPABASE_TEST_JWT` and the check can extend to cover them.
+
 - [ ] **`SUPABASE_ANON_KEY` is not in CI.** The RLS check skips without it, so CI is
       currently green on a check that never runs. Add it as a GitHub Actions secret
       (it is public by design — it ships in any browser client).

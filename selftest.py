@@ -510,6 +510,65 @@ def main():
         assert "/envelope/" in out and " 200 " in out, \
             f"no 200 from the ingest endpoint:\n{out[-400:]}"
 
+    @check("every API route requires a valid token, and /health leaks nothing")
+    def _():
+        """The API is what a phone will talk to, so a route left unauthenticated is a data
+        leak with no recall — a shipped binary cannot be patched out of users' hands.
+
+        This asserts it structurally: enumerate the app's OWN routes and probe each one
+        with no header and with a junk token. Listing expected routes by hand would pass
+        while a newly added route sat wide open, which is the failure mode that matters."""
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            return "fastapi not installed (pip install -r requirements-api.txt)"
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import api as _api
+            tc = TestClient(_api.app)
+
+            r = tc.get("/health")
+            assert r.status_code == 200, f"/health returned {r.status_code}"
+            body = r.json()
+            assert set(body) <= {"ok", "supabase"}, \
+                f"/health is unauthenticated and must not describe the data: {body}"
+
+            skip = ("/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc")
+            routes = [(rt.path, sorted(rt.methods - {"HEAD", "OPTIONS"})[0])
+                      for rt in _api.app.routes
+                      if getattr(rt, "methods", None) and rt.path not in skip]
+            assert len(routes) >= 8, f"only found {len(routes)} routes — did they move?"
+            wide_open = []
+            for path, method in routes:
+                probe = path.replace("{tmdb_id}", "1396")
+                kw = {"json": {"tmdb_id": 1, "title": "x"}} if method == "POST" else {}
+                for hdr in ({}, {"Authorization": "Bearer garbage"},
+                            {"Authorization": "garbage"}):
+                    code = tc.request(method, probe, headers=hdr, **kw).status_code
+                    if code not in (401, 403):
+                        wide_open.append(f"{method} {path} -> {code} with {hdr or 'no header'}")
+            assert not wide_open, f"reachable without a valid token: {wide_open}"
+
+    @check("the API never imports Streamlit or app.py")
+    def _():
+        """api.py exists to prove the module boundary is real. Importing app.py would
+        make it a second UI; importing streamlit would mean the boundary is imaginary."""
+        import ast as _a
+        tree = _a.parse(open("api.py").read())
+        mods = set()
+        for n in _a.walk(tree):
+            if isinstance(n, _a.Import):
+                mods |= {al.name.split(".")[0] for al in n.names}
+            elif isinstance(n, _a.ImportFrom) and n.module:
+                mods.add(n.module.split(".")[0])
+        for forbidden in ("streamlit", "app"):
+            assert forbidden not in mods, f"api.py imports {forbidden}"
+        # and it must not hand modules a service-role client — RLS is the backstop
+        src = open("api.py").read()
+        assert "SUPABASE_KEY" not in src, \
+            "api.py reads the service key; it must act as the user so RLS still applies"
+
     @check("the portable modules import with no Streamlit at all")
     def _():
         """These modules are the future API (ROADMAP.md NEAR). A module that imports

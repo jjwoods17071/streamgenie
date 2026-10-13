@@ -95,7 +95,8 @@ _MODULE_CONTRACT = {
              "fetch_tv_rows", "list_movies", "enrich"),
     providers: ("resolve", "split_reseller", "build_catalogue", "routes", "watchable",
                 "SERVICE", "CHANNEL", "BUNDLE", "logo_for", "logo_needs_light_tile"),
-    watchlist: ("upsert", "delete", "rows_for", "PLACEHOLDER_PROVIDERS"),
+    watchlist: ("upsert", "delete", "rows_for", "PLACEHOLDER_PROVIDERS", "COLUMNS",
+                "set_next_air_date", "set_provider", "update_fields", "kind_of"),
     cache: ("memoize", "clear", "stats"),
     observability: ("init", "capture", "enabled"),
     discover: ("discover_returning", "stream_providers", "match_title",
@@ -346,9 +347,7 @@ def delete_show(client: Client, tmdb_id:int, region:str = None, provider_name:st
     return watchlist.delete(client, get_user_id(), tmdb_id)
 
 
-_SHOW_COLS = ("tmdb_id, title, region, on_provider, provider_name, next_air_date, overview, "
-              "poster_path, production_status, status_message, status_confidence, "
-              "in_production, created_at, show_status")
+_SHOW_COLS = watchlist.COLUMNS   # owned by watchlist.py; the API reads the same list
 
 
 def list_shows(client: Client) -> List[Dict[str, Any]]:
