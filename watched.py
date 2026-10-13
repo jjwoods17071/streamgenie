@@ -8,10 +8,10 @@ yet, so the UI can ship before the migration is run.
 from collections import Counter
 from typing import Set, Tuple, Dict
 
-import streamlit as st
+import cache
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@cache.memoize(ttl=300)
 def table_available(_client) -> bool:
     """True if the watched_episodes table exists (cached 5 min). Leading _ skips hashing the client."""
     try:

@@ -7,3 +7,4 @@ supabase>=2.0.0
 python-dotenv>=1.0.0
 extra-streamlit-components==0.1.71
 anthropic>=0.45.0
+sentry-sdk>=2.0.0

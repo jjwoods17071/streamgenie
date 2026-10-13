@@ -94,12 +94,19 @@ checks against the invariant, not against the shape of the last bug.
 Nothing here is user-visible. It is what turns "a Streamlit app" into "a product with a
 UI attached", and it can be done incrementally while the app keeps running.
 
-1. **Finish decoupling the modules.** 22 of 29 already import no Streamlit — including
-   `filters`, `providers`, `genre_prefs` and now `watchlist`, the write paths.
-   The remaining ones — `sports`, `watched`, `dismissed`, `notifications`, `discover`,
-   `leaving_soon`, `auth` —
-   use `@st.cache_data` or `session_state`. Replace those with a caching interface the
-   caller provides. **That count is the progress bar for this phase: 22/29 → 29/29.**
+1. **Finish decoupling the modules — 26 of 30** (was 22/29; `cache.py` is new).
+   Done 2026-10-12: `sports`, `watched` and `dismissed` moved off `@st.cache_data` onto
+   `cache.memoize`, and `dismissed`'s optimistic set moved to the caller.
+   **Remaining four, and they are not equal work:**
+   - `auth.py` (690L) — **needs no porting at all.** Supabase's own client SDKs do auth
+     and session persistence natively; a phone replaces this file rather than importing
+     it. It is the biggest name on the list and it is free.
+   - `notifications.py` (482L, 12 `st.` calls), `discover.py` (336L, 17),
+     `leaving_soon.py` (247L, 35 — mostly an admin panel). These need UI split from data,
+     which is real work, unlike the three just done.
+
+   So the honest remaining figure is ~1,065 lines across three files, not four modules.
+
 2. **Stand up a small HTTP API** (FastAPI) over the decoupled modules. Endpoints follow
    what the UI already asks for: recommendations, wildcard, release info, milestones,
    search. Deploy alongside the Streamlit app; it stays the only consumer at first, which

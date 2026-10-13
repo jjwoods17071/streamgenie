@@ -29,6 +29,8 @@ import dismissed  # "Not interested" dismissals for discovery carousels
 import filters  # suspendable user filters
 import genre_prefs  # Genre classification for Discover/recs (hides live in filters)
 import watchlist  # add/update/remove a show — the write paths, testable
+import cache  # TTL memoization for the streamlit-free modules
+import observability  # error reporting; no-op without SENTRY_DSN
 import calendar_ics  # Episode → ICS / Google Calendar export
 import sports  # Follow an NFL team like a show (ESPN API + 506sports maps)
 
@@ -72,6 +74,12 @@ try:
 except Exception:
     pass  # no secrets.toml locally — .env covers it
 
+# Error reporting, AFTER the secrets mirror above (a DSN added to Streamlit Cloud after
+# boot only exists in st.secrets, not os.environ) and tagged with build_id so a report
+# says which deploy produced it — "is the app even running my fix" has been a real
+# question here more than once.
+observability.init(release=build_id())
+
 # ── Stale-module guard ───────────────────────────────────────────────────────
 # app.py is the SCRIPT, so Streamlit re-executes it every run and its changes take
 # effect immediately. The modules beside it are IMPORTS — loaded once into sys.modules
@@ -88,6 +96,10 @@ _MODULE_CONTRACT = {
     providers: ("resolve", "split_reseller", "build_catalogue", "routes", "watchable",
                 "SERVICE", "CHANNEL", "BUNDLE", "logo_for", "logo_needs_light_tile"),
     watchlist: ("upsert", "delete", "rows_for", "PLACEHOLDER_PROVIDERS"),
+    cache: ("memoize", "clear", "stats"),
+    observability: ("init", "capture", "enabled"),
+    dismissed: ("get_dismissed", "dismiss", "table_available"),
+    watched: ("table_available", "get_watched", "set_watched"),
     filters: ("get_state", "active_keys", "set_enabled", "suspend", "resume",
               "get_subscriptions", "set_subscriptions", "has_answered"),
 }
@@ -3702,7 +3714,8 @@ if "movie" in st.query_params:
         st.query_params.clear()
 
 # ── Main page: tabbed layout (Search / discovery / watchlist) ──
-_dismissed_ids = dismissed.get_dismissed(client, get_user_id())
+_dismissed_ids = dismissed.get_dismissed(
+    client, get_user_id(), also=st.session_state.get("_dismissed_local"))
 _wl_ids = {r.get("tmdb_id") for r in list_shows(client)}
 
 def _add_discovered(tmdb_id, title, overview, poster_path, provider="Multiple Providers"):
@@ -3714,8 +3727,17 @@ def _dismiss_discovered(tmdb_id):
 
     The single dismiss path. It was five identical inline calls, which is how a fix lands
     in one place and not the other four — the same shape as the two logo lookups.
+
+    This also owns the optimistic set. dismissed.py used to keep it in session_state,
+    which is what stopped that module being importable without Streamlit; the module now
+    answers what the database knows and the UI owns what this session believes.
     """
-    if not _dismiss_discovered(tmdb_id):
+    # NOT session_state.setdefault — that raised AttributeError on Cloud while working
+    # locally on the pinned 1.39 (see the self-test). Membership + subscript are stable.
+    if "_dismissed_local" not in st.session_state:
+        st.session_state["_dismissed_local"] = set()
+    st.session_state["_dismissed_local"].add(tmdb_id)
+    if not dismissed.dismiss(client, get_user_id(), tmdb_id):
         st.toast("Hidden for now — but that didn't save, so it'll be back on reload.",
                  icon="⚠️")
 
@@ -4585,6 +4607,7 @@ def render_footer():
             if st.button("♻️ Rebuild caches", use_container_width=True,
                          help="Admin: force fresh TMDB + recommendation data"):
                 st.cache_data.clear()
+                cache.clear()          # the modules no longer use Streamlit's cache
                 st.session_state.pop("_meta_store", None)
                 st.rerun()
 

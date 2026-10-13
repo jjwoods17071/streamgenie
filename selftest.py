@@ -9,6 +9,7 @@ environment: it exercises the real engines against the real data, headlessly, in
 
     python selftest.py            # everything except paid model calls
     python selftest.py --genie    # also exercise the Claude/Gemini ranking (costs cents)
+    python selftest.py --sentry   # also send ONE real event to Sentry (costs quota)
     python selftest.py --user <uuid>
 
 Exit code 0 = all passed, 1 = something failed. Wired into CI by
@@ -48,6 +49,8 @@ def check(name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--genie", action="store_true", help="also exercise the model ranking (costs money)")
+    ap.add_argument("--sentry", action="store_true",
+                    help="also send one real event to Sentry (costs quota, creates an issue)")
     ap.add_argument("--user", default=DEFAULT_USER)
     ap.add_argument("--email", default="jjwoods@gmail.com",
                     help="real email of --user; a wrong value rewrites their profile row")
@@ -428,6 +431,177 @@ def main():
         groups = movies.group_by_status(fake)
         assert [g[0] for g in groups] == ["streaming", "coming"], groups
         assert sum(len(g[2]) for g in groups) == 3
+
+    @check("error reporting is wired, degrades, and never leaks secrets")
+    def _():
+        """Production failures here are still found by hand. "Not interested" shipped as a
+        RecursionError and sat broken for weeks because nothing reported it.
+
+        Two things must hold: no DSN must be a silent no-op (PRODUCT.md principle 6), and
+        a report must never carry a credential or an address — the app reads TMDB,
+        Anthropic and Supabase keys from the environment, and Sentry attaches frame locals,
+        so a key in a local is exactly what leaves without anyone intending it."""
+        import observability as _o
+        import os as _os
+
+        # no DSN -> no-op, not a crash
+        saved = _os.environ.pop("SENTRY_DSN", None)
+        try:
+            assert _o.init(dsn="") is False, "init with no DSN should report False"
+            _o.capture(ValueError("x"), where="selftest")      # must not raise
+        finally:
+            if saved is not None:
+                _os.environ["SENTRY_DSN"] = saved
+
+        # the scrubber is the part that matters, so test it directly
+        event = {
+            "user": {"email": "jjwoods@gmail.com"},
+            "exception": {"values": [{"stacktrace": {"frames": [{"vars": {
+                "TMDB_API_KEY": "abc123",
+                "supabase_token": "eyJhbGci",
+                "email": "someone@example.com",
+                "tmdb_id": 1396,
+            }}]}}]},
+        }
+        out = _o._scrub(event, {})
+        assert "user" not in out, "the user block (email) must be dropped"
+        v = out["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]
+        for leaky in ("TMDB_API_KEY", "supabase_token", "email"):
+            assert v[leaky] == "[scrubbed]", f"{leaky} survived scrubbing as {v[leaky]!r}"
+        assert v["tmdb_id"] == 1396, "scrubbing must leave harmless values alone"
+
+        # PII must be off explicitly, not by relying on the library default
+        src = open("observability.py").read()
+        assert "send_default_pii=False" in src, "PII must be disabled explicitly"
+
+        # and app.py has to actually call it, tagged with the build
+        app_src = open("app.py").read()
+        assert "observability.init(release=build_id())" in app_src, \
+            "app.py must init reporting, tagged with build_id"
+
+    @check("an event really reaches Sentry")
+    def _():
+        """Opt-in, because it costs quota and creates an issue someone has to resolve.
+
+        It exists because "init returned True" proves nothing — a wrong DSN, a blocked
+        egress or a project-level rate limit all look identical from inside the process,
+        and an error reporter that silently fails is worse than none at all. This asserts
+        the HTTP 200 from the ingest endpoint. Verified once by hand on 2026-10-12."""
+        if not args.sentry:
+            return "use --sentry to run (sends a real event, costs quota)"
+        import logging as _lg, io as _io
+        import observability as _o, sentry_sdk as _ss
+        if not _o.init(release="selftest", environment="selftest"):
+            return "SENTRY_DSN not set in this environment"
+        buf = _io.StringIO()
+        h = _lg.StreamHandler(buf)
+        pool = _lg.getLogger("urllib3.connectionpool")
+        lvl, had = pool.level, pool.propagate
+        pool.setLevel(_lg.DEBUG); pool.addHandler(h)
+        try:
+            try:
+                raise ValueError("StreamGenie selftest — safe to resolve")
+            except ValueError as e:
+                _o.capture(e, where="selftest")
+            _ss.flush(timeout=20)
+        finally:
+            pool.removeHandler(h); pool.setLevel(lvl); pool.propagate = had
+        out = buf.getvalue()
+        assert "/envelope/" in out and " 200 " in out, \
+            f"no 200 from the ingest endpoint:\n{out[-400:]}"
+
+    @check("the portable modules import with no Streamlit at all")
+    def _():
+        """These modules are the future API (ROADMAP.md NEAR). A module that imports
+        streamlit can't be loaded by a FastAPI worker, a cron job, or a phone's backend —
+        so "does it import streamlit" is the actual acceptance test, and it has to be run
+        in a process where streamlit is UNAVAILABLE, not merely unused."""
+        import subprocess, sys as _sys
+        mods = ["cache", "observability", "sports", "watched", "dismissed", "filters",
+                "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
+                "genre_prefs"]
+        # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
+        # find_module blocker silently blocks nothing and this check passes for the wrong
+        # reason — which it did, until putting streamlit back into sports.py failed to
+        # trip it.
+        prog = (
+            "import sys\n"
+            "class Block:\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'streamlit' or name.startswith('streamlit.'):\n"
+            "            raise ImportError('streamlit is not available in this process')\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, Block())\n"
+            "assert 'streamlit' not in sys.modules\n"
+            "try:\n"
+            "    import streamlit\n"
+            "except ImportError:\n"
+            "    pass\n"
+            "else:\n"
+            "    raise SystemExit('BLOCKER INERT: streamlit imported anyway')\n"
+            f"import {', '.join(mods)}\n"
+            "print('ok')\n")
+        r = subprocess.run([_sys.executable, "-c", prog], capture_output=True, text=True,
+                           cwd=".", timeout=120)
+        assert r.returncode == 0 and "ok" in r.stdout, \
+            f"a portable module needs streamlit:\n{r.stderr[-600:]}"
+
+    @check("cache.memoize caches, expires, and ignores _-prefixed args")
+    def _():
+        """Replaces @st.cache_data in the portable modules. It must keep st.cache_data's
+        one real convention — a parameter named with a leading _ is NOT part of the key —
+        because that is how the unhashable Supabase client gets passed in."""
+        import cache as _c
+        calls = []
+
+        @_c.memoize(ttl=60)
+        def f(_client, league):
+            calls.append(league)
+            return f"{league}:{len(calls)}"
+
+        a = f(object(), "nfl")
+        b = f(object(), "nfl")          # DIFFERENT client object, same league
+        assert a == b, f"the _client arg was part of the key: {a} != {b}"
+        assert len(calls) == 1, f"not cached: {calls}"
+        f(object(), "mlb")
+        assert len(calls) == 2, "a different key should miss"
+
+        # unhashable arg must compute, not raise — a cache is an optimisation
+        @_c.memoize(ttl=60)
+        def g(items):
+            return len(items)
+        assert g(["a", "b"]) == 2, "an unhashable argument should still compute"
+
+        # ttl=0 expires immediately
+        hits = []
+        @_c.memoize(ttl=0)
+        def h():
+            hits.append(1)
+            return len(hits)
+        h(); h()
+        assert len(hits) == 2, "ttl=0 should not serve a stale value"
+
+        # clear() empties every bucket, which the admin button depends on
+        f(object(), "nhl")
+        assert any(v for v in _c.stats().values()), "nothing cached to clear"
+        _c.clear()
+        assert not any(v for v in _c.stats().values()), f"clear() left entries: {_c.stats()}"
+
+    @check("'Not interested' doesn't call itself")
+    def _():
+        """_dismiss_discovered called ITSELF — a global replace that routed five inline
+        calls through one wrapper also rewrote the call inside the wrapper's own body. It
+        was a RecursionError on every click, and the render tests never caught it because
+        they draw the page without pressing anything."""
+        import ast as _a
+        tree = _a.parse(open("app.py").read())
+        fn = next((n for n in _a.walk(tree)
+                   if isinstance(n, _a.FunctionDef) and n.name == "_dismiss_discovered"), None)
+        assert fn, "_dismiss_discovered is gone"
+        body = "\n".join(_a.unparse(n) for n in
+                          (fn.body[1:] if _a.get_docstring(fn) else fn.body))
+        assert "_dismiss_discovered(" not in body, f"it calls itself:\n{body}"
+        assert "dismissed.dismiss(" in body, "it must delegate to the dismissed module"
 
     # ---------------- writes ----------------
     # Every check above this point is a read or a pure function. The operations a user

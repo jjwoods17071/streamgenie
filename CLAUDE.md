@@ -88,6 +88,25 @@ New behaviour goes in a module and is called from `app.py`, not written inline. 
 needs `st.` to work, it's presentation; if it doesn't, it belongs in a module where the
 self-test can reach it.
 
+## 4b. No `@st.cache_data` in a portable module
+
+Use `cache.memoize(ttl=...)`. A module that imports streamlit cannot be loaded by a
+FastAPI worker, a cron job, or a test — and "does it import streamlit" is the acceptance
+test for the API extraction, so the self-test runs those imports in a process where
+streamlit is genuinely **unavailable**.
+
+`cache.memoize` keeps `st.cache_data`'s one real convention: a parameter named with a
+leading `_` is not part of the key, which is how the unhashable Supabase client gets
+passed in. It also sidesteps a real hazard — `st.cache_data` keys on
+`inspect.getsource()`, which indexes current line numbers into linecache's cached
+contents, and that took the whole app down once when a deploy rewrote a file under a live
+process.
+
+**When blocking an import to prove portability, use `find_spec`, not `find_module`.** The
+old finder API was removed in 3.12, so a `find_module` blocker blocks nothing and the
+check passes for the wrong reason. This one did, until putting `import streamlit` back
+into `sports.py` failed to trip it.
+
 ## 5. Environment facts
 
 - **The hosted app IS the dev environment.** `git push` to main auto-deploys to Streamlit

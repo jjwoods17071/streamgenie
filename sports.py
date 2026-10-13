@@ -8,7 +8,8 @@ rows by tmdb_id < 0. Games are the "episodes". 506sports has regional coverage m
 import datetime as dt
 import re
 import requests
-import streamlit as st
+
+import cache
 
 _UA = {"User-Agent": "Mozilla/5.0"}
 _BASE = "https://site.api.espn.com/apis/site/v2/sports"
@@ -134,7 +135,7 @@ def coverage_map_url(league: str):
     return LEAGUES.get(league, (None, None, None, None, None))[4]
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@cache.memoize(ttl=86400)
 def get_teams(league: str):
     """All teams in a league: {id, name, abbrev, logo}."""
     try:
@@ -166,7 +167,7 @@ def _logo(c):
     return t.get("logo")
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@cache.memoize(ttl=1800)
 def _league_fixtures(league: str):
     """All scheduled games for a league via a single date-ranged scoreboard query
     (today .. +75d). ESPN leaves the per-team /schedule endpoint EMPTY for
@@ -245,7 +246,7 @@ def _merge_league_fixtures(league: str, team_id: str, games: list) -> list:
     return games
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@cache.memoize(ttl=900)
 def get_team_schedule(league: str, team_id: str):
     """A team's season schedule (oldest→newest) as a list of game dicts."""
     try:
@@ -337,7 +338,7 @@ def record_str(league: str, w: int, l: int, d: int) -> str:
     return f"{w}-{d}-{l}" if league in SOCCER else f"{w}-{l}"
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@cache.memoize(ttl=1800)
 def game_insight(league: str, event_id):
     """Pre-game context for a matchup from ESPN's event summary: both teams' records,
     the head-to-head season series, and the venue. Returns a small dict or None."""
@@ -490,7 +491,7 @@ def encode_series_id(league: str) -> int:
     return encode_id(league, 0)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@cache.memoize(ttl=3600)
 def get_event_schedule(league: str):
     """Season calendar + current/next event for an event-model series.
 
