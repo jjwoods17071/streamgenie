@@ -19,6 +19,13 @@ work on it.
 
 ## Known gaps
 
+- [ ] **`SUPABASE_ANON_KEY` is not in CI.** The RLS check skips without it, so CI is
+      currently green on a check that never runs. Add it as a GitHub Actions secret
+      (it is public by design — it ships in any browser client).
+- [ ] **Leaving Soon's Add button still does `st.button(): work(); st.rerun()`** — two
+      full passes. Unlike the delete beside it, it validates and has two outcomes to
+      report, so on_click needs the message routed through session_state.
+
 - [ ] **Run `migrations/2026-09-02_drop_logo_overrides.sql`** — the code that read
       `logo_overrides` / `deleted_providers` is gone, so the tables are inert; this just
       drops them. Backup of the 5 rows is in the migration header and in

@@ -98,6 +98,8 @@ _MODULE_CONTRACT = {
     watchlist: ("upsert", "delete", "rows_for", "PLACEHOLDER_PROVIDERS"),
     cache: ("memoize", "clear", "stats"),
     observability: ("init", "capture", "enabled"),
+    leaving_soon: ("get_active", "list_entries", "add_entry", "delete_entry",
+                   "search_shows", "poster_url", "COMMON_PROVIDERS"),
     notifications: ("get_unread_count", "get_user_notifications", "create_notification",
                     "mark_notification_read", "mark_all_notifications_read",
                     "delete_notification", "format_notification_time"),
@@ -3346,6 +3348,154 @@ st.markdown("""
 # Account-level controls belong beside Logout, not in a full-width header row. This also
 # frees the top of the page: content now starts near the top of the viewport instead of
 # below ~350px of banner + spacer.
+# Leaving Soon renderers. Defined HERE, above the settings block below, because
+# that block calls render_admin_panel at MODULE level — a def further down the
+# file does not exist yet when it runs.
+
+def _ls_delete(client, entry_id):
+    leaving_soon.delete_entry(client, entry_id)
+
+
+def render_admin_panel(client) -> None:
+    """Admin tab: search a show, set provider + leaving date, save; manage existing.
+
+    Moved out of leaving_soon.py on 2026-10-12. That module imports no streamlit now,
+    which also unblocks newsletter.py — it imports leaving_soon, so the newsletter cron
+    had been pulling a UI framework in behind it.
+
+    The Add button keeps its `st.rerun()`: unlike the delete, it validates and has two
+    outcomes to report, so converting it to on_click means routing the message through
+    session_state. Worth doing, not worth doing in the same change as a module move.
+    """
+    st.markdown("**⏳ Leaving Soon — Admin**")
+    st.caption("Curate the list of shows about to leave a streaming service. Shown to all users.")
+
+    # ---- Add new entry ----
+    with st.container(border=True):
+        st.markdown("**Add a show**")
+        query = st.text_input("Search TV show", key="ls_search_q",
+                              placeholder="e.g. Gen V")
+        results = leaving_soon.search_shows(query) if query else []
+
+        if query and not results:
+            st.caption("No matches.")
+
+        if results:
+            labels = [f"{r['title']} ({r['year']})" for r in results]
+            idx = st.selectbox("Pick the show", range(len(results)),
+                               format_func=lambda i: labels[i], key="ls_pick")
+            chosen = results[idx]
+
+            c1, c2, c3 = st.columns([1, 2, 2])
+            with c1:
+                pu = leaving_soon.poster_url(chosen["poster_path"], "w92")
+                if pu:
+                    st.image(pu, width=70)
+            with c2:
+                prov_choice = st.selectbox("Provider", leaving_soon.COMMON_PROVIDERS + ["Other…"],
+                                           key="ls_prov")
+                provider = prov_choice
+                if prov_choice == "Other…":
+                    provider = st.text_input("Provider name", key="ls_prov_other").strip()
+            with c3:
+                default_date = dt.date.today() + dt.timedelta(days=30)
+                leaving_date = st.date_input("Leaving date", value=default_date,
+                                             min_value=dt.date.today(), key="ls_date")
+
+            if st.button("➕ Add to Leaving Soon", type="primary", key="ls_add"):
+                if not provider:
+                    st.error("Pick or type a provider.")
+                else:
+                    ok, msg = leaving_soon.add_entry(client, chosen["tmdb_id"], chosen["title"],
+                                        provider, leaving_date.isoformat(),
+                                        chosen["poster_path"])
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    # ---- Existing entries ----
+    st.markdown("**Current entries**")
+    entries = leaving_soon.list_entries(client)
+    if not entries:
+        st.info("No shows in Leaving Soon yet. Add one above.")
+        return
+
+    today = dt.date.today()
+    for e in entries:
+        with st.container(border=True):
+            cols = st.columns([1, 4, 2, 1])
+            with cols[0]:
+                pu = leaving_soon.poster_url(e.get("poster_path"), "w92")
+                if pu:
+                    st.image(pu, width=50)
+            with cols[1]:
+                st.markdown(f"**{e.get('title')}**")
+                st.caption(f"Leaving **{e.get('provider_name')}**")
+            with cols[2]:
+                try:
+                    d = dt.date.fromisoformat(str(e.get("leaving_date")))
+                    days = (d - today).days
+                    tag = "⚠️ gone" if days < 0 else (f"in {days}d" if days <= 14 else f"{days}d")
+                    st.caption(f"{e.get('leaving_date')}  ·  {tag}")
+                except Exception:
+                    st.caption(str(e.get("leaving_date")))
+            with cols[3]:
+                st.button("🗑️", key=f"ls_del_{e['id']}", help="Remove",
+                          on_click=_ls_delete, args=(client, e["id"]))
+
+
+# --------------- User-facing display ---------------
+def render_user_section(client, watchlist_tmdb_ids: Optional[set] = None,
+                        within_days: int = 60) -> None:
+    """Compact 'Leaving Soon' strip for the main page. Highlights watchlist hits."""
+    active = leaving_soon.get_active(client, within_days=within_days)
+    if not active:
+        return
+
+    watchlist_tmdb_ids = watchlist_tmdb_ids or set()
+    on_watch = [e for e in active if e.get("tmdb_id") in watchlist_tmdb_ids]
+
+    st.markdown("### ⏳ Leaving Soon")
+    if on_watch:
+        titles = ", ".join(f"**{e['title']}**" for e in on_watch)
+        st.warning(f"On your watchlist and leaving soon: {titles}")
+
+    def _poster_card(e):
+        pu = leaving_soon.poster_url(e.get("poster_path"), "w342")
+        if pu:
+            st.image(pu, use_column_width=True)
+        star = "⭐ " if e.get("tmdb_id") in watchlist_tmdb_ids else ""
+        st.caption(f"{star}**{e['title']}**")
+        days = e.get("_days_left", 0)
+        urgency = "🔴" if days <= 7 else ("🟡" if days <= 21 else "⚪")
+        st.caption(f"{urgency} {e['provider_name']} · {days}d left")
+
+    # Compact strip: soonest 5
+    cols = st.columns(min(len(active), 5))
+    for i, e in enumerate(active[:5]):
+        with cols[i]:
+            _poster_card(e)
+
+    # Full grouped view if there's more than the strip shows
+    if len(active) > 5:
+        with st.expander(f"📋 See all {len(active)} leaving soon"):
+            groups = [
+                ("⏰ This week", [e for e in active if e.get("_days_left", 0) <= 7]),
+                ("📅 This month", [e for e in active if 7 < e.get("_days_left", 0) <= 30]),
+                ("🔜 Later", [e for e in active if e.get("_days_left", 0) > 30]),
+            ]
+            for label, items in groups:
+                if not items:
+                    continue
+                st.markdown(f"**{label}** ({len(items)})")
+                row = st.columns(5)
+                for i, e in enumerate(items):
+                    with row[i % 5]:
+                        _poster_card(e)
+
+
 show_settings = bool(st.session_state.get("_show_settings"))
 
 # Collapsible settings section
@@ -3378,7 +3528,7 @@ if show_settings:
         if user_is_admin:
             tab1, tab2, tab5, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['settings']} Maintenance", "⏳ Leaving Soon", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
             with tab5:
-                leaving_soon.render_admin_panel(client)
+                render_admin_panel(client)
         else:
             tab1, tab3, tab4 = st.tabs([f"{ICONS['info']} How It Works", f"{ICONS['email']} Email Reminders", f"{ICONS['notifications']} Notification Preferences"])
 
@@ -5303,7 +5453,7 @@ if _view == "discover" and not _find_active:
 
     # ⏳ Leaving Soon (admin-curated) — highlights titles on the user's watchlist
     try:
-        leaving_soon.render_user_section(client, watchlist_tmdb_ids=_wl_ids)
+        render_user_section(client, watchlist_tmdb_ids=_wl_ids)
     except Exception:
         pass
 

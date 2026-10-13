@@ -518,14 +518,14 @@ def main():
         in a process where streamlit is UNAVAILABLE, not merely unused."""
         import subprocess, sys as _sys
         # Deliberately a list of modules that are portable TODAY, so adding one is a
-        # decision. newsletter is NOT here: it imports leaving_soon, which imports
-        # streamlit — so the "imports no streamlit" grep overstates portability, and this
-        # subprocess import is the honest measure. newsletter joins when leaving_soon
-        # splits, which also stops the cron carrying a UI framework.
+        # decision. A grep for "import streamlit" is NOT the measure — newsletter passed
+        # that for months while importing leaving_soon, which imported streamlit, so the
+        # newsletter cron carried a UI framework. Importing in a process where streamlit
+        # is unavailable is the only honest version; both joined once leaving_soon split.
         mods = ["cache", "observability", "sports", "watched", "dismissed", "filters",
                 "providers", "watchlist", "recs", "milestones", "movies", "tmdb",
                 "genre_prefs", "notifications", "mailer", "show_status", "preferences",
-                "production_intel", "calendar_ics", "genie"]
+                "production_intel", "calendar_ics", "genie", "leaving_soon", "newsletter"]
         # find_spec, NOT find_module: the old finder API was removed in 3.12, so a
         # find_module blocker silently blocks nothing and this check passes for the wrong
         # reason — which it did, until putting streamlit back into sports.py failed to
@@ -608,6 +608,62 @@ def main():
                           (fn.body[1:] if _a.get_docstring(fn) else fn.body))
         assert "_dismiss_discovered(" not in body, f"it calls itself:\n{body}"
         assert "dismissed.dismiss(" in body, "it must delegate to the dismissed module"
+
+    @check("RLS actually closes the door to the anon key")
+    def _():
+        """The check this project has been missing since RLS went on 2026-09-01.
+
+        Every other check runs as service_role, which BYPASSES RLS — so the suite would
+        pass identically with RLS switched off, and RLS has been silently disabled here
+        once before. It is also the precondition for a native client: a phone can only
+        ship the anon key, so these policies are the only thing between one user's data
+        and another's.
+
+        Careful about the verdict. A PostgREST delete/update that matches no VISIBLE row
+        returns 200 with an empty array — it does not raise. "Succeeded with 0 rows" is
+        RLS working, not a leak; only rows > 0 is a leak. An earlier version of this probe
+        reported three false leaks for exactly that reason (CLAUDE.md section 8)."""
+        anon_key = os.getenv("SUPABASE_ANON_KEY", "").strip()
+        if not anon_key:
+            return "SUPABASE_ANON_KEY not set"
+        import base64 as _b64, json as _json
+        from supabase import create_client as _cc
+        role = _json.loads(_b64.urlsafe_b64decode(
+            anon_key.split(".")[1] + "=="))["role"]
+        assert role == "anon", f"SUPABASE_ANON_KEY is a {role} key, not anon"
+
+        anon = _cc(os.environ["SUPABASE_URL"], anon_key)
+        tables = ["shows", "users", "watched_episodes", "dismissed_shows", "rec_feedback",
+                  "notifications", "filter_prefs", "notification_preferences",
+                  "user_settings"]
+        leaks = []
+        for t in tables:
+            try:
+                rows = anon.table(t).select("*").limit(5).execute().data or []
+            except Exception:
+                rows = []                      # refused outright is also closed
+            if rows:
+                leaks.append(f"{t} ({len(rows)} rows readable)")
+        assert not leaks, f"anon can READ: {leaks}"
+
+        # ...and cannot write. An insert must be refused outright; an update must touch
+        # nothing. UID is the real account, so a leak here would be a real breach.
+        try:
+            anon.table("shows").insert({"user_id": UID, "tmdb_id": -424242,
+                                        "title": "rls probe", "region": "US",
+                                        "on_provider": True}).execute()
+            raise AssertionError("anon INSERTED a row into someone's watchlist")
+        except AssertionError:
+            raise
+        except Exception:
+            pass                               # refused, as it must be
+        touched = anon.table("users").update({"username": "rls-probe"})\
+            .eq("id", UID).execute().data or []
+        assert not touched, f"anon UPDATED {len(touched)} row(s) of users"
+        # and prove the probe would have been visible if it had landed
+        left = client.table("shows").select("tmdb_id").eq("tmdb_id", -424242)\
+            .execute().data or []
+        assert not left, "the anon insert actually landed — RLS is open"
 
     # ---------------- writes ----------------
     # Every check above this point is a read or a pure function. The operations a user

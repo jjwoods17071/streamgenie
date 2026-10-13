@@ -47,7 +47,10 @@ it survives. **Treat "is there a second one?" as the first question in any bug h
    those bugs was invisible precisely because nothing reported. Today production failures
    are discovered by Joe, by hand, and a truncated traceback once cost a full
    wrong-root-cause round. Needs: a DSN. Effort: ~30 min.
-2. **Prove RLS actually closed the hole.** `service_role` bypasses RLS, so nothing we can
+2. ~~**Prove RLS actually closed the hole.**~~ **DONE 2026-10-12.** Verified against the
+   real anon key: 12 tables, zero readable rows, inserts refused by policy, updates touch
+   nothing. Now a permanent check (`RLS actually closes the door to the anon key`), which
+   is the point — RLS was silently disabled here once before. Historical note: `service_role` bypasses RLS, so nothing we can
    run today verifies it — the suite would pass identically if RLS were off, which is the
    same shape of problem as everything above. With the anon key we can assert an anon read
    returns nothing and keep it as a permanent check. RLS was on once before and got
@@ -106,8 +109,10 @@ UI attached", and it can be done incrementally while the app keeps running.
    - ~~`notifications.py`~~ **done 2026-10-12** — `render_notifications_panel` moved to
      app.py (13 of its 14 functions were already pure) and its three
      `st.button(): work(); st.rerun()` pairs became `on_click`.
-   - `discover.py` (336L, 17 `st.` calls) and `leaving_soon.py` (247L, 35 — mostly an
-     admin panel) still need UI split from data.
+   - ~~`leaving_soon.py`~~ **done 2026-10-12** — both renderers moved to app.py, which
+     also made `newsletter` portable and got a UI framework out of the newsletter cron.
+   - `discover.py` (336L, 17 `st.` calls) is the last one, and the genuinely tangled one:
+     6 of its 9 functions mix logic with `st.` calls.
 
    **The grep overstates this.** `newsletter.py` imports no streamlit itself but imports
    `leaving_soon`, which does — so it is not portable, and the newsletter CRON has been
