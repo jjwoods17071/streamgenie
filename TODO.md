@@ -12,9 +12,9 @@ work on it.
 
 ## Parked deliberately
 
-- [ ] **Run `migrations/2026-10-12_show_cache.sql`**, then add `--job showcache` to the
-      GitHub Actions cron. The code is built and tested but is a deliberate no-op until
-      the table exists.
+- [ ] **Add `--job showcache` to the GitHub Actions cron.** The table is live and
+      populated (88 shows); without the cron, expired rows self-heal on the next read
+      instead of being refreshed ahead of time. Latency only, nothing breaks.
 - [x] ~~**`show_cache` table.**~~ Built 2026-10-12. Design, measurements and limits in SCALING.md; the swap
       point is `tmdb.fetch_shows`. Build it when a second real user appears, or when cold
       loads become annoying. It will NOT reduce AI token use — that was measured and is a

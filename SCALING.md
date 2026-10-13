@@ -1,9 +1,9 @@
 # Scaling notes — the show cache (BUILT 2026-10-12)
 
-> **Status: built, not yet live.** Code is in `show_cache.py`, wired through
-> `tmdb.fetch_shows(ids, cache=...)`, with a `cron_runner.py --job showcache` refresher.
-> It is a **no-op until `migrations/2026-10-12_show_cache.sql` is run** — every read
-> falls through to TMDB exactly as before, so nothing changes until you run it.
+> **Status: LIVE since 2026-10-12.** Migration run, cache populated. Code in
+> `show_cache.py`, wired through `tmdb.fetch_shows(ids, cache=...)`, refreshed by
+> `cron_runner.py --job showcache`. Still degrades to a no-op if the table is ever
+> absent, so nothing depends on it existing.
 >
 > Built when the trigger below was met from the other direction: not a second user, but
 > a second *consumer*. `api.py` and a future phone client multiply the same fan-out one
@@ -13,6 +13,28 @@
 > is a miss and the caller re-fetches and writes it back. The cache self-heals even if
 > the cron never runs, which makes the cron a latency optimisation rather than
 > load-bearing.
+
+## Measured after building it (2026-10-12, 88 distinct TV ids, the real watchlist)
+
+    TMDB only, no cache        2.28s
+    first run (fills cache)    1.95s
+    second run (cache hit)     0.13s     18x faster
+
+All 88 cached records were byte-identical to a live fetch.
+
+**The volatility tiering pays off far better than estimated.** These notes assumed ~60%
+of shows would need a daily refresh. On the real watchlist it is **4 of 88 — under 5%**:
+
+    daily    (dated, within reach)      4
+    weekly   (returning, undated)      46
+    monthly  (Ended / Canceled)        38
+
+By TMDB status: 50 Returning Series, 32 Ended, 6 Canceled. A blanket nightly refresh
+would do **88 fetches to accomplish what 4 do**. The 20,000-show ceiling in the limits
+section was computed at the 60% assumption, so it is conservative by roughly an order of
+magnitude for a library shaped like this one. Original estimates left in place below
+rather than rewritten.
+
 
 ## Original notes (the case for deferring)
 
