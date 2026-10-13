@@ -15,7 +15,7 @@ on:
         required: false
         default: 'all'
         type: choice
-        options: [all, daily, leaving, status, weekly]
+        options: [all, daily, leaving, status, weekly, showcache]
       dry_run:
         description: 'Dry run (log only, no emails)'
         required: false
@@ -29,7 +29,10 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 20, not 15: showcache budgets ~8 minutes of wall clock for refreshing expired TMDB
+    # records, and a timeout marks the whole run red even though the earlier jobs already
+    # committed their work. It runs last, so a cut-off costs only cache freshness.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

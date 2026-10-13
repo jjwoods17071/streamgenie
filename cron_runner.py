@@ -177,11 +177,14 @@ def main():
         run_leaving(client, args.leaving_window, dry)
     if job in ("all", "status"):
         run_status(client, dry)
-    if job in ("all", "showcache"):
-        run_showcache(client, dry)
     # weekly preview: explicit --job weekly, or Sundays under --job all
     if job == "weekly" or (job == "all" and dt.date.today().weekday() == 6):
         run_weekly(client, dry)
+    # LAST on purpose. showcache is the only job with a wall-clock budget (~8 min of the
+    # workflow's ceiling), so anything after it risks being cut off by a timeout. On
+    # Sundays that would have been the newsletter — the only email this app sends.
+    if job in ("all", "showcache"):
+        run_showcache(client, dry)
 
     log("=== done ===")
 
